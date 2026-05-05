@@ -1,0 +1,6 @@
+[submodule "Qwen2.5-Coder-1.5B-Instruct"]
+	path = src_models/Qwen/Qwen2.5-Coder-1.5B-Instruct
+	url = https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct
+[submodule "Qwen2.5-Coder-7B-Instruct"]
+	path = src_models/Qwen/Qwen2.5-Coder-7B-Instruct
+	url = https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct

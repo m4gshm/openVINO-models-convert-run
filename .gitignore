@@ -1,0 +1,7 @@
+.idea
+.kilo
+log
+models_cache
+models/Qwen*/1
+models/gpt-oss-20b*/1
+models/starcoder*/1
