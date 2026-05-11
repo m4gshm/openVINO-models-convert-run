@@ -14,7 +14,6 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      pipeline_type: 2, # LM_CB
       max_num_seqs: 1,
       device: "NPU",
       models_path: "./1",
@@ -22,7 +21,7 @@ node: {
       cache_size: 4,
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
-      max_tokens_limit: 32768,
+      max_tokens_limit: 8192,
       plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "NPU_COMPILER_TYPE": "DRIVER",  "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int8-sym-g-1-r1", "MAX_PROMPT_LEN": 32768}'
     }
   }

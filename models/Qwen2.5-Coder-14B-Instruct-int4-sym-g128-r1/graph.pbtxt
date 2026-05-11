@@ -14,8 +14,7 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      pipeline_type: 2, # LM_CB
-      max_num_seqs: 1,
+      max_num_seqs: 2,
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
@@ -23,12 +22,7 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       max_tokens_limit: 32768,
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int8-sym-g-1-r1"}',
-      draft_models_path: "../Qwen2.5-Coder-1.5B-Instruct-int8-sym-g-1-r1/1",
-      draft_device: "GPU",
-      draft_max_num_batched_tokens: 5
-      draft_eagle3_mode: false,
-      draft_dynamic_split_fuse: true
+      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-14B-Instruct-int4-sym-g128-r1"}'
     }
   }
   input_stream_handler {

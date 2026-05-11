@@ -21,6 +21,7 @@ node: {
       cache_size: 1,
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
+      max_tokens_limit: 32768,
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-1.5B-Instruct-int8-sym-g-1-r1"}'
     }
   }
