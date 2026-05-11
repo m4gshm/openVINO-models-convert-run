@@ -1,0 +1,16 @@
+{
+    "model_config_list": [
+        {
+            "config": {
+                "name": "Qwen2.5-Coder-1.5B-Instruct",
+                "base_path": "./models/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1",
+                "graph_path": "graph-NPU.pbtxt",
+                "model_version_policy": {
+                    "latest": {
+                        "num_versions": 1
+                    }
+                }
+            }
+        }
+    ]
+}

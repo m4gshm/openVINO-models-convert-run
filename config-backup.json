@@ -14,8 +14,8 @@
         },
         {
             "config": {
-                "name": "Qwen2.5-Coder-1.5B-Instruct-int8",
-                "base_path": "./models/Qwen2.5-Coder-1.5B-Instruct-int8-sym-g128-r1",
+                "name": "Qwen3-Embedding-0.6B",
+                "base_path": "./models/Qwen3-Embedding-0.6B-int4-sym-g128-r1",
                 "graph_path": "graph-NPU.pbtxt",
                 "model_version_policy": {
                     "latest": {

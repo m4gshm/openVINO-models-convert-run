@@ -1,7 +1,16 @@
 .idea
 .kilo
 log
+*.log
+src_models/Qwen
+src_models/microsoft
+src_models/allenai
+src_models/bigcode
+src_models/Tesslate
 models_cache
 models/Qwen*/1
 models/gpt-oss-20b*/1
 models/starcoder*/1
+models/SERA*/1
+models/microsoft*/1
+models/Phi-*
