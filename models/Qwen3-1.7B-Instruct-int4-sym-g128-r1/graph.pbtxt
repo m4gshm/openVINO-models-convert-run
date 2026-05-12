@@ -18,7 +18,6 @@ node: {
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
-      cache_size: 1,
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",

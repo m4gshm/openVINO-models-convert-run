@@ -21,7 +21,7 @@ node: {
       enable_prefix_caching: true,
       cache_size: 4,
       enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
+      tool_parser: "qwen3coder",
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g64-r1"}'
     }
   }

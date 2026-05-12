@@ -15,13 +15,13 @@ node: {
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
       pipeline_type: 2, # LM_CB
-      max_num_seqs: 1,
+      max_num_seqs: 2,
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
       cache_size: 4,
       enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
+      tool_parser: "qwen3coder",
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int8-sym-g-1-r1"}'
     }
   }

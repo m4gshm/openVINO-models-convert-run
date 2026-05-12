@@ -22,8 +22,8 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",
-      max_tokens_limit: 32768,
-      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "NPU_COMPILER_TYPE": "DRIVER", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen3-8B-int4-sym-g128-r1", "MAX_PROMPT_LEN": 32768}'
+      max_tokens_limit: 8192,
+      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "NPU_COMPILER_TYPE": "DRIVER", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen3-8B-int4-sym-g128-r1", "MAX_PROMPT_LEN": 4096}'
     }
   }
   input_stream_handler {

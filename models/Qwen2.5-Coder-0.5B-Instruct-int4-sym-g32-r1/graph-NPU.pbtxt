@@ -21,7 +21,7 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "qwen3coder",
       max_tokens_limit: 8192,
-      plugin_config: '{"LOG_LEVEL": "LOG_INFO", "NPU_COMPILER_TYPE": "DRIVER", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g64-r1", "MAX_PROMPT_LEN": 4096}'
+      plugin_config: '{"LOG_LEVEL": "LOG_INFO", "NPU_COMPILER_TYPE": "DRIVER", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-0.5B-Instruct-int4-sym-g32-r1", "MAX_PROMPT_LEN": 4096}'
     }
   }
   input_stream_handler {

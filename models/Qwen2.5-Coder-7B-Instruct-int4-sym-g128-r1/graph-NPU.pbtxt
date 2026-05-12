@@ -20,7 +20,7 @@ node: {
       enable_prefix_caching: true,
       cache_size: 4,
       enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
+      tool_parser: "qwen3coder",
       max_tokens_limit: 8192,
       plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "NPU_COMPILER_TYPE": "PLUGIN", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1", "MAX_PROMPT_LEN": 4096}'
     }

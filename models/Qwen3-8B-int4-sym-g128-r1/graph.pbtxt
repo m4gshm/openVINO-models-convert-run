@@ -14,7 +14,8 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      max_num_seqs: 1,
+      pipeline_type: 2, # LM_CB
+      max_num_seqs: 2,
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
@@ -22,7 +23,7 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",
-      max_tokens_limit: 32768,
+      max_tokens_limit: 8192,
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen3-8B-int4-sym-g128-r1"}'
     }
   }
