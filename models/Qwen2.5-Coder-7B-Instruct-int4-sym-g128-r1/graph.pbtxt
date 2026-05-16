@@ -22,6 +22,7 @@ node: {
       cache_size: 4,
       enable_tool_guided_generation: true,
       tool_parser: "qwen3coder",
+      max_tokens_limit: 32768,
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1"}'
     }
   }

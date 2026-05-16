@@ -14,3 +14,5 @@ models/starcoder*/1
 models/SERA*/1
 models/microsoft*/1
 models/Phi-*
+models/gemma-*/1
+models/gemma-4-E4B-it-int8-ov/

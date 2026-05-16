@@ -21,8 +21,8 @@ node: {
       cache_size: 4,
       enable_tool_guided_generation: true,
       tool_parser: "qwen3coder",
-      max_tokens_limit: 8192,
-      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "NPU_COMPILER_TYPE": "PLUGIN", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1", "MAX_PROMPT_LEN": 4096}'
+      max_tokens_limit: 32768,
+      plugin_config: '{"LOG_LEVEL": "LOG_INFO", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "PLUGIN", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1", "MAX_PROMPT_LEN": 32768}'
     }
   }
   input_stream_handler {

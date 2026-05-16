@@ -14,7 +14,7 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      max_num_seqs: 4,
+      max_num_seqs: 1,
       device: "NPU",
       models_path: "./1",
       enable_prefix_caching: true,
@@ -22,8 +22,8 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",
-      max_tokens_limit: 32768,
-      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/SERA-8B-int4-sym-g128-r1", "MAX_PROMPT_LEN": 65536}'
+      max_tokens_limit: 12288,
+      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/SERA-8B-int4-sym-g128-r1", "MAX_PROMPT_LEN": 12288}'
     }
   }
   input_stream_handler {

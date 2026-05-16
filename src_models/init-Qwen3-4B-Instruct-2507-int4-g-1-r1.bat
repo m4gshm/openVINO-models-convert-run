@@ -1,10 +1,10 @@
-set MODEL_NAME=Qwen2.5-Coder-1.5B-Instruct
+set MODEL_NAME=Qwen3-4B-Instruct-2507
 set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
 
-set GROUP_SIZE=128
+set GROUP_SIZE=-1
 set WEIGHT_FORMAT=int4
 
 optimum-cli export openvino ^

@@ -15,6 +15,8 @@ optimum-cli export openvino ^
   --group-size %GROUP_SIZE% ^
   --ratio 1.0 ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1/1
+  --dataset gsm8k ^
+  --scale-estimation ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1-se/1
 
 pause
