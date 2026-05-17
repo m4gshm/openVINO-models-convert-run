@@ -16,3 +16,4 @@ models/microsoft*/1
 models/Phi-*
 models/gemma-*/1
 models/gemma-4-E4B-it-int8-ov/
+models/OmniCoder*/1

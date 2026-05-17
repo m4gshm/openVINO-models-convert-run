@@ -9,12 +9,14 @@ set WEIGHT_FORMAT=int4
 
 optimum-cli export openvino ^
   --model %MODEL_PATH% ^
-  --task text-generation-with-past ^
+  --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
   --sym ^
   --group-size %GROUP_SIZE% ^
   --ratio 1.0 ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1/1
+  --dataset contextual ^
+  --awq ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1-awq/1
 
 pause
