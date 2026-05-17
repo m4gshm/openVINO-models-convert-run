@@ -1,0 +1,1 @@
+call C:\alex\openvino\ovms\setupvars.bat

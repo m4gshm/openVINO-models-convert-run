@@ -1,4 +1,4 @@
-set MODEL_NAME=Qwen2.5-Coder-1.5B-Instruct
+set MODEL_NAME=Qwen3-8B
 set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
@@ -16,7 +16,7 @@ optimum-cli export openvino ^
   --ratio 1.0 ^
   --trust-remote-code ^
   --dataset gsm8k ^
-  --scale-estimation ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1-se/1
+  --awq ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1-awq/1
 
 pause

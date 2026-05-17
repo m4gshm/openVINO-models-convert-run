@@ -14,14 +14,14 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      pipeline_type: 2, # LM_CB
-      max_num_seqs: 2,
+      max_num_seqs: 1,
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
       enable_tool_guided_generation: true,
-      tool_parser: "gemma3",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/gemma-4-E2B-it-int4-sym-g128-r1"}'
+      tool_parser: "hermes3",
+      reasoning_parser: "qwen3",
+      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/SERA-8B-int4-sym-g-1-r1-se-awq"}'
     }
   }
   input_stream_handler {

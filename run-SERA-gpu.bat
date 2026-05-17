@@ -1,1 +1,1 @@
-ovms --config_path ./config-SERA-gpu.json --rest_port 8000 --log_level DEBUG
+ovms --config_path ./config-SERA-gpu.json --rest_port 8000 --log_level INFO
