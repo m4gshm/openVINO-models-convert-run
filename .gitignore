@@ -7,6 +7,9 @@ src_models/microsoft
 src_models/allenai
 src_models/bigcode
 src_models/Tesslate
+src_models/deepseek-ai
+src_models/google
+src_models/nomic-ai
 models_cache
 models/Qwen*/1
 models/gpt-oss-20b*/1
@@ -17,3 +20,4 @@ models/Phi-*
 models/gemma-*/1
 models/gemma-4-E4B-it-int8-ov/
 models/OmniCoder*/1
+models/Mellum*/1

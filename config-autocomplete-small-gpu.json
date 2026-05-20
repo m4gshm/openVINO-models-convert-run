@@ -1,0 +1,25 @@
+{
+    "model_config_list": [
+        {
+            "config": {
+                "name": "Qwen2.5-Coder",
+                "base_path": "./models/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g-1-r1-se-awq",
+                "graph_path": "graph.pbtxt"
+            }
+        },
+        {
+            "config": {
+                "name": "Qwen3-Embedding",
+                "base_path": "./models/Qwen3-Embedding-0.6B-int4-sym-g-1-r1-se-awq",
+                "graph_path": "graph.pbtxt"
+            }
+        },
+        {
+            "config": {
+                "name": "Qwen3-Reranker",
+                "base_path": "./models/Qwen3-Reranker-0.6B-int4-sym-g-1-r1",
+                "graph_path": "graph.pbtxt"
+            }
+        }
+    ]
+}

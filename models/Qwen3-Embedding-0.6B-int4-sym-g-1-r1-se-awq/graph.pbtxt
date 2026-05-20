@@ -1,0 +1,19 @@
+
+input_stream: "REQUEST_PAYLOAD:input"
+output_stream: "RESPONSE_PAYLOAD:output"
+node {
+  name: "EmbeddingsExecutor"
+  input_side_packet: "EMBEDDINGS_NODE_RESOURCES:embeddings_servable"
+  calculator: "EmbeddingsCalculatorOV"
+  input_stream: "REQUEST_PAYLOAD:input"
+  output_stream: "RESPONSE_PAYLOAD:output"
+  node_options: {
+    [type.googleapis.com / mediapipe.EmbeddingsCalculatorOVOptions]: {
+      models_path: "./1",
+      plugin_config: '{ "NUM_STREAMS": "AUTO", "PERFORMANCE_HINT": "LATENCY" }',
+      normalize_embeddings: false,
+      pooling: LAST,
+      target_device: "GPU"
+    }
+  }
+}

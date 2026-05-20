@@ -11,6 +11,7 @@ optimum-cli export openvino ^
   --model %MODEL_PATH% ^
   --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
+  --backup-precision int8_sym ^
   --sym ^
   --group-size %GROUP_SIZE% ^
   --ratio 1.0 ^

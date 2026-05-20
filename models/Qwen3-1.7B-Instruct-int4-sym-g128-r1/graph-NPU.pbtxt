@@ -20,7 +20,7 @@ node: {
       enable_prefix_caching: true,
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
-      max_tokens_limit: 32768,
+      max_tokens_limit: 16384,
       plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen3-1.7B-Instruct-int4-sym-g128-r1", "MAX_PROMPT_LEN": 32768}'
     }
   }
