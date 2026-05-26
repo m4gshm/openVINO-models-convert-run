@@ -3,7 +3,7 @@
         {
             "config": {
                 "name": "OmniCoder-9B",
-                "base_path": "./models/OmniCoder-9B-int4-sym-g-1-r1-awq",
+                "base_path": "./models/OmniCoder-9B-int4-asym-g128-awq",
                 "graph_path": "graph.pbtxt",
                 "model_version_policy": {
                     "latest": {

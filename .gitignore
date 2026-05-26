@@ -10,6 +10,8 @@ src_models/Tesslate
 src_models/deepseek-ai
 src_models/google
 src_models/nomic-ai
+src_models/ministralai
+src_models/ricdomolm
 models_cache
 models/Qwen*/1
 models/gpt-oss-20b*/1
@@ -21,3 +23,4 @@ models/gemma-*/1
 models/gemma-4-E4B-it-int8-ov/
 models/OmniCoder*/1
 models/Mellum*/1
+models/*/1

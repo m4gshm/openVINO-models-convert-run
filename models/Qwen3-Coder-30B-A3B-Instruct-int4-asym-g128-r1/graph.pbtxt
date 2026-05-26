@@ -17,7 +17,7 @@ node: {
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
-      enable_tool_guided_generation: false,
+      enable_tool_guided_generation: true,
       tool_parser: "qwen3coder",
       reasoning_parser: "qwen3",
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen3-Coder-30B-A3B-Instruct-int4-asym-g128-r1"}'
