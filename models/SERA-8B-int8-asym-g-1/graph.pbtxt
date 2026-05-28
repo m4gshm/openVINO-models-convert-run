@@ -18,9 +18,10 @@ node: {
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
+      enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-asym-g128-awq"}'
+      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/SERA-8B-int8-asym-g-1"}'
     }
   }
   input_stream_handler {

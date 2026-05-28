@@ -3,7 +3,7 @@
         {
             "config": {
                 "name": "SERA-8B",
-                "base_path": "./models/SERA-8B-int4-sym-g-1-r1-se-awq",
+                "base_path": "./models/SERA-8B-int8-asym-g-1",
                 "graph_path": "graph.pbtxt",
                 "model_version_policy": {
                     "latest": {
