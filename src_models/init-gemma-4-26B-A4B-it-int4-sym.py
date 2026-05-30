@@ -61,8 +61,9 @@ model = OVModelForVisualCausalLM.from_pretrained(
     model_id,
     export=True,
     trust_remote_code=True,
-    quantization_config=quantization_config,
-    task="image-text-to-text"
+    task="image-text-to-text",
+    low_cpu_mem_usage=True,
+    quantization_config=quantization_config
 )
 model.save_pretrained(output_dir)
 
