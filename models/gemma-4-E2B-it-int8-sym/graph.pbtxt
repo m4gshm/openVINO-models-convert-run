@@ -14,14 +14,16 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
+      pipeline_type: VLM,
       max_num_seqs: 2,
-      device: "GPU",
+      device: "HETERO:GPU,CPU",
       models_path: "./1",
       enable_prefix_caching: true,
       enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
-      reasoning_parser: "qwen3",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/SERA-8B-int8-asym-g-1"}'
+      tool_parser: "gemma4",
+      reasoning_parser: "gemma4",
+      max_tokens_limit: 32768,
+      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/gemma-4-E2B-it-int8-sym"}'
     }
   }
   input_stream_handler {

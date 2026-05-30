@@ -14,15 +14,16 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      pipeline_type: 2, # LM_CB
-      max_num_seqs: 2,
-      device: "NPU",
+      pipeline_type: VLM,
+      max_num_seqs: 1,
+      device: "HETERO:NPU,CPU",
       models_path: "./1",
       enable_prefix_caching: true,
       enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
-      max_tokens_limit: 4096,
-      plugin_config: '{"LOG_LEVEL": "LOG_INFO", "NPU_COMPILER_TYPE": "DRIVER", "PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-14B-Instruct-int4-sym-g128-r1", "MAX_PROMPT_LEN": 8192}'
+      tool_parser: "gemma4",
+      reasoning_parser: "gemma4",
+      max_tokens_limit: 16384,
+      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "DRIVER", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/gemma-4-E2B-it-int8-sym", "MAX_PROMPT_LEN": 16384, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128}'
     }
   }
   input_stream_handler {

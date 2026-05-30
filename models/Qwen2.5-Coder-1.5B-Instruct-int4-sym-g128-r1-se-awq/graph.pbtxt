@@ -14,14 +14,12 @@ node: {
   }
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
-      max_num_seqs: 2,
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
-      enable_tool_guided_generation: true,
-      tool_parser: "hermes3",
-      reasoning_parser: "qwen3",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-sym-g128-r1-awq"}'
+      cache_size: 1,
+      enable_tool_guided_generation: false,
+      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq"}'
     }
   }
   input_stream_handler {

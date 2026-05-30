@@ -3,8 +3,10 @@
         {
             "config": {
                 "name": "Qwen2.5-Coder",
-                "base_path": "./models/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g-1-r1-se-awq",
-                "graph_path": "graph.pbtxt"
+                "base_path": "./models/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq",
+                "graph_path": "graph.pbtxt",
+                "low_latency_transformation": true,
+                "stateful": true
             }
         },
         {

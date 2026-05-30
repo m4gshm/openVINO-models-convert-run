@@ -18,7 +18,8 @@ node: {
       device: "GPU",
       models_path: "./1",
       enable_prefix_caching: true,
-      tool_parser: "hermes3",
+      enable_tool_guided_generation: true,
+      tool_parser: "qwen3coder",
       reasoning_parser: "qwen3",
       plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-asym-g128-awq"}'
     }

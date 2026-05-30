@@ -20,7 +20,7 @@ node: {
       enable_prefix_caching: true,
       enable_tool_guided_generation: false,
       max_tokens_limit: 4096,
-      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "DRIVER", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq", "MAX_PROMPT_LEN": 4096, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128}'
+      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "PLUGIN", "NPUW_LLM_GENERATE_HINT": "BEST_PERF", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq", "MAX_PROMPT_LEN": 4096, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128}'
     }
   }
   input_stream_handler {

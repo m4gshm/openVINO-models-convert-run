@@ -8,6 +8,7 @@ llama-server ^
   --jinja ^
   --cache-prompt ^
   --context-shift ^
+  --cont-batching ^
   -ctk q8_0 ^
   -ctv q8_0 ^
   -fa on ^
