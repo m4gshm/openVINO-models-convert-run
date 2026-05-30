@@ -39,19 +39,19 @@ def _patched_init(self, config, layer_idx):
 
 _gemma4_mod.Gemma4TextAttention.__init__ = _patched_init
 
-model_id = "./google/gemma-4-E2B-it"
-output_dir = "../models/gemma-4-E2B-it-int8-sym/1"
+model_id = "./google/gemma-4-26B-A4B-it"
+output_dir = "../models/gemma-4-26B-A4B-it-int4-sym/1"
 
 os.makedirs(output_dir, exist_ok=True)
 
 quantization_config = OVPipelineQuantizationConfig(
     quantization_configs={
         "lm_model": OVWeightQuantizationConfig(
-            bits=8,
+            bits=4,
             sym=True,
             group_size=-1,
             # awq=True,
-            # backup_precision="int8_sym"
+            backup_precision="int8_sym"
         )
     },
     # dataset="contextual"

@@ -1,6 +1,6 @@
 # /// script
 # dependencies = [
-#   "transformers==5.5.4",
+#   "transformers>5.5.4",
 #   "optimum-intel",
 #   "openvino-tokenizers",
 #   "openvino"
@@ -15,8 +15,32 @@ from optimum.intel import OVPipelineQuantizationConfig, OVWeightQuantizationConf
 
 import os
 
+import transformers.models.gemma4.modeling_gemma4 as _gemma4_mod
+
+_orig_init = _gemma4_mod.Gemma4TextAttention.__init__
+
+def _patched_init(self, config, layer_idx):
+    _orig_init(self, config, layer_idx)
+    n = config.num_hidden_layers
+    n_shared = getattr(config, "num_kv_shared_layers", 0)
+    first_shared = n - n_shared
+    prev = list(getattr(config, "layer_types", []))[:first_shared]
+    last_sliding = max((i for i, t in enumerate(prev) if t == "sliding_attention"), default=-1)
+    last_full    = max((i for i, t in enumerate(prev) if t == "full_attention"), default=-1)
+    if getattr(self, "is_kv_shared_layer", False):
+        if self.layer_type == "sliding_attention":
+            self.kv_shared_layer_index = last_sliding
+        elif self.layer_type == "full_attention":
+            self.kv_shared_layer_index = last_full
+        else:
+            self.kv_shared_layer_index = -1
+    else:
+        self.kv_shared_layer_index = -1
+
+_gemma4_mod.Gemma4TextAttention.__init__ = _patched_init
+
 model_id = "./google/gemma-4-E2B-it"
-output_dir = "../models/gemma-4-E2B-it-int4-sym-g128-awq/1"
+output_dir = "../models/gemma-4-E2B-it-int4-asym-g128/1"
 
 os.makedirs(output_dir, exist_ok=True)
 
@@ -26,11 +50,11 @@ quantization_config = OVPipelineQuantizationConfig(
             bits=4,
             sym=False,
             group_size=128,
-            awq=True,
+            # awq=True,
             backup_precision="int8_asym"
         )
     },
-    dataset="contextual"
+    # dataset="contextual"
 )
 
 model = OVModelForVisualCausalLM.from_pretrained(
