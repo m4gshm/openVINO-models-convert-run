@@ -18,7 +18,7 @@ node: {
       models_path: "./1",
       enable_prefix_caching: true,
       enable_tool_guided_generation: false,
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1-se"}'
+      plugin_config: '{"PERFORMANCE_HINT": "THROUGHPUT", "CACHE_DIR": "./models_cache/Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1-se"}'
     }
   }
   input_stream_handler {

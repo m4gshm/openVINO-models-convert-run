@@ -1,5 +1,5 @@
 llama-server ^
-  -m "C:\Users\mfour\.lmstudio\models\Tesslate\OmniCoder-9B-GGUF\omnicoder-9b-q4_k_m.gguf" ^
+  -m "C:\Users\mfour\.lmstudio\models\lmstudio-community\gemma-4-E2B-it-GGUF\gemma-4-E2B-it-Q4_K_M.gguf" ^
   --ctx-size 65536 ^
   --batch-size 4096 ^
   --ubatch-size 2048 ^
@@ -11,4 +11,5 @@ llama-server ^
   -fa on ^
   -ngl 99 ^
   -np 1 ^
+  --kv-unified ^
   --port 8002

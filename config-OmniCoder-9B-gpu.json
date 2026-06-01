@@ -3,13 +3,10 @@
         {
             "config": {
                 "name": "OmniCoder-9B",
-                "base_path": "./models/OmniCoder-9B-int8-sym-g128",
+                "base_path": "./models/OmniCoder-9B-int8-asym",
                 "graph_path": "graph.pbtxt",
-                "model_version_policy": {
-                    "latest": {
-                        "num_versions": 1
-                    }
-                }
+                "low_latency_transformation": true,
+                "stateful": true
             }
         }
     ]

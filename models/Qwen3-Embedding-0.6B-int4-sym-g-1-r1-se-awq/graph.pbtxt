@@ -10,7 +10,7 @@ node {
   node_options: {
     [type.googleapis.com / mediapipe.EmbeddingsCalculatorOVOptions]: {
       models_path: "./1",
-      plugin_config: '{ "NUM_STREAMS": "AUTO", "PERFORMANCE_HINT": "LATENCY" }',
+      plugin_config: '{ "NUM_STREAMS": "AUTO", "PERFORMANCE_HINT": "THROUGHPUT" }',
       normalize_embeddings: false,
       pooling: LAST,
       target_device: "GPU"

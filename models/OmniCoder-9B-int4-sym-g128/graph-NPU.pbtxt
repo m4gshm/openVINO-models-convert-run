@@ -18,10 +18,11 @@ node: {
       device: "NPU",
       models_path: "./1",
       enable_prefix_caching: true,
-      cache_size: 1,
-      enable_tool_guided_generation: false,
-      max_tokens_limit: 4096,
-      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "DRIVER", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/Mellum-4b-sft-all-int4-sym-g64-r1-se-awq", "MAX_PROMPT_LEN": 4096, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 64}'
+      enable_tool_guided_generation: true,
+      tool_parser: "hermes3",
+      reasoning_parser: "qwen3",
+      max_tokens_limit: 32768,
+      plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "THROUGHPUT", "NPU_COMPILER_TYPE": "PLUGIN", "NPUW_LLM_GENERATE_HINT": "BEST_PERF", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "MAX_PROMPT_LEN": 32768, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128, "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-sym-g128"}'
     }
   }
   input_stream_handler {

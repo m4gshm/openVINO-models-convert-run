@@ -21,7 +21,7 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "gptoss",
       reasoning_parser: "gptoss",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/gpt-oss-20b-int4-sym-g64-r1"}'
+      plugin_config: '{"PERFORMANCE_HINT": "THROUGHPUT", "CACHE_DIR": "./models_cache/gpt-oss-20b-int4-sym-g64-r1"}'
     }
   }
   input_stream_handler {

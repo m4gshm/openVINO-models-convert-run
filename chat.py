@@ -4,7 +4,7 @@ import openvino_genai as ov_genai
 
 
 def main():
-    model_name = "OpenVINO/Qwen3-8B-int4-cw-ov"
+    model_name = "OmniCoder-9B-int4-sym-g128/1"
     model_path = "./models/" + model_name
     device = "AUTO"
 

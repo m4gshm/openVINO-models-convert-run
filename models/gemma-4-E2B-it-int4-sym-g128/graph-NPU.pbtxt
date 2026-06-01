@@ -15,16 +15,24 @@ node: {
   node_options: {
     [type.googleapis.com / mediapipe.LLMCalculatorOptions]: {
       pipeline_type: VLM,
-      max_num_seqs: 1,
-      device: "HETERO:NPU,GPU",
+      max_num_seqs: 2,
+      device: "GPU",
       models_path: "./1",
+<<<<<<<< HEAD:models/gemma-4-E2B-it-int4-sym-g128/graph-NPU.pbtxt
       cache_size: 2,
+========
+>>>>>>>> 6534545 (THROUGHPUT):models/gemma-4-E2B-it-int4-asym-g128/graph.pbtxt
       enable_prefix_caching: true,
       enable_tool_guided_generation: true,
       tool_parser: "gemma4",
       reasoning_parser: "gemma4",
+<<<<<<<< HEAD:models/gemma-4-E2B-it-int4-sym-g128/graph-NPU.pbtxt
       max_tokens_limit: 16384,
       plugin_config: '{"LOG_LEVEL": "LOG_WARNING", "PERFORMANCE_HINT": "LATENCY", "NPU_COMPILER_TYPE": "PLUGIN", "NPUW_LLM_GENERATE_HINT": "BEST_PERF", "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID", "CACHE_DIR": "./models_cache/gemma-4-E2B-it-int4-sym-g128", "MAX_PROMPT_LEN": 16384, "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128}'
+========
+      max_tokens_limit: 32768,
+      plugin_config: '{"PERFORMANCE_HINT": "THROUGHPUT", "CACHE_DIR": "./models_cache/gemma-4-E2B-it-int4-asym-g128"}'
+>>>>>>>> 6534545 (THROUGHPUT):models/gemma-4-E2B-it-int4-asym-g128/graph.pbtxt
     }
   }
   input_stream_handler {

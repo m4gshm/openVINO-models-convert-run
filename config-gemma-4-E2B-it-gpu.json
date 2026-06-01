@@ -2,8 +2,8 @@
     "model_config_list": [
         {
             "config": {
-                "name": "Qwen3-Coder-30B-A3B-Instruct",
-                "base_path": "./models/Qwen3-Coder-30B-A3B-Instruct-int4-asym-g128-r1",
+                "name": "gemma-4-E2B-it",
+                "base_path": "./models/gemma-4-E2B-it-int8-asym",
                 "graph_path": "graph.pbtxt",
                 "low_latency_transformation": true,
                 "stateful": true

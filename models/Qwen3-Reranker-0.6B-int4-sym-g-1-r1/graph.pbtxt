@@ -9,7 +9,7 @@ node {
   node_options: {
     [type.googleapis.com / mediapipe.RerankCalculatorOVOptions]: {
       models_path: "./1",
-      plugin_config: '{ "NUM_STREAMS": "AUTO", "PERFORMANCE_HINT": "LATENCY" }',
+      plugin_config: '{ "NUM_STREAMS": "AUTO", "PERFORMANCE_HINT": "THROUGHPUT" }',
       target_device: "GPU"
     }
   }

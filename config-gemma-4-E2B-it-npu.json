@@ -2,8 +2,8 @@
     "model_config_list": [
         {
             "config": {
-                "name": "OmniCoder-9B",
-                "base_path": "./models/OmniCoder-9B-int4-sym-g128",
+                "name": "gemma-4-E2B-it",
+                "base_path": "./models/gemma-4-E2B-it-int4-sym-g128",
                 "graph_path": "graph-NPU.pbtxt",
                 "low_latency_transformation": true,
                 "stateful": true

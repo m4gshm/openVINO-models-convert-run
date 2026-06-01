@@ -21,7 +21,7 @@ node: {
       enable_tool_guided_generation: true,
       tool_parser: "hermes3",
       reasoning_parser: "qwen3",
-      plugin_config: '{"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-sym-g128-awq"}'
+      plugin_config: '{"PERFORMANCE_HINT": "THROUGHPUT", "CACHE_DIR": "./models_cache/OmniCoder-9B-int4-sym-g128-awq"}'
     }
   }
   input_stream_handler {
