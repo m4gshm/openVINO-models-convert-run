@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
+from openvino_genai.py_openvino_genai import ChatHistory
 from pydantic import BaseModel
 
 logging.basicConfig(
@@ -56,6 +57,8 @@ except Exception as e:
 class ChatMessage(BaseModel):
     role: str
     content: str
+    tool_call_id: str | None = None
+    tool_calls: list[dict] | None = None
 
 
 class FunctionModel(BaseModel):
@@ -71,18 +74,169 @@ class ToolModel(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: Optional[str] = None
-    messages: List[ChatMessage]
+    messages: List[dict]
     tools: Optional[List[ToolModel]] = None
     stream: Optional[bool] = False
     max_tokens: Optional[int] = 1024
 
 
-def parse_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
+@app.post("/v1/chat/completions")
+async def chat(body: ChatCompletionRequest, request: Request):
+    messages = body.messages
+    logger.info(f"--- Входящий запрос (Сообщений в истории: {len(messages)}) ---")
+
+    chat_history = ChatHistory()
+    chat_history_messages = messages  # [msg.model_dump() for msg in messages]
+    chat_history.set_messages(chat_history_messages)
+
+    body_tools = body.tools
+    tools = [tool.model_dump() for tool in body_tools] if body_tools else None
+    if tools:
+        chat_history.set_tools(tools)
+
+    # tokenizer = pipe.get_tokenizer()
+    # full_prompt = tokenizer.apply_chat_template(history=chat_history, add_generation_prompt=True, tools=tools)
+
+    generation_config = ov_genai.GenerationConfig()
+    generation_config.max_new_tokens = body.max_tokens or 1024
+    generation_config.temperature = 0.1
+    generation_config.top_p = 0.95
+
+    if not body.stream:
+        # reuse Stream
+        result = await asyncio.to_thread(pipe.generate, history=chat_history, generation_config=generation_config)
+        generated_text = result.texts if hasattr(result, 'texts') and result.texts else str(result)
+
+        tool_calls = parse_tool_calls(generated_text)
+        message_payload = {"role": "assistant"}
+
+        if tool_calls:
+            message_payload["tool_calls"] = tool_calls
+            message_payload["content"] = None
+            finish_reason = "tool_calls"
+        else:
+            message_payload["content"] = generated_text
+            finish_reason = "stop"
+
+        return {
+            "choices": [{
+                "index": 0,
+                "message": message_payload,
+                "finish_reason": finish_reason
+            }]
+        }
+
+    async def real_time_generator():
+        queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        stop_generation = False
+
+        def my_streamer(subword: str) -> bool:
+            if stop_generation:
+                return True
+            loop.call_soon_threadsafe(queue.put_nowait, subword)
+            return False
+
+        async def run_inference():
+            try:
+                await asyncio.to_thread(
+                    pipe.generate,
+                    history=chat_history,
+                    generation_config=generation_config,
+                    streamer=my_streamer
+                )
+            except Exception as e:
+                logger.error(f"Ошибка в инференсе: {e}")
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        inference_task = asyncio.create_task(run_inference())
+
+        call_expression = ""
+        call_prefix = "call"
+        call_in_progress = False
+        try:
+            while True:
+                if await request.is_disconnected():
+                    stop_generation = True
+                    break
+
+                try:
+                    subword = await asyncio.wait_for(queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+
+                if subword is None:
+                    break
+
+                if subword == call_prefix:
+                    call_in_progress = True
+
+                if call_in_progress:
+                    call_expression += subword
+                    continue
+                else:
+                    chunk = {
+                        "choices": [{"index": 0, "delta": {"content": subword}, "finish_reason": None}]
+                    }
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+            tool_calls = parse_tool_calls(call_expression, call_prefix) if call_in_progress else None
+            if tool_calls:
+                logger.info(f"Стрим завершен. Обнаружен инструмент: {tool_calls}")
+
+                # Имитируем для клиента OpenAI стриминговую передачу tool_calls
+                for tool_call in tool_calls:
+                    chunk = {
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [{
+                                    "index": 0,
+                                    "id": tool_call["id"],
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call["function"]["name"],
+                                        "arguments": tool_call["function"]["arguments"]
+                                    }
+                                }]
+                            },
+                            "finish_reason": None
+                        }]
+                    }
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+                # Закрывающий чанк с корректным finish_reason
+                stop_chunk = {
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]
+                }
+                yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
+            else:
+                stop_chunk = {
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+                }
+                yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"Исключение во время стриминга: {e}")
+        finally:
+            stop_generation = True
+            if not inference_task.done():
+                logger.info("Ожидание завершения фонового инференса...")
+                try:
+                    await inference_task
+                except Exception as e:
+                    logger.error(f"Ошибка при закрытии задачи: {e}")
+            logger.info("Ресурсы очищены, сессия стриминга закрыта.")
+
+    return StreamingResponse(real_time_generator(), media_type="text/event-stream")
+
+
+def parse_tool_calls(text: str, call_prefix: str = "call") -> Optional[List[Dict[str, Any]]]:
     """Парсит сгенерированный текст в поисках вызова инструментов."""
     text_clean = text.strip()
 
-    # 1. Проверяем формат call:имя{...}
-    call_pattern = r"call:([a-zA-Z0-9_-]+)\s*(\{.*\})"
+    call_function_part = r":([a-zA-Z0-9_-]+)\s*(\{.*\})"
+    call_pattern = f"{re.escape(call_prefix)}{call_function_part}"
     match = re.search(call_pattern, text_clean, re.DOTALL)
 
     if match:
@@ -110,7 +264,7 @@ def parse_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
             }
         }]
 
-    # 2. Попытка найти JSON внутри тегов <tool_call>
+    # todo is it need for gemma 4?
     call_match = re.search(r"<tool_call>(.*?)</tool_call>", text_clean, re.DOTALL)
     if call_match:
         text_clean = call_match.group(1).strip()
@@ -149,158 +303,6 @@ def parse_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
         return tool_calls if tool_calls else None
     except Exception:
         return None
-
-
-@app.post("/v1/chat/completions")
-async def chat(body: ChatCompletionRequest, request: Request):
-    logger.info(f"--- Входящий запрос (Сообщений в истории: {len(body.messages)}) ---")
-
-    formatted_messages = [
-        {"role": msg.role, "content": msg.content}
-        for msg in body.messages
-    ]
-
-    raw_tools = None
-    if body.tools:
-        raw_tools = [tool.model_dump() for tool in body.tools]
-
-    tokenizer = pipe.get_tokenizer()
-
-    if raw_tools:
-        full_prompt = tokenizer.apply_chat_template(formatted_messages, add_generation_prompt=True, tools=raw_tools)
-    else:
-        full_prompt = tokenizer.apply_chat_template(formatted_messages, add_generation_prompt=True)
-
-    generation_config = ov_genai.GenerationConfig()
-    generation_config.max_new_tokens = body.max_tokens or 1024
-    generation_config.temperature = 0.1
-    generation_config.top_p = 0.95
-
-    # 1. НЕ СТРИМИНГОВЫЙ РЕЖИМ
-    if not body.stream:
-        result = await asyncio.to_thread(pipe.generate, prompt=full_prompt, generation_config=generation_config)
-        generated_text = result.texts if hasattr(result, 'texts') and result.texts else str(result)
-
-        tool_calls = parse_tool_calls(generated_text)
-        message_payload = {"role": "assistant"}
-
-        if tool_calls:
-            message_payload["tool_calls"] = tool_calls
-            message_payload["content"] = None
-            finish_reason = "tool_calls"
-        else:
-            message_payload["content"] = generated_text
-            finish_reason = "stop"
-
-        return {
-            "choices": [{
-                "index": 0,
-                "message": message_payload,
-                "finish_reason": finish_reason
-            }]
-        }
-
-    # 2. СТРИМИНГОВЫЙ РЕЖИМ
-    async def real_time_generator():
-        queue = asyncio.Queue()
-        loop = asyncio.get_running_loop()
-        stop_generation = False
-        accumulated_text = ""
-
-        def my_streamer(subword: str) -> bool:
-            if stop_generation:
-                return True
-            loop.call_soon_threadsafe(queue.put_nowait, subword)
-            return False
-
-        async def run_inference():
-            try:
-                await asyncio.to_thread(
-                    pipe.generate,
-                    full_prompt,
-                    generation_config=generation_config,
-                    streamer=my_streamer
-                )
-            except Exception as e:
-                logger.error(f"Ошибка в инференсе: {e}")
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
-
-        inference_task = asyncio.create_task(run_inference())
-
-        try:
-            while True:
-                if await request.is_disconnected():
-                    stop_generation = True
-                    break
-
-                try:
-                    subword = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except asyncio.TimeoutError:
-                    continue
-
-                if subword is None:
-                    break
-
-                accumulated_text += subword
-
-                # Если модель явно начинает писать вызов функции, прекращаем гнать обычный текст
-                if "call:" in accumulated_text or "<tool_call>" in accumulated_text:
-                    continue
-
-                chunk = {
-                    "choices": [{"index": 0, "delta": {"content": subword}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-
-            # Инференс завершен, проверяем финальный текст на вызовы функций
-            final_tool_calls = parse_tool_calls(accumulated_text)
-
-            if final_tool_calls:
-                logger.info(f"Стрим завершен. Обнаружен инструмент: {final_tool_calls}")
-
-                # Имитируем для клиента OpenAI стриминговую передачу tool_calls
-                for tool_call in final_tool_calls:
-                    chunk = {
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "tool_calls": [{
-                                    "index": 0,
-                                    "id": tool_call["id"],
-                                    "type": "function",
-                                    "function": {
-                                        "name": tool_call["function"]["name"],
-                                        "arguments": tool_call["function"]["arguments"]
-                                    }
-                                }]
-                            },
-                            "finish_reason": None
-                        }]
-                    }
-                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-
-                # Закрывающий чанк с корректным finish_reason
-                stop_chunk = {
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]
-                }
-                yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
-            else:
-                stop_chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
-                yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            logger.error(f"Исключение во время стриминга: {e}")
-        finally:
-            stop_generation = True
-            if not inference_task.done():
-                logger.info("Ожидание завершения фонового инференса...")
-                try:
-                    await inference_task
-                except Exception as e:
-                    logger.error(f"Ошибка при закрытии задачи: {e}")
-            logger.info("Ресурсы очищены, сессия стриминга закрыта.")
-
-    return StreamingResponse(real_time_generator(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":
