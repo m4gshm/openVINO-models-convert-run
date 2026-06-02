@@ -1,3 +1,9 @@
+model_name = "gemma-4-E2B-it-int4-sym-g128"
+model_path = f"./models/{model_name}/1"
+device_name = "GPU"
+model_cache_dir = f"./models_cache/{model_name}"
+kv_cache_size = 4
+
 import asyncio
 import json
 import logging
@@ -40,14 +46,24 @@ class LoggingRoute(APIRoute):
 app = FastAPI()
 app.router.route_class = LoggingRoute
 
-model_name = "gemma-4-E2B-it-int8-asym"
-model_path = f"./models/{model_name}/1"
-config = {"CACHE_DIR": f"./models_cache/{model_name}"}
+# scheduler_config = ov_genai.SchedulerConfig()
+# scheduler_config.enable_prefix_caching = True
+# scheduler_config.cache_size = kv_cache_size
+# scheduler_config.max_num_batched_tokens = 512
+# scheduler_config.max_num_seqs = 2
 
-device_name = "GPU"
-logger.info(f"Загрузка модели на {device_name} ...")
+# scheduler_config.dynamic_split_fuse = True
+
+config = {
+    "CACHE_DIR": model_cache_dir,
+    "KV_CACHE_PRECISION": "u4",
+    "PERFORMANCE_HINT": "THROUGHPUT",
+    # "scheduler_config": scheduler_config,
+}
+logger.info(
+    f"Загрузка модели {model_path} на {device_name} с параметрами {config}...")
 try:
-    pipe = ov_genai.VLMPipeline(model_path, device_name, **config)
+    pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name,  **config)
     logger.info("Мультимодальная модель успешно загружена!")
 except Exception as e:
     logger.error(f"Критическая ошибка инициализации VLMPipeline: {e}")
@@ -74,10 +90,11 @@ class ToolModel(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: Optional[str] = None
-    messages: List[dict]
-    tools: Optional[List[ToolModel]] = None
+    messages: List[dict] = []
+    tools: Optional[List[dict]] = None
     stream: Optional[bool] = False
-    max_tokens: Optional[int] = 1024
+    max_tokens: Optional[int] = None
+    reasoning: Optional[int] = True
 
 
 @app.post("/v1/chat/completions")
@@ -89,8 +106,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
     chat_history_messages = messages  # [msg.model_dump() for msg in messages]
     chat_history.set_messages(chat_history_messages)
 
-    body_tools = body.tools
-    tools = [tool.model_dump() for tool in body_tools] if body_tools else None
+    tools = body.tools
     if tools:
         chat_history.set_tools(tools)
 
@@ -98,33 +114,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
     # full_prompt = tokenizer.apply_chat_template(history=chat_history, add_generation_prompt=True, tools=tools)
 
     generation_config = ov_genai.GenerationConfig()
-    generation_config.max_new_tokens = body.max_tokens or 1024
-    generation_config.temperature = 0.1
-    generation_config.top_p = 0.95
-
-    if not body.stream:
-        # reuse Stream
-        result = await asyncio.to_thread(pipe.generate, history=chat_history, generation_config=generation_config)
-        generated_text = result.texts if hasattr(result, 'texts') and result.texts else str(result)
-
-        tool_calls = parse_tool_calls(generated_text)
-        message_payload = {"role": "assistant"}
-
-        if tool_calls:
-            message_payload["tool_calls"] = tool_calls
-            message_payload["content"] = None
-            finish_reason = "tool_calls"
-        else:
-            message_payload["content"] = generated_text
-            finish_reason = "stop"
-
-        return {
-            "choices": [{
-                "index": 0,
-                "message": message_payload,
-                "finish_reason": finish_reason
-            }]
-        }
+    generation_config.max_new_tokens = body.max_tokens or 4096
 
     async def real_time_generator():
         queue = asyncio.Queue()
@@ -176,16 +166,13 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     call_expression += subword
                     continue
                 else:
-                    chunk = {
-                        "choices": [{"index": 0, "delta": {"content": subword}, "finish_reason": None}]
-                    }
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    chunk = {"choices": [{"index": 0, "delta": {"content": subword}, "finish_reason": None}]}
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
             tool_calls = parse_tool_calls(call_expression, call_prefix) if call_in_progress else None
             if tool_calls:
                 logger.info(f"Стрим завершен. Обнаружен инструмент: {tool_calls}")
 
-                # Имитируем для клиента OpenAI стриминговую передачу tool_calls
                 for tool_call in tool_calls:
                     chunk = {
                         "choices": [{
@@ -206,15 +193,10 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     }
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
-                # Закрывающий чанк с корректным finish_reason
-                stop_chunk = {
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]
-                }
+                stop_chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
                 yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
             else:
-                stop_chunk = {
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-                }
+                stop_chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
                 yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"Исключение во время стриминга: {e}")
@@ -228,11 +210,69 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     logger.error(f"Ошибка при закрытии задачи: {e}")
             logger.info("Ресурсы очищены, сессия стриминга закрыта.")
 
-    return StreamingResponse(real_time_generator(), media_type="text/event-stream")
+    if body.stream:
+        return StreamingResponse(real_time_generator(), media_type="text/event-stream")
+    else:
+        full_content = ""
+
+        final_tool_calls = None
+        final_finish_reason = "stop"
+
+        # Итерируем ваш генератор вручную прямо в коде
+        async for chunk_str in real_time_generator():
+            # Отрезаем "data: " и "\n\n"
+            if not chunk_str.startswith("data: "):
+                continue
+
+            clean_json = chunk_str.replace("data: ", "").strip()
+            if not clean_json:
+                continue
+
+            try:
+                chunk_data = json.loads(clean_json)
+                choice = chunk_data["choices"][0]
+                delta = choice.get("delta", {})
+
+                # 1. Собираем обычный текст, если он есть
+                if "content" in delta and delta["content"]:
+                    full_content += delta["content"]
+
+                # 2. Перехватываем tool_calls, если они пришли
+                if "tool_calls" in delta:
+                    if final_tool_calls is None:
+                        final_tool_calls = []
+
+                    # Собираем части аргументов/имени (в стриминге OpenAI они могут дополняться)
+                    for tc in delta["tool_calls"]:
+                        # Для простоты, так как ваш генератор сразу отдает готовый tool_call:
+                        final_tool_calls.append(tc)
+
+                # 3. Запоминаем причину остановки
+                if choice.get("finish_reason"):
+                    final_finish_reason = choice["finish_reason"]
+
+            except Exception as e:
+                logger.error(f"Ошибка разбора чанка при сборке: {e}")
+
+        # Формируем итоговый ответ для клиента
+        message_payload = {"role": "assistant"}
+
+        if final_tool_calls:
+            message_payload["content"] = None
+            message_payload["tool_calls"] = final_tool_calls
+        else:
+            message_payload["content"] = full_content
+
+        return {
+            "choices": [{
+                "index": 0,
+                "message": message_payload,
+                "finish_reason": final_finish_reason
+            }]
+        }
 
 
 def parse_tool_calls(text: str, call_prefix: str = "call") -> Optional[List[Dict[str, Any]]]:
-    """Парсит сгенерированный текст в поисках вызова инструментов."""
     text_clean = text.strip()
 
     call_function_part = r":([a-zA-Z0-9_-]+)\s*(\{.*\})"
@@ -269,7 +309,6 @@ def parse_tool_calls(text: str, call_prefix: str = "call") -> Optional[List[Dict
     if call_match:
         text_clean = call_match.group(1).strip()
 
-    # 3. Извлечение JSON из markdown-блоков
     md_match = re.search(r"```json\s*(.*?)\s*```", text_clean, re.DOTALL)
     if md_match:
         text_clean = md_match.group(1).strip()
