@@ -5,6 +5,7 @@ reasoning_supported = True
 
 tool_call_start = "<tool_call>"
 tool_call_end = "</tool_call>"
+reasoning_start = "<think>"
 reasoning_end = "</think>"
 
 device_name = "GPU"
@@ -22,8 +23,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, List, Optional, Any, Dict, Literal
 
-import openvino as ov
-import openvino.properties.log as log
 import openvino_genai as ov_genai
 import uvicorn
 from anyio.from_thread import run
@@ -35,37 +34,10 @@ from pydantic import BaseModel
 
 executor = ThreadPoolExecutor(max_workers=4)
 
-core = ov.Core()
-
-# compile a model on AUTO and set log level to debug
-# compiled_model = core.compile_model(
-#     model=model,
-#     device_name="AUTO",
-#     config={log.level: log.Level.DEBUG},
-# )
-
-# set log level with set_property and compile model
-core.set_property(
-    device_name="AUTO",
-    properties={log.level: log.Level.DEBUG},
-)
-# compiled_model = core.compile_model(model=model, device_name="AUTO")
-
-# # compile a model on AUTO and set log level to debug
-# compiled_model = core.compile_model(
-#     model=model,
-#     device_name="AUTO",
-#     config={log.log_level: log.Level.DEBUG},
-# )
-# # set log level with set_property and compile model
-# core.set_property(
-#     device_name="AUTO",
-#     properties={log.log_level: log.Level.DEBUG},
-# )
-# compiled_model = core.compile_model(model=model, device_name="AUTO")
-
 # Available levels: "NO", "ERR", "WARNING", "INFO", "DEBUG", "TRACE"
-os.environ["OPENVINO_LOG_LEVEL"] = "DEBUG"
+os.environ["OPENVINO_LOG_LEVEL"] = "4"
+os.environ["ONEDNN_VERBOSE"] = "ON"
+os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -203,26 +175,30 @@ def chat(body: ChatCompletionRequest, request: Request):
     def stream_generator():
         word_queue: q.Queue[str | None] = q.Queue()
         # queue: asyncio.Queue[str | None] = asyncio.Queue()
-        stop_generation = False
+        stop_generation: q.Queue[bool | None] = q.Queue()
 
         def run_inference():
             def streamer(word: str) -> bool:
-                logger.info(word)
-                if stop_generation:
+                try:
+                    logger.info(word)
+                    if not stop_generation.empty() and stop_generation.get_nowait():
+                        word_queue.put_nowait(None)
+                        # log
+                        return True
+                    elif word is None:
+                        word_queue.put_nowait(None)
+                        return True
+                    else:
+                        word_queue.put_nowait(word)  # loop.call_soon_threadsafe(queue.put_nowait, subword)
+                        return False
+                except Exception as e:
+                    logger.error(f"streamer error: {e}")
                     word_queue.put_nowait(None)
-                    # log
                     return True
-                elif word is None:
-                    word_queue.put_nowait(None)
-                    return True
-                else:
-                    word_queue.put_nowait(word)  # loop.call_soon_threadsafe(queue.put_nowait, subword)
-                    return False
 
             result: VLMDecodedResults
             try:
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
-
 
                 # for text in result.texts:
                 #     words = re.split(r" |\n", text)
@@ -243,22 +219,17 @@ def chat(body: ChatCompletionRequest, request: Request):
 
         inference_task = executor.submit(run_inference)
 
-        thinking_finished = False
+        thinking_in_progress = 1 if is_prompt_start_thinking(full_prompt) else 0
 
         possible_call_expression = ""
         possible_call_in_progress = False
         try:
-            subword: str | None = None
 
             while True:
-                # inference_task_done = inference_task.done()
-                # if inference_task_done:
-                #     stop_generation = True
-                #     break
-
+                subword: str | None = None
                 is_disconnected = run(request.is_disconnected)
                 if is_disconnected:  # await request.is_disconnected():
-                    stop_generation = True
+                    stop_generation.put_nowait(True)
                     break
 
                 try:
@@ -269,39 +240,52 @@ def chat(body: ChatCompletionRequest, request: Request):
                     continue
 
                 if subword is None:
+                    stop_chunk = new_chunk(None)
+                    yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
                     break
+
+                if is_reasoning_enabled:
+                    if think_is_started(subword):
+                        # log, assert thinking_in_progress == False
+                        thinking_in_progress += 1
+                    if thinking_in_progress > 0 and think_is_over(subword):
+                        # log, assert
+                        thinking_in_progress -= 1
+
+                if thinking_in_progress > 0:
+                    chunk = new_chunk(subword, thinking=True)
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                elif is_possible_tool_call_start(subword):
+                    # log trace
+                    # todo need assert possible_call_in_progress == False
+                    possible_call_in_progress = True
+                    possible_call_expression += subword
+                elif is_possible_tool_call_end(subword):
+                    possible_call_expression += subword
+                    tool_calls = parse_tool_calls(possible_call_expression)
+                    if not tool_calls:
+                        logger.info(f"fake tool call: {tool_calls}")
+                        chunk = new_chunk(text=possible_call_expression)
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    else:
+                        logger.info(f"tool call: {tool_calls}")
+                        chunk = new_chunk(tool_calls=tool_calls)
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    possible_call_in_progress = False
+                    possible_call_expression = ""
                 elif possible_call_in_progress:
+                    # log
                     possible_call_expression += subword
                     # if is_possible_tool_call_end(subword):
                     #     break
                 else:
-                    if is_reasoning_enabled and not thinking_finished and think_is_over(subword):
-                        # log
-                        thinking_finished = True
-                    elif thinking_finished and is_possible_tool_call_start(subword):
-                        # log trace
-                        # todo need assert possible_call_in_progress == False
-                        possible_call_in_progress = True
-                        possible_call_expression += subword
-                    else:
-                        chunk = new_chunk(subword, thinking=not thinking_finished)
-                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    chunk = new_chunk(subword, thinking=thinking_in_progress > 0)
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
-            tool_calls = parse_tool_calls(possible_call_expression) if possible_call_in_progress else None
-            if not tool_calls:
-                chunk = new_chunk(text=subword, thinking=not thinking_finished)
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-
-                stop_chunk = new_chunk(None)
-                yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
-            else:
-                logger.info(f"Стрим завершен. Обнаружен инструмент: {tool_calls}")
-                chunk = new_chunk(tool_calls=tool_calls)
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"Исключение во время стриминга: {e}", e)
         finally:
-            stop_generation = True
+            stop_generation.put_nowait(True)
             if not inference_task.done():
                 logger.info("Ожидание завершения фонового инференса...")
                 try:
@@ -373,6 +357,10 @@ def think_is_over(subword: str) -> bool:
     return subword.strip() == reasoning_end
 
 
+def think_is_started(subword: str) -> bool:
+    return subword.strip() == reasoning_start
+
+
 def new_chunk(text: str | None = None, thinking: bool = False, tool_calls: Optional[list[dict[str, Any]]] = None) -> \
         dict[str, Any]:
     finish_reason = None
@@ -395,7 +383,7 @@ def new_chunk(text: str | None = None, thinking: bool = False, tool_calls: Optio
 
         tool_calls = list(map(lambda p: tool_call_convert(p[0], p[1]), enumerate(tool_calls)))
         delta["tool_calls"] = tool_calls
-        finish_reason = "tool_calls"
+        # finish_reason = "tool_calls"
     else:
         finish_reason = "stop"
     return {"choices": [{"index": 0, "delta": delta, "model": model_name, "finish_reason": finish_reason}]}
@@ -409,9 +397,14 @@ def is_possible_tool_call_end(text: str) -> bool:
     return tool_call_end == text.strip()
 
 
+def is_prompt_start_thinking(prompt: str) -> bool:
+    return prompt.endswith(reasoning_start, 0, len(prompt) - 1) if prompt.endswith(
+        '\n') else prompt.endswith(reasoning_start)
+
+
 def parse_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
     """Parses Qwen3-Coder style unique XML tool call blocks."""
-    tool_call_blocks = re.findall(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
+    tool_call_blocks = re.findall(f"{tool_call_start}(.*?){tool_call_end}", text, re.DOTALL)
 
     parsed_calls = []
     for idx, call_block in enumerate(tool_call_blocks):
