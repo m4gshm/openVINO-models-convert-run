@@ -252,10 +252,10 @@ def chat(body: ChatCompletionRequest, request: Request):
                         # log, assert
                         thinking_in_progress -= 1
 
-                if thinking_in_progress > 0:
-                    chunk = new_chunk(subword, thinking=True)
-                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                elif is_possible_tool_call_start(subword):
+                # if thinking_in_progress > 0:
+                #     chunk = new_chunk(subword, thinking=thinking_in_progress>0)
+                #     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                if is_possible_tool_call_start(subword):
                     # log trace
                     # todo need assert possible_call_in_progress == False
                     possible_call_in_progress = True
@@ -276,8 +276,6 @@ def chat(body: ChatCompletionRequest, request: Request):
                 elif possible_call_in_progress:
                     # log
                     possible_call_expression += subword
-                    # if is_possible_tool_call_end(subword):
-                    #     break
                 else:
                     chunk = new_chunk(subword, thinking=thinking_in_progress > 0)
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
