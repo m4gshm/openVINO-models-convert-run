@@ -1,5 +1,3 @@
-from click import shell_completion
-
 model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"./models/{model_name}/1"
 
@@ -19,7 +17,7 @@ import asyncio
 import json
 import logging.config
 import os
-import queue as q
+import queue
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -34,7 +32,7 @@ from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
 from pydantic import BaseModel
 from pydantic.json import pydantic_encoder
 
-executor = ThreadPoolExecutor(max_workers=4)
+executor = ThreadPoolExecutor()
 
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
@@ -92,9 +90,9 @@ LOGGING_CONFIG = {
 }
 
 logging.config.dictConfig(LOGGING_CONFIG)
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-logger.debug("Database connection initialized.")
+log.debug("Database connection initialized.")
 
 
 class LoggingRoute(APIRoute):
@@ -106,12 +104,12 @@ class LoggingRoute(APIRoute):
         async def custom_route_handler(request: Request) -> Any:
             body_bytes = await request.body()
             body_str = body_bytes.decode("utf-8") if body_bytes else "Пусто"
-            logger.info(f"--> inbound {request.method} {request.url.path}")
-            logger.info(f"body: {body_str}")
+            log.info(f"--> inbound {request.method} {request.url.path}")
+            log.info(f"body: {body_str}")
 
             response: Response = await original_route_handler(request)
 
-            logger.info(f"<-- outbound {response.status_code}")
+            log.info(f"<-- outbound {response.status_code}")
 
             # if isinstance(response, StreamingResponse):
             #     response_body_bytes = b""
@@ -156,37 +154,23 @@ scheduler_config.dynamic_split_fuse = True
 scheduler_config.use_sparse_attention = False
 scheduler_config.enable_prefix_caching = True
 
-
-# SchedulerConfig {
-# max_num_batched_tokens: 18446744073709551615
-# num_kv_blocks: 0
-# cache_size: 0
-# num_linear_attention_blocks: 0
-# cache_interval_multiplier: unset
-# dynamic_split_fuse: true
-# use_cache_eviction: false
-# max_num_seqs: 256
-# enable_prefix_caching: true
-# use_sparse_attention: false
-# }
-
 config = {
     # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
     # "OPENVINO_LOG_LEVEL": "DEBUG",
     "CACHE_DIR": model_cache_dir,
     # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
     # "KV_CACHE_PRECISION": "u4",
-    "PERFORMANCE_HINT": "LATENCY", # THROUGHPUT crash process
+    "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crash process
     "scheduler_config": scheduler_config,
 }
 
-logger.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
+log.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 try:
 
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
-    logger.info("model loaded successfully")
+    log.info("model loaded successfully")
 except Exception as e:
-    logger.error(e)
+    log.error(e)
     sys.exit(1)
 
 
@@ -221,13 +205,12 @@ class ChatCompletionRequest(BaseModel):
 
 @app.post("/v1/chat/completions")
 async def chat(body: ChatCompletionRequest, request: Request):
-    # loop = asyncio.get_running_loop()
-
+    loop = asyncio.get_event_loop()
     is_reasoning_enabled = reasoning_supported and (body.reasoning or True)
 
     messages = body.messages
 
-    logger.info(f"inbound history messages {len(messages)}")
+    log.info(f"inbound history messages {len(messages)}")
 
     chat_history = ChatHistory()
     chat_history_messages = messages
@@ -247,7 +230,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
                                                 tools=tools,
                                                 extra_context=extra_context)
 
-    logger.debug(f"prompt:\n{full_prompt}")
+    log.debug(f"prompt:\n{full_prompt}")
 
     generation_config = ov_genai.GenerationConfig()
     generation_config.max_new_tokens = body.max_tokens or 4096
@@ -265,52 +248,50 @@ async def chat(body: ChatCompletionRequest, request: Request):
 
     generation_config.repetition_penalty = 1.1
 
-    async def stream_generator():
-        word_queue: q.Queue[str | None] = q.Queue()  # asyncio.Queue[str | None] = asyncio.Queue()
-        stop_generation: q.Queue[bool | None] = q.Queue()
+    def stream_generator():
+        word_queue: queue.Queue[str | None] = queue.Queue()
+
+        # stop_stream_handling: queue.Queue[bool | None] = queue.Queue()
 
         def run_inference():
             def streamer(word: str) -> bool:
+                def put_queue(w: str | None):
+                    word_queue.put_nowait(w)
+
                 try:
-                    logger.debug(f"stream: {word}")
-                    if not stop_generation.empty() and stop_generation.get_nowait():
-                        word_queue.put_nowait(None)
-                        # log
+                    log.debug(f"stream: {word}")
+                    put_queue(word)
+                    if is_disconnected():
+                        log.info("stream finished by user disconnected")
                         return True
-                    elif word is None:
-                        word_queue.put_nowait(None)
-                        return True
+                    # if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
+                    #     log.debug("stream finished by stop signal")
+                    #     return True
+                    # elif word is None:
+                    #     log.debug("stream finished by None word")
+                    #     return True
                     else:
-                        word_queue.put_nowait(word)  # loop.call_soon_threadsafe(queue.put_nowait, subword)
                         return False
                 except Exception as e:
-                    logger.error(f"streamer error: {e}")
-                    word_queue.put_nowait(None)
+                    log.error(f"streamer error: {e}")
+                    # put_queue(None)
                     return True
 
             result: VLMDecodedResults
             try:
-                logger.info(f"inference starting")
-                # generation_config.apply_chat_template = True
-                # result = pipe.generate(history=chat_history, generation_config=generation_config, streamer=streamer)
+                log.info(f"inference starting")
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
 
-                # for text in result.texts:
-                #     words = re.split(r" |\n", text)
-                #     for word in words:
-                #         word_queue.put_nowait(word)
-
-                if logger.level == logging.DEBUG:
-                    logger.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
+                if log.level == logging.DEBUG:
+                    log.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
                 else:
-                    logger.info(f"inference finish reason {result.finish_reasons}")
-                word_queue.put_nowait(None)
+                    log.info(f"inference finish reason {result.finish_reasons}")
             except Exception as e:
-                logger.error(f"inference error: {e}")
+                log.error(f"inference error: {e}")
+                raise
+            finally:
+                # send stop stream word
                 word_queue.put_nowait(None)
-                raise e
-
-        # inference_task = loop.run_in_executor(None, run_inference)
 
         inference_task = executor.submit(run_inference)
 
@@ -320,71 +301,76 @@ async def chat(body: ChatCompletionRequest, request: Request):
         possible_call_in_progress = False
         try:
             while True:
-                is_disconnected = await request.is_disconnected()
-                if is_disconnected:  # await request.is_disconnected():
-                    stop_generation.put_nowait(True)
+                if is_disconnected():
                     break
 
-                try:
-                    # subword = await asyncio.wait_for(queue.get(), timeout=0.1)
-                    subword = word_queue.get()
-                except asyncio.TimeoutError:
-                    # todo log
-                    continue
+                # log.debug(f"waiting next word")
+                word = word_queue.get()
+                log.debug(f"next word: {word}")
 
-                if subword is None:
+                if word is None:
                     stop_chunk = new_chunk(None)
                     yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
                     break
 
                 if is_reasoning_enabled:
-                    if think_is_started(subword):
+                    if think_is_started(word):
                         # log, assert thinking_in_progress == False
                         thinking_in_progress += 1
-                    if thinking_in_progress > 0 and think_is_over(subword):
+                    if thinking_in_progress > 0 and think_is_over(word):
                         # log, assert
                         thinking_in_progress -= 1
 
                 # if thinking_in_progress > 0:
-                #     chunk = new_chunk(subword, thinking=thinking_in_progress>0)
+                #     chunk = new_chunk(word, thinking=thinking_in_progress>0)
                 #     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                if is_possible_tool_call_start(subword):
+                if is_possible_tool_call_start(word):
                     # log trace
                     # todo need assert possible_call_in_progress == False
                     possible_call_in_progress = True
-                    possible_call_expression += subword
-                elif is_possible_tool_call_end(subword):
-                    possible_call_expression += subword
+                    possible_call_expression += word
+                elif is_possible_tool_call_end(word):
+                    possible_call_expression += word
                     tool_calls = parse_tool_calls(possible_call_expression)
                     if not tool_calls:
-                        logger.debug(f"fake tool call: {tool_calls}")
+                        log.debug(f"fake tool call: {tool_calls}")
                         chunk = new_chunk(text=possible_call_expression)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
-                        logger.debug(f"tool call: {tool_calls}")
+                        log.debug(f"tool call: {tool_calls}")
                         chunk = new_chunk(tool_calls=tool_calls)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     possible_call_in_progress = False
                     possible_call_expression = ""
                 elif possible_call_in_progress:
                     # log
-                    possible_call_expression += subword
-                    logger.debug(f"form tool call expression '{possible_call_expression}'")
+                    possible_call_expression += word
+                    # log.debug(f"form tool call expression '{possible_call_expression}'")
                 else:
-                    chunk = new_chunk(subword, thinking=thinking_in_progress > 0)
+                    chunk = new_chunk(word, thinking=thinking_in_progress > 0)
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            logger.error(e)
+            log.error(f"inference result processing error: {e}")
         finally:
-            stop_generation.put_nowait(True)
+            # stop_stream_handling.put_nowait(True)
             if not inference_task.done():
-                logger.info("waiting for inference to complete")
+                log.info("waiting for inference to complete")
                 try:
-                    r = inference_task.result()  # await inference_task
+                    r = inference_task.result()
                 except Exception as e:
-                    logger.error(e)
-            logger.info("inference handling is done")
+                    log.error(e)
+            log.info("inference handling is done")
+
+    def is_disconnected() -> bool:
+        disconnected = False
+        try:
+            disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.5)
+            if disconnected:
+                log.debug(f"disconnected http request")
+        except asyncio.TimeoutError:
+            log.debug(f"disconnected http request check timeout")
+        return disconnected
 
     # if body.stream:
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
@@ -537,5 +523,5 @@ def get_func_name(call_block) -> str | None:
 
 
 if __name__ == "__main__":
-    logger.info("Запуск API сервера...")
+    log.info("Запуск API сервера...")
     uvicorn.run(app, host="127.0.0.1", port=8888)
