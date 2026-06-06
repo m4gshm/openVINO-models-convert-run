@@ -1,6 +1,6 @@
 from click import shell_completion
 
-model_name = "OmniCoder-9B-int8-asym"
+model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"./models/{model_name}/1"
 
 reasoning_supported = True
@@ -11,7 +11,7 @@ reasoning_start = "<think>"
 reasoning_end = "</think>"
 
 device_name = "GPU"
-kv_cache_size = 6
+kv_cache_size = 8
 
 model_cache_dir = f"./models_cache/{model_name}"
 
@@ -148,11 +148,11 @@ app.router.route_class = LoggingRoute
 
 scheduler_config = ov_genai.SchedulerConfig()
 scheduler_config.cache_size = kv_cache_size
-# scheduler_config.max_num_batched_tokens = 4096
-scheduler_config.max_num_seqs = 2
-scheduler_config.cache_interval_multiplier = None
+# scheduler_config.max_num_batched_tokens = 1024
+scheduler_config.max_num_seqs = 1
+scheduler_config.cache_interval_multiplier = 2
 scheduler_config.dynamic_split_fuse = True
-scheduler_config.use_cache_eviction = False
+# scheduler_config.use_cache_eviction = True
 scheduler_config.use_sparse_attention = False
 scheduler_config.enable_prefix_caching = True
 
@@ -174,9 +174,9 @@ config = {
     # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
     # "OPENVINO_LOG_LEVEL": "DEBUG",
     "CACHE_DIR": model_cache_dir,
-    "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
+    # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
     # "KV_CACHE_PRECISION": "u4",
-    # "PERFORMANCE_HINT": "THROUGHPUT",
+    "PERFORMANCE_HINT": "LATENCY", # THROUGHPUT crash process
     "scheduler_config": scheduler_config,
 }
 
@@ -306,7 +306,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     logger.info(f"inference finish reason {result.finish_reasons}")
                 word_queue.put_nowait(None)
             except Exception as e:
-                logger.error(e)
+                logger.error(f"inference error: {e}")
                 word_queue.put_nowait(None)
                 raise e
 
