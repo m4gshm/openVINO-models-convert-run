@@ -1,4 +1,6 @@
-model_name = "OmniCoder-9B-int4-sym-g128"
+from click import shell_completion
+
+model_name = "OmniCoder-9B-int8-asym"
 model_path = f"./models/{model_name}/1"
 
 reasoning_supported = True
@@ -9,13 +11,13 @@ reasoning_start = "<think>"
 reasoning_end = "</think>"
 
 device_name = "GPU"
-kv_cache_size = 4
+kv_cache_size = 6
 
 model_cache_dir = f"./models_cache/{model_name}"
 
 import asyncio
 import json
-import logging
+import logging.config
 import os
 import queue as q
 import re
@@ -25,39 +27,117 @@ from typing import Callable, List, Optional, Any, Dict, Literal
 
 import openvino_genai as ov_genai
 import uvicorn
-from anyio.from_thread import run
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
 from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
 from pydantic import BaseModel
+from pydantic.json import pydantic_encoder
 
 executor = ThreadPoolExecutor(max_workers=4)
 
-# Available levels: "NO", "ERR", "WARNING", "INFO", "DEBUG", "TRACE"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,  # Keeps non-root loggers alive
+    "formatters": {
+        "simple": {
+            "format": "%(asctime)s - %(levelname)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "detailed": {
+            "format": "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "simple",
+            "stream": "ext://sys.stdout",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "INFO",
+            "formatter": "detailed",
+            "filename": "app.log",
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5,
+            "encoding": "utf8"
+        },
+        "file_http": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "INFO",
+            "formatter": "detailed",
+            "filename": "http.log",
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5,
+            "encoding": "utf8"
+        },
+    },
+    "loggers": {
+        "http": {
+            "level": "DEBUG",
+            "handlers": ["console", "file_http"],
+            "propagate": True,
+        }
+    },
+    "root": {
+        "level": "DEBUG",
+        "handlers": ["console", "file"],
+    },
+}
+
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
+
+logger.debug("Database connection initialized.")
 
 
 class LoggingRoute(APIRoute):
+    logger = logging.getLogger("http")
+
     def get_route_handler(self) -> Callable:
         original_route_handler = super().get_route_handler()
 
         async def custom_route_handler(request: Request) -> Any:
             body_bytes = await request.body()
             body_str = body_bytes.decode("utf-8") if body_bytes else "Пусто"
+            logger.info(f"--> inbound {request.method} {request.url.path}")
+            logger.info(f"body: {body_str}")
 
-            logger.info(f"--> ВХОДЯЩИЙ {request.method} {request.url.path}")
-            logger.info(f"Тело запроса: {body_str}")
+            response: Response = await original_route_handler(request)
 
-            response = await original_route_handler(request)
+            logger.info(f"<-- outbound {response.status_code}")
+
+            # if isinstance(response, StreamingResponse):
+            #     response_body_bytes = b""
+            #     chunks = []
+            #     async for chunk in response.body_iterator:
+            #         chunks.append(chunk)
+            #
+            #         if isinstance(chunk, str):
+            #             chunk_bytes = chunk.encode("utf-8")
+            #         else:
+            #             chunk_bytes = chunk
+            #
+            #         response_body_bytes += chunk_bytes
+            #
+            #     res_body_str = response_body_bytes.decode("utf-8", errors="ignore")
+            #     logger.info(f"Тело стрим-ответа: {res_body_str}")
+            #
+            #     async def re_iterator():
+            #         for chunk in chunks:
+            #             yield chunk
+            #
+            #     response.body_iterator = re_iterator()
+            # else:
+            #     res_body_str = response.body.decode("utf-8", errors="ignore") if response.body else "Пусто"
+            #     logger.info(f"response body: {res_body_str}")
+
             return response
 
         return custom_route_handler
@@ -66,29 +146,47 @@ class LoggingRoute(APIRoute):
 app = FastAPI()
 app.router.route_class = LoggingRoute
 
-# scheduler_config = ov_genai.SchedulerConfig()
-# scheduler_config.enable_prefix_caching = True
-# scheduler_config.cache_size = kv_cache_size
-# scheduler_config.max_num_batched_tokens = 512
-# scheduler_config.max_num_seqs = 2
+scheduler_config = ov_genai.SchedulerConfig()
+scheduler_config.cache_size = kv_cache_size
+# scheduler_config.max_num_batched_tokens = 4096
+scheduler_config.max_num_seqs = 2
+scheduler_config.cache_interval_multiplier = None
+scheduler_config.dynamic_split_fuse = True
+scheduler_config.use_cache_eviction = False
+scheduler_config.use_sparse_attention = False
+scheduler_config.enable_prefix_caching = True
 
-# scheduler_config.dynamic_split_fuse = True
+
+# SchedulerConfig {
+# max_num_batched_tokens: 18446744073709551615
+# num_kv_blocks: 0
+# cache_size: 0
+# num_linear_attention_blocks: 0
+# cache_interval_multiplier: unset
+# dynamic_split_fuse: true
+# use_cache_eviction: false
+# max_num_seqs: 256
+# enable_prefix_caching: true
+# use_sparse_attention: false
+# }
 
 config = {
     # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
     # "OPENVINO_LOG_LEVEL": "DEBUG",
     "CACHE_DIR": model_cache_dir,
+    "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
     # "KV_CACHE_PRECISION": "u4",
-    "PERFORMANCE_HINT": "THROUGHPUT",
-    # "scheduler_config": scheduler_config,
+    # "PERFORMANCE_HINT": "THROUGHPUT",
+    "scheduler_config": scheduler_config,
 }
-logger.info(
-    f"Загрузка модели {model_path} на {device_name} с параметрами {config}...")
+
+logger.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 try:
+
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
-    logger.info("Модель успешно загружена!")
+    logger.info("model loaded successfully")
 except Exception as e:
-    logger.error(f"Критическая ошибка инициализации VLMPipeline: {e}")
+    logger.error(e)
     sys.exit(1)
 
 
@@ -122,14 +220,14 @@ class ChatCompletionRequest(BaseModel):
 
 
 @app.post("/v1/chat/completions")
-def chat(body: ChatCompletionRequest, request: Request):
+async def chat(body: ChatCompletionRequest, request: Request):
     # loop = asyncio.get_running_loop()
 
     is_reasoning_enabled = reasoning_supported and (body.reasoning or True)
 
     messages = body.messages
 
-    logger.info(f"--- Inbound request (history messages: {len(messages)}) ---")
+    logger.info(f"inbound history messages {len(messages)}")
 
     chat_history = ChatHistory()
     chat_history_messages = messages
@@ -149,38 +247,32 @@ def chat(body: ChatCompletionRequest, request: Request):
                                                 tools=tools,
                                                 extra_context=extra_context)
 
+    logger.debug(f"prompt:\n{full_prompt}")
+
     generation_config = ov_genai.GenerationConfig()
     generation_config.max_new_tokens = body.max_tokens or 4096
-    if full_prompt:
-        generation_config.apply_chat_template = False
-    else:
-        generation_config.apply_chat_template = True
+    generation_config.apply_chat_template = False if full_prompt else True
 
-    # Greedy Search
-    temp = body.temperature or 0.1
+    temp = body.temperature or 0.8
     if temp < 0.05:
+        # Greedy Search
         generation_config.do_sample = False
     else:
         generation_config.do_sample = True
         generation_config.temperature = temp
         generation_config.top_p = body.top_p or 0.9
-        generation_config.top_k = 40  # Сужает выбор до лучших токенов
+        generation_config.top_k = 40
 
-    # generation_config.repetition_penalty = 1.0  # Для кода лучше не штрафовать повторы ключевых слов
-    # generation_config.presence_penalty = 0.0
-    # generation_config.frequency_penalty = 0.0
+    generation_config.repetition_penalty = 1.1
 
-    # generation_config.stop_strings = {"<|im_end|>", "<|endoftext|>", "<|im_start|>"}
-
-    def stream_generator():
-        word_queue: q.Queue[str | None] = q.Queue()
-        # queue: asyncio.Queue[str | None] = asyncio.Queue()
+    async def stream_generator():
+        word_queue: q.Queue[str | None] = q.Queue()  # asyncio.Queue[str | None] = asyncio.Queue()
         stop_generation: q.Queue[bool | None] = q.Queue()
 
         def run_inference():
             def streamer(word: str) -> bool:
                 try:
-                    logger.info(word)
+                    logger.debug(f"stream: {word}")
                     if not stop_generation.empty() and stop_generation.get_nowait():
                         word_queue.put_nowait(None)
                         # log
@@ -198,6 +290,9 @@ def chat(body: ChatCompletionRequest, request: Request):
 
             result: VLMDecodedResults
             try:
+                logger.info(f"inference starting")
+                # generation_config.apply_chat_template = True
+                # result = pipe.generate(history=chat_history, generation_config=generation_config, streamer=streamer)
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
 
                 # for text in result.texts:
@@ -205,15 +300,15 @@ def chat(body: ChatCompletionRequest, request: Request):
                 #     for word in words:
                 #         word_queue.put_nowait(word)
 
+                if logger.level == logging.DEBUG:
+                    logger.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
+                else:
+                    logger.info(f"inference finish reason {result.finish_reasons}")
+                word_queue.put_nowait(None)
             except Exception as e:
-                logger.error(f"Ошибка в инференсе: {e}", e)
+                logger.error(e)
                 word_queue.put_nowait(None)
                 raise e
-            finally:
-                logger.info("Завершено инференсирование")
-                word_queue.put_nowait(None)
-                logger.info("Завершено инференсирование 2")
-                # word_queue.put_nowait(None)  # loop.call_soon_threadsafe(queue.put_nowait, None)
 
         # inference_task = loop.run_in_executor(None, run_inference)
 
@@ -224,10 +319,8 @@ def chat(body: ChatCompletionRequest, request: Request):
         possible_call_expression = ""
         possible_call_in_progress = False
         try:
-
             while True:
-                subword: str | None = None
-                is_disconnected = run(request.is_disconnected)
+                is_disconnected = await request.is_disconnected()
                 if is_disconnected:  # await request.is_disconnected():
                     stop_generation.put_nowait(True)
                     break
@@ -264,11 +357,11 @@ def chat(body: ChatCompletionRequest, request: Request):
                     possible_call_expression += subword
                     tool_calls = parse_tool_calls(possible_call_expression)
                     if not tool_calls:
-                        logger.info(f"fake tool call: {tool_calls}")
+                        logger.debug(f"fake tool call: {tool_calls}")
                         chunk = new_chunk(text=possible_call_expression)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
-                        logger.info(f"tool call: {tool_calls}")
+                        logger.debug(f"tool call: {tool_calls}")
                         chunk = new_chunk(tool_calls=tool_calls)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     possible_call_in_progress = False
@@ -276,21 +369,22 @@ def chat(body: ChatCompletionRequest, request: Request):
                 elif possible_call_in_progress:
                     # log
                     possible_call_expression += subword
+                    logger.debug(f"form tool call expression '{possible_call_expression}'")
                 else:
                     chunk = new_chunk(subword, thinking=thinking_in_progress > 0)
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            logger.error(f"Исключение во время стриминга: {e}", e)
+            logger.error(e)
         finally:
             stop_generation.put_nowait(True)
             if not inference_task.done():
-                logger.info("Ожидание завершения фонового инференса...")
+                logger.info("waiting for inference to complete")
                 try:
                     r = inference_task.result()  # await inference_task
                 except Exception as e:
-                    logger.error(f"Ошибка при закрытии задачи: {e}", e)
-            logger.info("Ресурсы очищены, сессия стриминга закрыта.")
+                    logger.error(e)
+            logger.info("inference handling is done")
 
     # if body.stream:
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
