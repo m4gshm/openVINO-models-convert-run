@@ -13,20 +13,20 @@ model_cache_dir = f"./models_cache/{model_name}"
 
 import openvino_genai as ov_genai
 
+default_max_new_tokens = 32768
+
 scheduler_config = ov_genai.SchedulerConfig()
 scheduler_config.enable_prefix_caching = True
 scheduler_config.cache_size = 8
-scheduler_config.max_num_batched_tokens = 1024
+# scheduler_config.max_num_batched_tokens = 256
 # scheduler_config.num_kv_blocks = 4096
-# scheduler_config.max_num_seqs = 256
-scheduler_config.cache_interval_multiplier = None # 2
+scheduler_config.max_num_seqs = 2
+scheduler_config.cache_interval_multiplier = None  # 2
 scheduler_config.dynamic_split_fuse = True
 # scheduler_config.use_cache_eviction = True
 scheduler_config.use_sparse_attention = False
 
 config = {
-    # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
-    # "OPENVINO_LOG_LEVEL": "DEBUG",
     "CACHE_DIR": model_cache_dir,
     # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
     # "KV_CACHE_PRECISION": "u4",
@@ -59,11 +59,13 @@ from common_log import log_format_simple, log_format_prefix, LoggingRoute
 executor = ThreadPoolExecutor()
 tool_call_counter = itertools.count(start=0)
 
+# os.environ["LOG_LEVEL"] = "4"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 log = logging.getLogger(__name__)
+log_inference_prompt = logging.getLogger("inference.prompt")
 
 app = FastAPI()
 app.router.route_class = LoggingRoute
@@ -71,21 +73,31 @@ app.router.route_class = LoggingRoute
 log.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 try:
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
-    log.info("model loaded successfully")
+    default_generation_config = pipe.get_generation_config()
+    log.info(f"model loaded successfully")
 except Exception as e:
     log.error(e)
     sys.exit(1)
 
 
 class ChatCompletionRequest(BaseModel):
+    n: Optional[int] = None
     model: Optional[str] = None
     messages: List[dict] = []
     tools: Optional[List[dict]] = None
     stream: Optional[bool] = False
+    stream_options: Optional[dict[str, Any]] = None
+    tool_choice: Optional[str] = None
+
     max_tokens: Optional[int] = None
-    reasoning: Optional[int] = True
+    reasoning: Optional[bool] = True
     top_p: Optional[float] = None
     temperature: Optional[float] = None
+
+
+def is_erase(word: str) -> bool:
+    service_token: bool = word.strip() in [tool_call_start, tool_call_end, reasoning_start, reasoning_end]
+    return service_token
 
 
 @app.post("/v1/chat/completions")
@@ -115,10 +127,10 @@ async def chat(body: ChatCompletionRequest, request: Request):
                                                 tools=tools,
                                                 extra_context=extra_context)
 
-    log.debug(f"prompt:\n{full_prompt}")
+    log_inference_prompt.debug(full_prompt)
 
     generation_config = ov_genai.GenerationConfig()
-    generation_config.max_new_tokens = body.max_tokens or 4096
+    generation_config.max_new_tokens = body.max_tokens or default_max_new_tokens
     generation_config.apply_chat_template = False if full_prompt else True
 
     temp = body.temperature or 0.8
@@ -166,11 +178,12 @@ async def chat(body: ChatCompletionRequest, request: Request):
 
             result: VLMDecodedResults
             try:
+                pipe.start_chat()
                 log.info(f"inference starting")
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
 
-                if log_inference.isEnabledFor(logging.DEBUG):
-                    log_inference.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
+                if log.isEnabledFor(logging.DEBUG):
+                    log.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
                 else:
                     log.info(f"inference finished")
             except Exception as e:
@@ -179,6 +192,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
             finally:
                 # send stop stream word
                 word_queue.put_nowait(None)
+                pipe.finish_chat()
 
         inference_task = executor.submit(run_inference)
 
@@ -187,7 +201,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
         possible_call_expression = ""
         possible_call_in_progress = False
         tool_called = False
-        log_inference = logging.getLogger("inference")
+        log_inference_processing = logging.getLogger("inference.processing")
         try:
             while True:
                 if is_disconnected():
@@ -195,7 +209,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
 
                 # log.debug(f"waiting next word")
                 word = word_queue.get()
-                log_inference.debug(f"next word: {word}")
+                log_inference_processing.debug(f"next word: {word}")
 
                 if word is None:
                     stop_chunk = new_chunk(finish_reason="stop")
@@ -219,11 +233,11 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     possible_call_expression += word
                     tool_calls = parse_tool_calls(possible_call_expression)
                     if not tool_calls:
-                        log_inference.debug(f"fake tool call: {tool_calls}")
+                        log_inference_processing.debug(f"fake tool call: {tool_calls}")
                         chunk = new_chunk(text=possible_call_expression)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
-                        log_inference.debug(f"tool call: {tool_calls}")
+                        log_inference_processing.debug(f"tool call: {tool_calls}")
                         chunk = new_chunk(tool_calls=tool_calls)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     possible_call_in_progress = False
@@ -235,19 +249,22 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     # log.debug(f"form tool call expression '{possible_call_expression}'")
                 else:
                     if tool_called:
-                        log_inference.warning("model trying to generate tokens after tool call, inference is aborted.")
+                        log_inference_processing.warning(
+                            "model trying to generate tokens after tool call, inference is aborted.")
                         stop_chunk = new_chunk(finish_reason="tool_call")
                         yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
                         break
-                    chunk = new_chunk(word, thinking=thinking_in_progress > 0)
-                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    else:
+                        if not is_erase(word):
+                            chunk = new_chunk(word, thinking=thinking_in_progress > 0)
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             log.error(f"inference result processing error: {e}")
         finally:
             stop_stream_handling.put_nowait(True)
             if not inference_task.done():
-                log_inference.info("waiting for inference to complete")
+                log_inference_processing.info("waiting for inference to complete")
                 try:
                     r = inference_task.result()
                 except Exception as e:

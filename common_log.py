@@ -41,10 +41,19 @@ LOGGING_CONFIG = {
             "backupCount": 5,
             "encoding": "utf8"
         },
+        "file_prompt": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "detailed",
+            "filename": f"{logs_dir}/prompt.log",
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5,
+            "encoding": "utf8"
+        },
         "file_http": {
             "class": "logging.handlers.RotatingFileHandler",
             "level": "INFO",
-            "formatter": "detailed",
+            "formatter": "simple",
             "filename": f"{logs_dir}/http.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
@@ -60,6 +69,11 @@ LOGGING_CONFIG = {
         "inference.stream": {
             "level": "INFO",
             "propagate": True,
+        },
+        "inference.prompt": {
+            "level": "DEBUG",
+            "propagate": False,
+            "handlers": ["file_prompt"],
         }
     },
     "root": {
@@ -81,12 +95,12 @@ class LoggingRoute(APIRoute):
         async def custom_route_handler(request: Request) -> Response:
             body_bytes = await request.body()
             request_body_str = body_bytes.decode("utf-8") if body_bytes else None
-            log_http.info(f"--> inbound {request.method} {request.url.path} body {request_body_str}")
+            log_http.debug(f"--> inbound {request.method} {request.url.path} body {request_body_str}")
 
             response: Response = await original_route_handler(request)
 
             if isinstance(response, StreamingResponse):
-                log_http.info(f"<-- outbound {response.status_code}, media-type {response.media_type}")
+                log_http.debug(f"<-- outbound {response.status_code}, media-type {response.media_type}")
                 old_iterator = response.body_iterator
 
                 async def re_iterator():
@@ -98,13 +112,13 @@ class LoggingRoute(APIRoute):
 
                         res_body_str = chunk_bytes.decode("utf-8", errors="ignore")
 
-                        log_http.info(f"<-- outbound body chunk {res_body_str}")
+                        log_http.debug(f"<-- outbound body chunk {res_body_str}")
                         yield chunk
 
                 response.body_iterator = re_iterator()
             else:
                 res_body_str = response.body.decode("utf-8", errors="ignore") if response.body else None
-                log_http.info(
+                log_http.debug(
                     f"<-- outbound {response.status_code}, media-type {response.media_type}, body {res_body_str}")
 
             return response
