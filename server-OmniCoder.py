@@ -45,15 +45,16 @@ import re
 import sys
 import itertools
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, List, Optional, Any, Dict, Literal
+from typing import List, Optional, Any, Dict, Literal
 
 import uvicorn
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
-from fastapi.routing import APIRoute
 from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
 from pydantic import BaseModel
 from pydantic.json import pydantic_encoder
+
+from common_log import log_format_simple, log_format_prefix, LoggingRoute
 
 executor = ThreadPoolExecutor()
 tool_call_counter = itertools.count(start=0)
@@ -62,104 +63,7 @@ os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,  # Keeps non-root loggers alive
-    "formatters": {
-        "simple": {
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S"
-        },
-        "detailed": {
-            "format": "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "level": "DEBUG",
-            "formatter": "simple",
-            "stream": "ext://sys.stdout",
-        },
-        "file": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "level": "INFO",
-            "formatter": "detailed",
-            "filename": "app.log",
-            "maxBytes": 10485760,  # 10MB
-            "backupCount": 5,
-            "encoding": "utf8"
-        },
-        "file_http": {
-            "class": "logging.handlers.RotatingFileHandler",
-            "level": "INFO",
-            "formatter": "detailed",
-            "filename": "http.log",
-            "maxBytes": 10485760,  # 10MB
-            "backupCount": 5,
-            "encoding": "utf8"
-        },
-    },
-    "loggers": {
-        "http": {
-            "level": "DEBUG",
-            "handlers": ["console", "file_http"],
-            "propagate": False,
-        },
-        "inference.stream": {
-            "level": "DEBUG",
-            "propagate": True,
-        }
-    },
-    "root": {
-        "level": "DEBUG",
-        "handlers": ["console", "file"],
-    },
-}
-
-logging.config.dictConfig(LOGGING_CONFIG)
 log = logging.getLogger(__name__)
-
-
-class LoggingRoute(APIRoute):
-
-    def get_route_handler(self) -> Callable:
-        log_http = logging.getLogger("http")
-
-        original_route_handler = super().get_route_handler()
-
-        async def custom_route_handler(request: Request) -> Any:
-            body_bytes = await request.body()
-            request_body_str = body_bytes.decode("utf-8") if body_bytes else None
-            log_http.info(f"--> inbound {request.method} {request.url.path} body {request_body_str}")
-
-            response: Response = await original_route_handler(request)
-
-            if isinstance(response, StreamingResponse):
-                log_http.info(f"<-- outbound {response.status_code}, media-type {response.media_type}")
-                old_iterator = response.body_iterator
-                async def re_iterator():
-                    async for chunk in old_iterator:
-                        if isinstance(chunk, str):
-                            chunk_bytes = chunk.encode("utf-8")
-                        else:
-                            chunk_bytes = chunk
-
-                        res_body_str = chunk_bytes.decode("utf-8", errors="ignore")
-
-                        log_http.info(f"<-- outbound body chunk {res_body_str}")
-                        yield chunk
-
-                response.body_iterator = re_iterator()
-            else:
-                res_body_str = response.body.decode("utf-8", errors="ignore") if response.body else None
-                log_http.info(
-                    f"<-- outbound {response.status_code}, media-type {response.media_type}, body {res_body_str}")
-
-            return response
-
-        return custom_route_handler
-
 
 app = FastAPI()
 app.router.route_class = LoggingRoute
@@ -528,5 +432,12 @@ def get_func_name(call_block) -> str | None:
 
 
 if __name__ == "__main__":
-    log.info("Запуск API сервера...")
+    log.info("server starting")
+    log_config = uvicorn.config.LOGGING_CONFIG
+
+    log_config["formatters"]["default"]["format"] = log_format_simple
+    log_config["formatters"]["access"]["format"] = (
+            log_format_prefix + " - %(client_addr)s - '%(request_line)s' %(status_code)s"
+    )
+
     uvicorn.run(app, host="127.0.0.1", port=8888)
