@@ -9,9 +9,32 @@ reasoning_start = "<think>"
 reasoning_end = "</think>"
 
 device_name = "GPU"
-kv_cache_size = 8
-
 model_cache_dir = f"./models_cache/{model_name}"
+
+import openvino_genai as ov_genai
+
+scheduler_config = ov_genai.SchedulerConfig()
+scheduler_config.enable_prefix_caching = True
+scheduler_config.cache_size = 8
+scheduler_config.max_num_batched_tokens = 1024
+# scheduler_config.num_kv_blocks = 4096
+# scheduler_config.max_num_seqs = 256
+scheduler_config.cache_interval_multiplier = 2
+scheduler_config.dynamic_split_fuse = True
+# scheduler_config.use_cache_eviction = True
+scheduler_config.use_sparse_attention = False
+
+config = {
+    # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
+    # "OPENVINO_LOG_LEVEL": "DEBUG",
+    "CACHE_DIR": model_cache_dir,
+    # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
+    # "KV_CACHE_PRECISION": "u4",
+    "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crashes process
+    "scheduler_config": scheduler_config,
+    "ATTENTION_BACKEND": "PA",
+    # "ATTENTION_BACKEND": "SDPA",
+}
 
 import asyncio
 import json
@@ -20,10 +43,10 @@ import os
 import queue
 import re
 import sys
+import itertools
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, List, Optional, Any, Dict, Literal
 
-import openvino_genai as ov_genai
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import StreamingResponse
@@ -33,6 +56,7 @@ from pydantic import BaseModel
 from pydantic.json import pydantic_encoder
 
 executor = ThreadPoolExecutor()
+tool_call_counter = itertools.count(start=0)
 
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
@@ -43,7 +67,7 @@ LOGGING_CONFIG = {
     "disable_existing_loggers": False,  # Keeps non-root loggers alive
     "formatters": {
         "simple": {
-            "format": "%(asctime)s - %(levelname)s - %(message)s",
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "detailed": {
@@ -80,6 +104,10 @@ LOGGING_CONFIG = {
         "http": {
             "level": "DEBUG",
             "handlers": ["console", "file_http"],
+            # "propagate": True,
+        },
+        "inference.stream": {
+            "level": "DEBUG",
             "propagate": True,
         }
     },
@@ -92,24 +120,22 @@ LOGGING_CONFIG = {
 logging.config.dictConfig(LOGGING_CONFIG)
 log = logging.getLogger(__name__)
 
-log.debug("Database connection initialized.")
-
-
 class LoggingRoute(APIRoute):
-    logger = logging.getLogger("http")
 
     def get_route_handler(self) -> Callable:
+        log_http = logging.getLogger("http")
+
         original_route_handler = super().get_route_handler()
 
         async def custom_route_handler(request: Request) -> Any:
             body_bytes = await request.body()
             body_str = body_bytes.decode("utf-8") if body_bytes else "Пусто"
-            log.info(f"--> inbound {request.method} {request.url.path}")
-            log.info(f"body: {body_str}")
+            log_http.info(f"--> inbound {request.method} {request.url.path}")
+            log_http.info(f"body: {body_str}")
 
             response: Response = await original_route_handler(request)
 
-            log.info(f"<-- outbound {response.status_code}")
+            log_http.info(f"<-- outbound {response.status_code}")
 
             # if isinstance(response, StreamingResponse):
             #     response_body_bytes = b""
@@ -143,26 +169,6 @@ class LoggingRoute(APIRoute):
 
 app = FastAPI()
 app.router.route_class = LoggingRoute
-
-scheduler_config = ov_genai.SchedulerConfig()
-scheduler_config.cache_size = kv_cache_size
-# scheduler_config.max_num_batched_tokens = 1024
-scheduler_config.max_num_seqs = 1
-scheduler_config.cache_interval_multiplier = 2
-scheduler_config.dynamic_split_fuse = True
-# scheduler_config.use_cache_eviction = True
-scheduler_config.use_sparse_attention = False
-scheduler_config.enable_prefix_caching = True
-
-config = {
-    # ov.properties.log.level(): ov.properties.log.Level.DEBUG,
-    # "OPENVINO_LOG_LEVEL": "DEBUG",
-    "CACHE_DIR": model_cache_dir,
-    # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
-    # "KV_CACHE_PRECISION": "u4",
-    "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crash process
-    "scheduler_config": scheduler_config,
-}
 
 log.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 try:
@@ -251,29 +257,30 @@ async def chat(body: ChatCompletionRequest, request: Request):
     def stream_generator():
         word_queue: queue.Queue[str | None] = queue.Queue()
 
-        # stop_stream_handling: queue.Queue[bool | None] = queue.Queue()
+        stop_stream_handling: queue.Queue[bool | None] = queue.Queue()
 
         def run_inference():
             def streamer(word: str) -> bool:
+                log_stream = logging.getLogger("inference.stream")
                 def put_queue(w: str | None):
                     word_queue.put_nowait(w)
 
                 try:
-                    log.debug(f"stream: {word}")
+                    log_stream.debug(f"stream: {word}")
                     put_queue(word)
                     if is_disconnected():
-                        log.info("stream finished by user disconnected")
+                        log_stream.info("stream finished by user disconnected")
                         return True
-                    # if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
-                    #     log.debug("stream finished by stop signal")
-                    #     return True
+                    if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
+                        log.debug("stream finished by stop signal")
+                        return True
                     # elif word is None:
                     #     log.debug("stream finished by None word")
                     #     return True
                     else:
                         return False
                 except Exception as e:
-                    log.error(f"streamer error: {e}")
+                    log_stream.error(f"streamer error: {e}")
                     # put_queue(None)
                     return True
 
@@ -282,10 +289,10 @@ async def chat(body: ChatCompletionRequest, request: Request):
                 log.info(f"inference starting")
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
 
-                if log.level == logging.DEBUG:
-                    log.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
+                if log_inference.isEnabledFor(logging.DEBUG):
+                    log_inference.debug(f"inference finished reason {result.finish_reasons}, result:\n{result.texts}")
                 else:
-                    log.info(f"inference finish reason {result.finish_reasons}")
+                    log.info(f"inference finished")
             except Exception as e:
                 log.error(f"inference error: {e}")
                 raise
@@ -299,6 +306,8 @@ async def chat(body: ChatCompletionRequest, request: Request):
 
         possible_call_expression = ""
         possible_call_in_progress = False
+        tool_called = False
+        log_inference = logging.getLogger("inference")
         try:
             while True:
                 if is_disconnected():
@@ -306,10 +315,10 @@ async def chat(body: ChatCompletionRequest, request: Request):
 
                 # log.debug(f"waiting next word")
                 word = word_queue.get()
-                log.debug(f"next word: {word}")
+                log_inference.debug(f"next word: {word}")
 
                 if word is None:
-                    stop_chunk = new_chunk(None)
+                    stop_chunk = new_chunk(finish_reason="stop")
                     yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
                     break
 
@@ -321,9 +330,6 @@ async def chat(body: ChatCompletionRequest, request: Request):
                         # log, assert
                         thinking_in_progress -= 1
 
-                # if thinking_in_progress > 0:
-                #     chunk = new_chunk(word, thinking=thinking_in_progress>0)
-                #     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 if is_possible_tool_call_start(word):
                     # log trace
                     # todo need assert possible_call_in_progress == False
@@ -333,29 +339,35 @@ async def chat(body: ChatCompletionRequest, request: Request):
                     possible_call_expression += word
                     tool_calls = parse_tool_calls(possible_call_expression)
                     if not tool_calls:
-                        log.debug(f"fake tool call: {tool_calls}")
+                        log_inference.debug(f"fake tool call: {tool_calls}")
                         chunk = new_chunk(text=possible_call_expression)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
-                        log.debug(f"tool call: {tool_calls}")
+                        log_inference.debug(f"tool call: {tool_calls}")
                         chunk = new_chunk(tool_calls=tool_calls)
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     possible_call_in_progress = False
                     possible_call_expression = ""
+                    tool_called = True
                 elif possible_call_in_progress:
                     # log
                     possible_call_expression += word
                     # log.debug(f"form tool call expression '{possible_call_expression}'")
                 else:
+                    if tool_called:
+                        log_inference.warning("model trying to generate tokens after tool call, inference is aborted.")
+                        stop_chunk = new_chunk(finish_reason="tool_call")
+                        yield f"data: {json.dumps(stop_chunk, ensure_ascii=False)}\n\n"
+                        break
                     chunk = new_chunk(word, thinking=thinking_in_progress > 0)
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             log.error(f"inference result processing error: {e}")
         finally:
-            # stop_stream_handling.put_nowait(True)
+            stop_stream_handling.put_nowait(True)
             if not inference_task.done():
-                log.info("waiting for inference to complete")
+                log_inference.info("waiting for inference to complete")
                 try:
                     r = inference_task.result()
                 except Exception as e:
@@ -439,9 +451,9 @@ def think_is_started(subword: str) -> bool:
     return subword.strip() == reasoning_start
 
 
-def new_chunk(text: str | None = None, thinking: bool = False, tool_calls: Optional[list[dict[str, Any]]] = None) -> \
+def new_chunk(text: str | None = None, thinking: bool = False, tool_calls: Optional[list[dict[str, Any]]] = None,
+              finish_reason=None) -> \
         dict[str, Any]:
-    finish_reason = None
     delta = {}
     if text:
         delta["reasoning_content" if thinking else "content"] = text
@@ -461,9 +473,6 @@ def new_chunk(text: str | None = None, thinking: bool = False, tool_calls: Optio
 
         tool_calls = list(map(lambda p: tool_call_convert(p[0], p[1]), enumerate(tool_calls)))
         delta["tool_calls"] = tool_calls
-        # finish_reason = "tool_calls"
-    else:
-        finish_reason = "stop"
     return {"choices": [{"index": 0, "delta": delta, "model": model_name, "finish_reason": finish_reason}]}
 
 
@@ -485,14 +494,15 @@ def parse_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
     tool_call_blocks = re.findall(f"{tool_call_start}(.*?){tool_call_end}", text, re.DOTALL)
 
     parsed_calls = []
-    for idx, call_block in enumerate(tool_call_blocks):
+    for i, call_block in enumerate(tool_call_blocks):
         func_name = get_func_name(call_block)
         if func_name is None:
             # log
             continue
         arguments = get_arguments(call_block)
+        call_id = next(tool_call_counter)
         parsed_calls.append({
-            "id": f"call_{idx}_{func_name}",
+            "id": f"call_{call_id}_{func_name}",
             "type": "function",
             "function": {
                 "name": func_name,
