@@ -104,7 +104,7 @@ LOGGING_CONFIG = {
         "http": {
             "level": "DEBUG",
             "handlers": ["console", "file_http"],
-            # "propagate": True,
+            "propagate": False,
         },
         "inference.stream": {
             "level": "DEBUG",
@@ -120,6 +120,7 @@ LOGGING_CONFIG = {
 logging.config.dictConfig(LOGGING_CONFIG)
 log = logging.getLogger(__name__)
 
+
 class LoggingRoute(APIRoute):
 
     def get_route_handler(self) -> Callable:
@@ -129,38 +130,31 @@ class LoggingRoute(APIRoute):
 
         async def custom_route_handler(request: Request) -> Any:
             body_bytes = await request.body()
-            body_str = body_bytes.decode("utf-8") if body_bytes else "Пусто"
-            log_http.info(f"--> inbound {request.method} {request.url.path}")
-            log_http.info(f"body: {body_str}")
+            request_body_str = body_bytes.decode("utf-8") if body_bytes else None
+            log_http.info(f"--> inbound {request.method} {request.url.path} body {request_body_str}")
 
             response: Response = await original_route_handler(request)
 
-            log_http.info(f"<-- outbound {response.status_code}")
+            if isinstance(response, StreamingResponse):
+                log_http.info(f"<-- outbound {response.status_code}, media-type {response.media_type}")
+                old_iterator = response.body_iterator
+                async def re_iterator():
+                    async for chunk in old_iterator:
+                        if isinstance(chunk, str):
+                            chunk_bytes = chunk.encode("utf-8")
+                        else:
+                            chunk_bytes = chunk
 
-            # if isinstance(response, StreamingResponse):
-            #     response_body_bytes = b""
-            #     chunks = []
-            #     async for chunk in response.body_iterator:
-            #         chunks.append(chunk)
-            #
-            #         if isinstance(chunk, str):
-            #             chunk_bytes = chunk.encode("utf-8")
-            #         else:
-            #             chunk_bytes = chunk
-            #
-            #         response_body_bytes += chunk_bytes
-            #
-            #     res_body_str = response_body_bytes.decode("utf-8", errors="ignore")
-            #     logger.info(f"Тело стрим-ответа: {res_body_str}")
-            #
-            #     async def re_iterator():
-            #         for chunk in chunks:
-            #             yield chunk
-            #
-            #     response.body_iterator = re_iterator()
-            # else:
-            #     res_body_str = response.body.decode("utf-8", errors="ignore") if response.body else "Пусто"
-            #     logger.info(f"response body: {res_body_str}")
+                        res_body_str = chunk_bytes.decode("utf-8", errors="ignore")
+
+                        log_http.info(f"<-- outbound body chunk {res_body_str}")
+                        yield chunk
+
+                response.body_iterator = re_iterator()
+            else:
+                res_body_str = response.body.decode("utf-8", errors="ignore") if response.body else None
+                log_http.info(
+                    f"<-- outbound {response.status_code}, media-type {response.media_type}, body {res_body_str}")
 
             return response
 
@@ -262,6 +256,7 @@ async def chat(body: ChatCompletionRequest, request: Request):
         def run_inference():
             def streamer(word: str) -> bool:
                 log_stream = logging.getLogger("inference.stream")
+
                 def put_queue(w: str | None):
                     word_queue.put_nowait(w)
 
