@@ -1,12 +1,13 @@
 import logging.config
 import os
+from typing import Callable
 
 from fastapi import Request, Response
 from fastapi.responses import StreamingResponse
 from fastapi.routing import APIRoute
-from typing import Callable
 
-os.makedirs("logs", exist_ok=True)
+logs_dir = "logs"
+os.makedirs(logs_dir, exist_ok=True)
 
 log_format_prefix = "%(asctime)s - %(name)s - %(levelname)s"
 log_format_detailed = (log_format_prefix + " - [%(filename)s:%(lineno)d] - %(message)s")
@@ -35,7 +36,7 @@ LOGGING_CONFIG = {
             "class": "logging.handlers.RotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
-            "filename": "app.log",
+            "filename": f"{logs_dir}/app.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "encoding": "utf8"
@@ -44,7 +45,7 @@ LOGGING_CONFIG = {
             "class": "logging.handlers.RotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
-            "filename": "http.log",
+            "filename": f"{logs_dir}/http.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
             "encoding": "utf8"
@@ -77,7 +78,7 @@ class LoggingRoute(APIRoute):
 
         original_route_handler = super().get_route_handler()
 
-        async def custom_route_handler(request: Request) -> Any:
+        async def custom_route_handler(request: Request) -> Response:
             body_bytes = await request.body()
             request_body_str = body_bytes.decode("utf-8") if body_bytes else None
             log_http.info(f"--> inbound {request.method} {request.url.path} body {request_body_str}")
@@ -109,4 +110,3 @@ class LoggingRoute(APIRoute):
             return response
 
         return custom_route_handler
-

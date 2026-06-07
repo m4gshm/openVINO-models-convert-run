@@ -19,7 +19,7 @@ scheduler_config.cache_size = 8
 scheduler_config.max_num_batched_tokens = 1024
 # scheduler_config.num_kv_blocks = 4096
 # scheduler_config.max_num_seqs = 256
-scheduler_config.cache_interval_multiplier = 2
+scheduler_config.cache_interval_multiplier = None # 2
 scheduler_config.dynamic_split_fuse = True
 # scheduler_config.use_cache_eviction = True
 scheduler_config.use_sparse_attention = False
@@ -45,7 +45,7 @@ import re
 import sys
 import itertools
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional, Any, Dict, Literal
+from typing import List, Optional, Any, Dict
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -70,30 +70,11 @@ app.router.route_class = LoggingRoute
 
 log.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 try:
-
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
     log.info("model loaded successfully")
 except Exception as e:
     log.error(e)
     sys.exit(1)
-
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-    tool_call_id: str | None = None
-    tool_calls: list[dict] | None = None
-
-
-class FunctionModel(BaseModel):
-    name: str
-    description: Optional[str] = None
-    parameters: Optional[Dict[str, Any]] = None
-
-
-class ToolModel(BaseModel):
-    type: Literal["function"] = "function"
-    function: FunctionModel
 
 
 class ChatCompletionRequest(BaseModel):
