@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "fastapi>=0.136.3",
+# ]
+# ///
 import logging.config
 import os
 from typing import Callable
@@ -52,7 +58,7 @@ LOGGING_CONFIG = {
         },
         "file_http": {
             "class": "logging.handlers.RotatingFileHandler",
-            "level": "INFO",
+            "level": "DEBUG",
             "formatter": "simple",
             "filename": f"{logs_dir}/http.log",
             "maxBytes": 10485760,  # 10MB
@@ -63,10 +69,14 @@ LOGGING_CONFIG = {
     "loggers": {
         "http": {
             "level": "DEBUG",
-            "handlers": ["console", "file_http"],
+            "handlers": ["file_http"],
             "propagate": False,
         },
         "inference.stream": {
+            "level": "INFO",
+            "propagate": True,
+        },
+        "inference.processing": {
             "level": "INFO",
             "propagate": True,
         },

@@ -1,6 +1,6 @@
 .idea
 .kilo
-log
+logs
 *.log
 src_models/Qwen
 src_models/microsoft
