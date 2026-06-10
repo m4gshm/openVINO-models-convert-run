@@ -73,11 +73,7 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
         "inference.stream": {
-            "level": "INFO",
-            "propagate": True,
-        },
-        "inference.processing": {
-            "level": "INFO",
+            "level": "DEBUG",
             "propagate": True,
         },
         "inference.prompt": {

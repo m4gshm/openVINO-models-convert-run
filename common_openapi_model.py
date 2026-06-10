@@ -160,7 +160,7 @@ class OpenAICompletionChunkResponse(BaseModel):
     """Official OpenAI Chat Completion Chunk Schema (stream=True)."""
     model_config = ConfigDict(extra="allow")
 
-    id: str
+    id: str | None = None
     object: str = "chat.completion.chunk"  # Note the object type here
     created: int
     model: str

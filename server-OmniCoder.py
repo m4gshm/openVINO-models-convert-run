@@ -106,7 +106,6 @@ os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 log = logging.getLogger(__name__)
 log_inference_prompt = logging.getLogger("inference.prompt")
-log_stream = logging.getLogger("inference.stream")
 
 app = FastAPI()
 app.router.route_class = LoggingRoute
@@ -157,14 +156,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     log.info(f"inbound history messages {len(messages)}")
 
-    # for message in messages:
-    #     content = message.get("content", {})
-    #     role = content.get("role", None)
-    #     tool_calls = content.get("tool_calls", None)
-    #     if cast(list[dict[str, Any]], tool_calls):
-    #         for tool_call in tool_calls:
-    #             tool_choice = tool_call.get("type", None)
-
     messages: list[dict[str, Any]] = list(
         map(ChatCompletionMessageParam.model_dump, body.messages)) if body.tools else []
 
@@ -205,72 +196,265 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     generation_config.repetition_penalty = default_repetition_penalty
 
-    # generation_config.parsers = {ReasoningParser()}
-    # generation_config.include_stop_str_in_output = True
-    # generation_config.adapters = AdapterConfig()
-
-    # generation_config.include_stop_str_in_output = True
-    # generation_config.stop_strings = { "<|im_end|>", "<|endoftext|>"}
-
     def stream_generator() -> Generator[str, None, None]:
         for chunk in chunk_generator():
             yield f"data: {chunk.model_dump_json()}\n\n"
 
     def chunk_generator() -> Generator[OpenAICompletionChunkResponse, None, None]:
-        token_queue: queue.Queue[str | None] = queue.Queue(5)
-
-        def put_queue(w: str | None):
-            # token_queue.put_nowait(w)
-            token_queue.put(w, timeout=10)
-
-        stop_stream_handling: queue.Queue[bool | None] = queue.Queue()
+        chunk_queue: queue.Queue[OpenAICompletionChunkResponse | None] = queue.Queue()
+        stop_stream_handling: queue.Queue[bool] = queue.Queue()
+        start_stream_handling: queue.Queue[bool] = queue.Queue()
 
         def run_inference():
+            class State(Enum):
+                CONVERSATION = 1
+                THINK = 2
+                TOOL_CALL = 3
+
             class Streamer(ov_genai.StreamerBase):
-                def __init__(self):
+                def __clean_phrase(self):
+                    self.phrase = ""
+                    self.phrase_tick = None
+
+                def __get_last_state(self):
+                    return self.states[-1] if self.states else None
+
+                def __remove_state(self, expected_state: State):
+                    s = self.__get_last_state()
+                    if s == expected_state:
+                        self.states.pop()
+                    else:
+                        self.log.error(f"unexpected state {s}, expected {expected_state}")
+
+                def __init__(self, start_thinking: bool = True):
                     super().__init__()
+                    self.log = logging.getLogger("inference.stream")
+                    self.role = ROLE_ASSISTANT
+                    self.prev_role = None
+                    self.possible_tool_call_expression = ""
+                    self.possible_call_in_progress = False
+                    self.tool_call_count = 0
+                    self.token_number = 0
+                    self.token_conversation_start_number: int = -1
+                    self.expect_role = False
+                    self.phrase_tick: float | None = None
+                    self.possible_tool_call_expression_tick: float | None = None
+                    self.phrase = ""
+                    self.empty_conversation_counter = 0
+                    self.no_conversation_counter = 0
+                    self.stop_inference = False
                     self.counter = 0
+                    self.started = False
+
+                    # by default conversation is opened by assistant in chat template
+                    self.states: list[State] = [State.CONVERSATION]
+                    self.in_conversation = True
+
+                    if start_thinking > 0:
+                        self.thinking_progress_counter = 1
+                        self.states.append(State.THINK)
 
                 def end(self) -> None:
-                    log.debug("stream end")
+                    self.log.debug("stream end")
 
                 def write(self, tokens: Sequence[typing.SupportsInt]) -> StreamingStatus:
-                    decoded_tokens: list[str] = tokenizer.decode(tokens=[tokens], skip_special_tokens=False)
-                    try:
-                        self.counter += 1
-                        log_stream.info(f"decoded '{decoded_tokens}' from {tokens}, num {self.counter}")
-                        # if is_disconnected():
-                        #     log_stream.info("stream finished by user disconnected")
-                        #     return StreamingStatus.STOP
-                        # if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
-                        #     log.debug("stream finished by stop signal")
-                        #     return StreamingStatus.STOP
-                        while True:
-                            try:
-                                for t in decoded_tokens:
-                                    put_queue(t)
-                                break
-                            except queue.Full:
-                                log.info("steam queue full")
-                            finally:
-                                if is_disconnected():
-                                    log_stream.info("stream finished by user disconnected")
-                                    return StreamingStatus.STOP
-                                if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
-                                    log.debug("stream finished by stop signal")
-                                    return StreamingStatus.STOP
+                    log = self.log
 
-                        return StreamingStatus.RUNNING
+                    if not self.started:
+                        start_stream_handling.put(True)
+                        self.started = True
+
+                    decoded_tokens: list[str] = tokenizer.decode(tokens=[tokens], skip_special_tokens=False)
+
+                    if is_disconnected():
+                        log.info("stream finished by user disconnected")
+                        chunk_queue.put_nowait(None)
+                        return StreamingStatus.STOP
+
+                    if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
+                        log.debug("stream finished by stop signal")
+                        chunk_queue.put_nowait(None)
+                        return StreamingStatus.STOP
+
+                    try:
+                        for t in decoded_tokens:
+                            self.counter += 1
+                            log.debug(f"token '{t}', num {self.counter}")
+                            stream_status = self.process_token(t)
+                            if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
+                                # log
+                                chunk_queue.put_nowait(None)
+                                return stream_status
                     except Exception as e:
-                        log_stream.error(f"streamer error: {e}", exc_info=e)
+                        log.error(f"streamer error: {e}", exc_info=e)
+                        chunk_queue.put_nowait(None)
                         return StreamingStatus.CANCEL
+
+                    return StreamingStatus.RUNNING
+
+                def process_token(self, token: str) -> StreamingStatus | None:
+                    log = self.log
+                    if is_conversation_start(token):
+                        self.states.append(State.CONVERSATION)
+                        self.in_conversation = True
+                        self.no_conversation_counter = 0
+                        self.token_conversation_start_number = self.token_number
+                        self.expect_role = True
+
+                        phrase = self.phrase.rstrip()
+                        if len(phrase) > 0:
+                            log.info(
+                                f"phrase before conversation: {phrase}, last token number: {self.token_number}")
+
+                        self.__clean_phrase()
+
+                    elif is_conversation_end(token):
+                        self.in_conversation = False
+                        self.__remove_state(expected_state=State.CONVERSATION)
+
+                        self.token_conversation_start_number = -1
+                        self.expect_role = False
+
+                        phrase = self.phrase.rstrip()
+                        if len(phrase) == 0:
+                            log.debug(f"empty conversation end, role {self.role}")
+                            self.empty_conversation_counter += 1
+                        else:
+                            self.empty_conversation_counter = 0
+                            log.info(
+                                f"phrase before conversation end: {phrase}, last token number: {self.token_number}")
+                            self.__clean_phrase()
+
+                        if self.empty_conversation_counter > 20:
+                            log.warning(
+                                f"many empty conversations ({self.empty_conversation_counter}), abort inference")
+                            return StreamingStatus.CANCEL
+
+                        if self.tool_call_count > 0:
+                            log.debug(
+                                f"stop inference by ending conversation with tool calling (count {self.tool_call_count})")
+                            return StreamingStatus.TOOL_CALL_STOP
+                        return None
+                    elif self.expect_role and self.in_conversation and self.token_number - self.token_conversation_start_number == 1:
+                        if len(token.rstrip()) > 0:  # conversation role
+                            self.expect_role = False
+                            self.prev_role = self.role
+                            self.role = token
+                            log.debug(f"apply conversation role {self.role}, prev {self.prev_role}")
+                        else:
+                            log.debug("empty token where expected role")
+
+                    elif think_is_started(token):
+                        self.states.append(State.THINK)
+                        if len(self.possible_tool_call_expression) > 0:
+                            log.warning(f"start think token inside tool_call {self.possible_tool_call_expression}")
+                        self.thinking_progress_counter += 1
+                        if self.thinking_progress_counter == 1:
+                            log.debug("thinking is starting")
+                        else:
+                            log.debug(
+                                f"More thinking for God of thinking!!! {self.thinking_progress_counter}")
+                    elif think_is_over(token):
+                        self.__remove_state(expected_state=State.THINK)
+                        if len(self.possible_tool_call_expression) > 0:
+                            log.warning(
+                                f"stop think token inside tool_call: '{self.possible_tool_call_expression}', phrase: {self.phrase}")
+
+                        if self.thinking_progress_counter > 0:
+                            self.thinking_progress_counter -= 1
+                            if self.thinking_progress_counter == 0:
+                                log.debug("thinking is over")
+                            else:
+                                log.debug(
+                                    f"intensity of thinking decreased {self.thinking_progress_counter}")
+                    elif is_possible_tool_call_start(token):
+                        self.states.append(State.TOOL_CALL)
+                        log.debug(f"possible tool call start: {token}")
+                        log.info(f"phrase of {self.role} before tool call: {self.phrase.rstrip()}")
+
+                        self.__clean_phrase()
+
+                        self.possible_tool_call_expression_tick = time.time()
+                        self.possible_call_in_progress = True
+                        self.possible_tool_call_expression += token
+                    elif is_possible_tool_call_end(token):
+                        self.__remove_state(expected_state=State.TOOL_CALL)
+                        log.debug(f"possible tool call end: {token}")
+                        self.possible_tool_call_expression += token
+                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
+                        if not parsed_tool_calls:
+                            log.info(
+                                f"phrase like tool calls: {self.possible_tool_call_expression}")
+                            chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
+                        else:
+                            if log.isEnabledFor(logging.INFO):
+                                adapter = TypeAdapter(List[ToolCall])
+                                log.info(
+                                    f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
+
+                            self.tool_call_count += 1
+                            chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
+
+                        self.possible_call_in_progress = False
+                        self.possible_tool_call_expression = ""
+                        self.possible_tool_call_expression_tick = None
+
+                        chunk_queue.put(chunk)
+                    else:
+                        last_state = self.__get_last_state()
+                        if self.possible_call_in_progress and last_state == State.TOOL_CALL:
+                            self.possible_tool_call_expression += token
+                            now_time = time.time()
+                            possible_tool_call_expression_time = now_time - self.possible_tool_call_expression_tick
+                            if possible_tool_call_expression_time >= 10:
+                                self.possible_tool_call_expression_tick = now_time
+                                log.debug(
+                                    f"possible tool call part: {self.possible_tool_call_expression}")
+                        else:
+                            if ROLE_ASSISTANT != self.role:
+                                log.warning(f"unexpected role {self.role}")
+
+                            self.phrase = self.phrase + token
+
+                            now_time = time.time()
+                            if self.phrase_tick is None:
+                                self.phrase_tick = now_time
+
+                            phrase_time = now_time - self.phrase_tick
+                            if phrase_time >= 10:
+                                self.phrase_tick = now_time
+                                log.debug(f"phrase part: {self.phrase}")
+
+                            phrase_end = self.phrase.endswith("\n")
+                            if phrase_end:
+                                phrase = self.phrase.rstrip()
+                                if len(phrase) > 0:
+                                    log.info(
+                                        f"phrase of {self.role}: '{phrase.rstrip()}', last token number: {self.token_number}")
+                                    self.__clean_phrase()
+
+                            if not last_state:
+                                log.debug("no more conversations")
+                                self.no_conversation_counter += 1
+                                if self.no_conversation_counter > 5:
+                                    log.debug(
+                                        f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
+                                    return StreamingStatus.STOP
+                            else:
+                                if self.in_conversation:
+                                    chunk = new_chunk(role=self.role, content=token,
+                                                      thinking=self.thinking_progress_counter > 0)
+                                    chunk_queue.put(chunk)
+                                else:
+                                    log.warning(f"strange phrase of role {self.role}: {self.phrase}")
+                    return None
 
             result: VLMDecodedResults
             try:
                 pipe.start_chat()
                 log.info(f"inference starting")
                 before_generate_mem = get_current_memory()
-                streamer = Streamer()
+                streamer = Streamer(start_thinking=is_prompt_start_thinking(full_prompt))
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
 
                 after_generate_mem = get_current_memory()
@@ -285,233 +469,34 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                 log.error(f"inference error: {e}", exc_info=e)
                 raise
             finally:
-                # send stop stream token
-                # token_queue.put_nowait(None)
                 pipe.finish_chat()
 
+        unique_id = str(uuid.uuid4())
         inference_task = executor.submit(run_inference)
-
-        log_inference_processing = logging.getLogger("inference.processing")
-
-        thinking_progress_counter = 1 if is_prompt_start_thinking(full_prompt) else 0
-        role = ROLE_ASSISTANT
-
-        if thinking_progress_counter:
-            log_inference_processing.debug("start with thinking")
-
-        possible_tool_call_expression = ""
-        possible_call_in_progress = False
-        tool_call_count = 0
-
-        class State(Enum):
-            CONVERSATION = 1
-            THINK = 2
-            TOOL_CALL = 3
-
-        states: list[State] = []
-
-        def get_last_state():
-            return states[-1] if states else None
-
-        def remove_state(expected_state: State):
-            s = get_last_state()
-            if s == expected_state:
-                states.pop()
-            else:
-                log.error(f"unexpected state {get_last_state}, expected {expected_state}")
-
-        states.append(State.CONVERSATION)  # by default conversation is opened by assistant in chat template
-        in_conversation = True  # by default conversation is opened by assistant in chat template
-        if thinking_progress_counter > 0:
-            states.append(State.THINK)
-
         try:
-            token_number = 0
-            token_conversation_start_number: int = -1
-            expect_role = False
-            phrase_tick: float | None = None
-            possible_tool_call_expression_tick: float | None = None
-            phrase = ""
-            empty_conversation_counter = 0
-
-            no_conversation_counter = 0
-
+            stream_started = start_stream_handling.get()
             stop_inference = False
             while not stop_inference:
                 if is_disconnected():
                     break
-
-                raw_token = token_queue.get()
-                token_number += 1
-                log_inference_processing.info(f"next token: {raw_token}, num: {token_number}")
-
-                if raw_token is None:
-                    stop_chunk = new_chunk(role=role, finish_reason="tool_calls" if tool_call_count > 0 else "stop")
-                    yield stop_chunk
-                    break
-
-                if is_conversation_start(raw_token):
-                    states.append(State.CONVERSATION)
-                    in_conversation = True
-                    # role = ""
-                    no_conversation_counter = 0
-                    token_conversation_start_number = token_number
-                    expect_role = True
-
-                    phrase = phrase.rstrip()
-                    if len(phrase) > 0:
-                        log_inference_processing.info(
-                            f"phrase before conversation: {phrase}, last token number: {token_number}")
-
-                    phrase = ""
-                    phrase_tick = None
-
-                elif is_conversation_end(raw_token):
-                    in_conversation = False
-                    remove_state(expected_state=State.CONVERSATION)
-
-                    token_conversation_start_number = -1
-                    expect_role = False
-
-                    phrase = phrase.rstrip()
-                    if len(phrase) == 0:
-                        log.debug(f"empty conversation end, role {role}")
-                        empty_conversation_counter += 1
+                try:
+                    chunk = chunk_queue.get(timeout=20)
+                    if chunk:
+                        chunk.id = unique_id
+                        yield chunk
                     else:
-                        empty_conversation_counter = 0
-                        log_inference_processing.info(
-                            f"phrase before conversation end: {phrase}, last token number: {token_number}")
-                        phrase = ""
-
-                    if empty_conversation_counter > 20:
-                        log.warning(f"many empty conversations ({empty_conversation_counter}), abort inference")
                         stop_inference = True
-
-                    if not stop_inference:
-                        if tool_call_count > 0:
-                            stop_inference = True
-                            log.debug(
-                                f"stop inference by ending conversation with tool calling (count {tool_call_count})")
-
-                    phrase = ""
-                    phrase_tick = None
-
-                elif expect_role and in_conversation and token_number - token_conversation_start_number == 1:
-                    if len(raw_token.rstrip()) > 0:  # conversation role
-                        expect_role = False
-                        prev_role = role
-                        role = raw_token
-                        log.debug(f"apply conversation role {role}, prev {prev_role}")
-                    else:
-                        log.debug("empty token where expected role")
-
-                elif think_is_started(raw_token):
-                    states.append(State.THINK)
-                    # log.debug(f"start thinking by {role}")
-                    if len(possible_tool_call_expression) > 0:
-                        log.warning(f"start think token inside tool_call {possible_tool_call_expression}")
-                    thinking_progress_counter += 1
-                    if thinking_progress_counter == 1:
-                        log_inference_processing.debug("thinking is starting")
-                    else:
-                        log_inference_processing.debug(
-                            f"More thinking for God of thinking!!! {thinking_progress_counter}")
-                elif think_is_over(raw_token):
-                    remove_state(expected_state=State.THINK)
-                    if len(possible_tool_call_expression) > 0:
-                        log.warning(
-                            f"stop think token inside tool_call: '{possible_tool_call_expression}', phrase: {phrase}")
-
-                    if thinking_progress_counter > 0:
-                        thinking_progress_counter -= 1
-                        if thinking_progress_counter == 0:
-                            log_inference_processing.debug("thinking is over")
-                        else:
-                            log_inference_processing.debug(
-                                f"intensity of thinking decreased {thinking_progress_counter}")
-                    # pass
-                elif is_possible_tool_call_start(raw_token):
-                    states.append(State.TOOL_CALL)
-                    log_inference_processing.debug(f"possible tool call start: {raw_token}")
-                    log_inference_processing.info(f"phrase of {role} before tool call: {phrase.rstrip()}")
-                    phrase = ""
-                    possible_tool_call_expression_tick = time.time()
-                    possible_call_in_progress = True
-                    possible_tool_call_expression += raw_token
-                elif is_possible_tool_call_end(raw_token):
-                    remove_state(expected_state=State.TOOL_CALL)
-                    log_inference_processing.debug(f"possible tool call end: {raw_token}")
-                    possible_tool_call_expression += raw_token
-                    parsed_tool_calls: List[ToolCall] = parse_tool_calls(possible_tool_call_expression)
-                    if not parsed_tool_calls:
-                        log_inference_processing.info(f"phrase like tool calls: {possible_tool_call_expression}")
-                        chunk: OpenAICompletionChunkResponse = new_chunk(role=role,
-                                                                         content=possible_tool_call_expression)
-                        yield chunk
-                    else:
-                        if log_inference_processing.isEnabledFor(logging.INFO):
-                            adapter = TypeAdapter(List[ToolCall])
-                            log_inference_processing.info(
-                                f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
-                        chunk: OpenAICompletionChunkResponse = new_chunk(role=role, tool_calls=parsed_tool_calls)
-                        yield chunk
-                    possible_call_in_progress = False
-                    possible_tool_call_expression = ""
-                    possible_tool_call_expression_tick = None
-                    tool_call_count += 1
-                else:
-                    last_state = get_last_state()
-                    if possible_call_in_progress and last_state == State.TOOL_CALL:
-                        possible_tool_call_expression += raw_token
-                        now_time = time.time()
-                        possible_tool_call_expression_time = now_time - possible_tool_call_expression_tick
-                        if possible_tool_call_expression_time >= 10:
-                            possible_tool_call_expression_tick = now_time
-                            log_inference_processing.debug(f"possible tool call part: {possible_tool_call_expression}")
-                    else:
-
-                        if ROLE_ASSISTANT != role:
-                            log.warning(f"unexpected role {role}")
-                            # stop_inference = True
-
-                        phrase = phrase + raw_token
-
-                        now_time = time.time()
-                        if phrase_tick is None:
-                            phrase_tick = now_time
-
-                        phrase_time = now_time - phrase_tick
-                        if phrase_time >= 10:
-                            phrase_tick = now_time
-                            log_inference_processing.debug(f"phrase part: {phrase}")
-                        phrase_end = phrase.endswith("\n")
-                        if phrase_end:
-                            phrase = phrase.rstrip()
-                            if len(phrase) > 0:
-                                log_inference_processing.info(
-                                    f"phrase of {role}: '{phrase.rstrip()}', last token number: {token_number}")
-                                phrase = ""
-
-                        if not last_state:
-                            log.debug("no more conversations")
-                            no_conversation_counter += 1
-                            if no_conversation_counter > 5:
-                                log.debug(
-                                    f"empty conversations limits exceed ({no_conversation_counter}), abort inference")
-                                stop_inference = True
-                        else:
-                            if in_conversation:
-                                chunk = new_chunk(role=role, content=raw_token, thinking=thinking_progress_counter > 0)
-                                yield chunk
-                            else:
-                                log.warning(f"strange phrase of role {role}: {phrase}")
+                except queue.Empty:
+                    pass
+                except TimeoutError:
+                    pass
 
         except Exception as e:
-            log.error(f"inference result processing error: {e}", exc_info=e)
+            log.error(f"chunk processing error: {e}", exc_info=e)
         finally:
             stop_stream_handling.put_nowait(True)
             if not inference_task.done():
-                log_inference_processing.info("waiting for inference to complete")
+                log.info("waiting for inference to complete")
                 try:
                     r = inference_task.result(timeout=20)
                 except Exception as e:
@@ -573,8 +558,7 @@ def new_chunk(role: str, content: str | None = None, thinking: bool = False,
 def new_choices(delta: ChatCompletionChunkDelta, finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
     choice = ChatCompletionChunkChoice(index=0, finish_reason=finish_reason, delta=delta)
     choices = [choice]
-    unique_id = str(uuid.uuid4())
-    return OpenAICompletionChunkResponse(id=unique_id, model=model_name, created=int(time.time()), choices=choices)
+    return OpenAICompletionChunkResponse(model=model_name, created=int(time.time()), choices=choices)
 
 
 def is_conversation_start(text: str) -> bool:
