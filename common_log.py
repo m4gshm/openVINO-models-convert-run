@@ -15,7 +15,7 @@ from fastapi.routing import APIRoute
 logs_dir = "logs"
 os.makedirs(logs_dir, exist_ok=True)
 
-log_format_prefix = "%(asctime)s - %(name)s - %(levelname)s"
+log_format_prefix = "%(asctime)s - %(threadName)s - %(name)s - %(levelname)s"
 log_format_detailed = (log_format_prefix + " - [%(filename)s:%(lineno)d] - %(message)s")
 log_format_simple = (log_format_prefix + " - %(message)s")
 
@@ -71,6 +71,10 @@ LOGGING_CONFIG = {
             "level": "DEBUG",
             "handlers": ["file_http"],
             "propagate": False,
+        },
+        "inference": {
+            "level": "DEBUG",
+            "propagate": True,
         },
         "inference.stream": {
             "level": "DEBUG",

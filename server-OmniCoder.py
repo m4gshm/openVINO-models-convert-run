@@ -53,12 +53,10 @@ default_top_p = 0.95
 default_top_k = 40
 default_min_p = 0.05
 default_repetition_penalty = 1.0
-default_max_new_tokens = 65536
 
 scheduler_config = ov_genai.SchedulerConfig()
 scheduler_config.enable_prefix_caching = True
 scheduler_config.max_num_batched_tokens = 256
-# scheduler_config.num_kv_blocks = 4096
 scheduler_config.max_num_seqs = 1
 scheduler_config.cache_interval_multiplier = None  # 2
 scheduler_config.dynamic_split_fuse = True
@@ -105,6 +103,7 @@ os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 log = logging.getLogger(__name__)
+log_inference = logging.getLogger("inference")
 log_inference_prompt = logging.getLogger("inference.prompt")
 
 app = FastAPI()
@@ -124,7 +123,7 @@ try:
     loaded_pipe_mem = get_current_memory()
     pipe_cost = loaded_pipe_mem - start_mem
 
-    log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, pipe loading cost: {pipe_cost:.2f} MB")
+    log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, pipe loading delta: {pipe_cost:.2f} MB")
 except Exception as e:
     log.error(f"instantiate pipeline error: {e}", exc_info=e)
     sys.exit(1)
@@ -180,7 +179,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
     log_inference_prompt.debug(full_prompt)
 
     generation_config = ov_genai.GenerationConfig()
-    generation_config.max_new_tokens = body.max_tokens or default_max_new_tokens
+    if body.max_completion_tokens:
+        generation_config.max_new_tokens = body.max_completion_tokens
+    if body.max_tokens:
+        generation_config.max_length = body.max_tokens
     generation_config.apply_chat_template = False if full_prompt else True
 
     temp = body.temperature or default_temperature
@@ -193,6 +195,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
         generation_config.top_p = body.top_p or default_top_p
         generation_config.top_k = default_top_k
         generation_config.min_p = default_min_p
+        if body.frequency_penalty:
+            generation_config.frequency_penalty = body.frequency_penalty
+        if body.logprobs:
+            generation_config.logprobs = 1
 
     generation_config.repetition_penalty = default_repetition_penalty
 
@@ -236,6 +242,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.tool_call_count = 0
                     self.token_conversation_start_number: int = -1
                     self.expect_role = False
+                    self.user_phrase_generated = False
                     self.phrase_tick: float | None = None
                     self.possible_tool_call_expression_tick: float | None = None
                     self.phrase = ""
@@ -267,12 +274,12 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     if is_disconnected():
                         log.info("stream finished by user disconnected")
-                        chunk_queue.put_nowait(None)
+                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.STOP
 
                     if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
                         log.debug("stream finished by stop signal")
-                        chunk_queue.put_nowait(None)
+                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.STOP
 
                     try:
@@ -282,11 +289,11 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             stream_status = self.process_token(t, self.token_counter)
                             if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
                                 # log
-                                chunk_queue.put_nowait(None)
+                                # chunk_queue.put_nowait(None)
                                 return stream_status
                     except Exception as e:
                         log.error(f"streamer error: {e}", exc_info=e)
-                        chunk_queue.put_nowait(None)
+                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.CANCEL
 
                     return StreamingStatus.RUNNING
@@ -303,7 +310,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         phrase = self.phrase.rstrip()
                         if len(phrase) > 0:
                             log.info(
-                                f"phrase before conversation: {phrase}, last token number: {token_number}")
+                                f"phrase before conversation: '{phrase}', last token num: {token_number}")
 
                         self.__clean_phrase()
 
@@ -321,7 +328,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         else:
                             self.empty_conversation_counter = 0
                             log.info(
-                                f"phrase before conversation end: {phrase}, last token number: {token_number}")
+                                f"{self.role} conversation end by: {phrase}, last token num: {token_number}")
                             self.__clean_phrase()
 
                         if self.empty_conversation_counter > 20:
@@ -339,9 +346,11 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             self.expect_role = False
                             self.prev_role = self.role
                             self.role = token
-                            log.debug(f"apply conversation role {self.role}, prev {self.prev_role}")
+                            if self.role == ROLE_USER:
+                                self.user_phrase_generated = True
+                            log.debug(f"set conversation role {self.role}, prev {self.prev_role}")
                         else:
-                            log.debug("empty token where expected role")
+                            log.debug("empty role for conversation start")
 
                     elif think_is_started(token):
                         self.states.append(State.THINK)
@@ -357,7 +366,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         self.__remove_state(expected_state=State.THINK)
                         if len(self.possible_tool_call_expression) > 0:
                             log.warning(
-                                f"stop think token inside tool_call: '{self.possible_tool_call_expression}', phrase: {self.phrase}")
+                                f"stop think token inside tool_call: '{self.possible_tool_call_expression}', phrase: '{self.phrase}'")
 
                         if self.thinking_progress_counter > 0:
                             self.thinking_progress_counter -= 1
@@ -369,7 +378,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     elif is_possible_tool_call_start(token):
                         self.states.append(State.TOOL_CALL)
                         log.debug(f"possible tool call start: {token}")
-                        log.info(f"phrase of {self.role} before tool call: {self.phrase.rstrip()}")
+
+                        phrase = self.phrase.rstrip()
+                        if len(phrase) > 0:
+                            log.info(f"{self.role} phrase before tool call: '{phrase}'")
 
                         self.__clean_phrase()
 
@@ -422,14 +434,14 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             phrase_time = now_time - self.phrase_tick
                             if phrase_time >= 10:
                                 self.phrase_tick = now_time
-                                log.debug(f"phrase part: {self.phrase}")
+                                log.debug(f"phrase part: '{self.phrase.rstrip()}'")
 
                             phrase_end = self.phrase.endswith("\n")
                             if phrase_end:
                                 phrase = self.phrase.rstrip()
                                 if len(phrase) > 0:
                                     log.info(
-                                        f"phrase of {self.role}: '{phrase.rstrip()}', last token number: {token_number}")
+                                        f"{self.role} phrase: '{phrase}', last token num: {token_number}")
                                     self.__clean_phrase()
 
                             if not last_state:
@@ -445,27 +457,38 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                                       thinking=self.thinking_progress_counter > 0)
                                     chunk_queue.put(chunk)
                                 else:
-                                    log.warning(f"strange phrase of role {self.role}: {self.phrase}")
+                                    log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
                     return None
 
             result: VLMDecodedResults
             try:
                 pipe.start_chat()
-                log.info(f"inference starting")
+                if log_inference.isEnabledFor(logging.DEBUG):
+                    log_inference.debug(
+                        f"inference starting with parameters max_length={generation_config.max_length}, "
+                        f"max_new_tokens={generation_config.max_new_tokens}, "
+                        f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
+                        f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
+                        f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
+                        f"presence_penalty={generation_config.presence_penalty:.2f}, "
+                        f"frequency_penalty={generation_config.frequency_penalty:.2f}")
+                else:
+                    log_inference.info(f"inference starting")
+
                 before_generate_mem = get_current_memory()
                 streamer = Streamer(start_thinking=is_prompt_start_thinking(full_prompt))
                 result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
-
+                chunk_queue.put_nowait(None)
                 after_generate_mem = get_current_memory()
                 generate_cost = after_generate_mem - before_generate_mem
-                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate cost: {generate_cost:.2f} MB")
+                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
 
-                if log.isEnabledFor(logging.DEBUG):
-                    log.debug(f"inference finished reason: {result.finish_reasons}, result:{result.texts}")
+                if log_inference.isEnabledFor(logging.DEBUG):
+                    log_inference.debug(f"inference finished, reason={result.finish_reasons}, result={result.texts}")
                 else:
-                    log.info(f"inference finished")
+                    log_inference.info(f"inference finished")
             except Exception as e:
-                log.error(f"inference error: {e}", exc_info=e)
+                log_inference.error(f"inference error: {e}", exc_info=e)
                 raise
             finally:
                 pipe.finish_chat()
