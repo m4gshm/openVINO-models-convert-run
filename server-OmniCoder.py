@@ -234,7 +234,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.possible_tool_call_expression = ""
                     self.possible_call_in_progress = False
                     self.tool_call_count = 0
-                    self.token_number = 0
                     self.token_conversation_start_number: int = -1
                     self.expect_role = False
                     self.phrase_tick: float | None = None
@@ -243,7 +242,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.empty_conversation_counter = 0
                     self.no_conversation_counter = 0
                     self.stop_inference = False
-                    self.counter = 0
+                    self.token_counter = 0
                     self.started = False
 
                     # by default conversation is opened by assistant in chat template
@@ -278,9 +277,9 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     try:
                         for t in decoded_tokens:
-                            self.counter += 1
-                            log.debug(f"token '{t}', num {self.counter}")
-                            stream_status = self.process_token(t)
+                            self.token_counter += 1
+                            log.debug(f"token '{t}', num {self.token_counter}")
+                            stream_status = self.process_token(t, self.token_counter)
                             if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
                                 # log
                                 chunk_queue.put_nowait(None)
@@ -292,19 +291,19 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     return StreamingStatus.RUNNING
 
-                def process_token(self, token: str) -> StreamingStatus | None:
+                def process_token(self, token: str, token_number: int) -> StreamingStatus | None:
                     log = self.log
                     if is_conversation_start(token):
                         self.states.append(State.CONVERSATION)
                         self.in_conversation = True
                         self.no_conversation_counter = 0
-                        self.token_conversation_start_number = self.token_number
+                        self.token_conversation_start_number = token_number
                         self.expect_role = True
 
                         phrase = self.phrase.rstrip()
                         if len(phrase) > 0:
                             log.info(
-                                f"phrase before conversation: {phrase}, last token number: {self.token_number}")
+                                f"phrase before conversation: {phrase}, last token number: {token_number}")
 
                         self.__clean_phrase()
 
@@ -322,7 +321,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         else:
                             self.empty_conversation_counter = 0
                             log.info(
-                                f"phrase before conversation end: {phrase}, last token number: {self.token_number}")
+                                f"phrase before conversation end: {phrase}, last token number: {token_number}")
                             self.__clean_phrase()
 
                         if self.empty_conversation_counter > 20:
@@ -335,7 +334,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 f"stop inference by ending conversation with tool calling (count {self.tool_call_count})")
                             return StreamingStatus.TOOL_CALL_STOP
                         return None
-                    elif self.expect_role and self.in_conversation and self.token_number - self.token_conversation_start_number == 1:
+                    elif self.expect_role and self.in_conversation and token_number - self.token_conversation_start_number == 1:
                         if len(token.rstrip()) > 0:  # conversation role
                             self.expect_role = False
                             self.prev_role = self.role
@@ -430,7 +429,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 phrase = self.phrase.rstrip()
                                 if len(phrase) > 0:
                                     log.info(
-                                        f"phrase of {self.role}: '{phrase.rstrip()}', last token number: {self.token_number}")
+                                        f"phrase of {self.role}: '{phrase.rstrip()}', last token number: {token_number}")
                                     self.__clean_phrase()
 
                             if not last_state:
