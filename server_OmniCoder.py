@@ -8,11 +8,13 @@
 # ]
 # ///
 import time
-import typing
 import uuid
 from collections.abc import Sequence
 from enum import Enum
+from logging import Logger
+from typing import SupportsInt, Optional
 
+import uvicorn
 from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import StreamingStatus
 from pydantic import TypeAdapter
@@ -20,39 +22,33 @@ from pydantic import TypeAdapter
 from commom_metric_mem import get_current_memory
 from common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
     OpenAICompletionChunkResponse, \
-    ChatCompletionChunkChoice, ChatCompletionChunkDelta, ToolCall, FunctionCall, OpenAICompletionResponse, \
+    ChatCompletionChunkChoice, ToolCall, OpenAICompletionResponse, \
     ChatCompletionChoice, ChatCompletionMessage, ResponseFormat
+from parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, think_is_over, \
+    is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
 
 model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"./models/{model_name}/1"
 
 reasoning_supported = True
 
+ROLE_TOOL = 'tool'
 ROLE_ASSISTANT = "assistant"
 ROLE_USER = "user"
-ROLES: set[str] = {ROLE_ASSISTANT, ROLE_USER}
-
-TOOL_CALL_START = "<tool_call>"
-TOOL_CALL_END = "</tool_call>"
-REASONING_START = "<think>"
-REASONING_END = "</think>"
-
-CONVERSATION_START = "<|im_start|>"
-CONVERSATION_END = "<|im_end|>"
-
-ERASED_TOKENS: set[str] = {TOOL_CALL_START, TOOL_CALL_END, REASONING_START, REASONING_END, CONVERSATION_START,
-                           CONVERSATION_END} | ROLES
+ROLES: set[str] = {ROLE_ASSISTANT, ROLE_USER, ROLE_TOOL}
 
 device_name = "GPU"
 model_cache_dir = f"./models_cache/{model_name}"
 
 import openvino_genai as ov_genai
 
+max_repeated_cool_calls_with_the_same_result = 5
+
 default_temperature = 0.4
 default_top_p = 0.95
 default_top_k = 40
 default_min_p = 0.05
-default_repetition_penalty = 1.0
+default_repetition_penalty = 1.1
 
 scheduler_config = ov_genai.SchedulerConfig()
 scheduler_config.enable_prefix_caching = True
@@ -84,18 +80,16 @@ import re
 import sys
 import itertools
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Any, Generator, List
+from typing import Any, Generator, List
 
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
 from pydantic.json import pydantic_encoder
 
-from common_log import log_format_simple, log_format_prefix, LoggingRoute
+from common_log import LoggingRoute, log_format_prefix, log_format_simple
 
 executor = ThreadPoolExecutor()
-tool_call_counter = itertools.count(start=0)
 
 # os.environ["LOG_LEVEL"] = "4"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
@@ -117,7 +111,7 @@ log.debug(f"consumed memory: {start_mem:.2f} MB")
 try:
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
     # pipe = ov_genai.ContinuousBatchingPipeline(models_path=model_path, device=device_name, **config)
-    default_generation_config = pipe.get_generation_config()
+
     log.info(f"model loaded successfully")
 
     loaded_pipe_mem = get_current_memory()
@@ -129,9 +123,8 @@ except Exception as e:
     sys.exit(1)
 
 
-def is_erase(token: str) -> bool:
-    service_token: bool = token.strip() in ERASED_TOKENS
-    return service_token
+def to_text_event(chunk: OpenAICompletionChunkResponse):
+    return f"data: {chunk.model_dump_json()}\n\n"
 
 
 @app.post("/v1/chat/completions")
@@ -152,6 +145,30 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     body.response_format = ResponseFormat(type="json_object")
     messages = body.messages
+
+    tool_call_stats = {}
+    for i, message in enumerate(reversed(messages)):
+        if message.role == ROLE_TOOL:
+            name = check_loop_call(i, message, tool_call_stats)
+            if name:
+                # log
+                msg = f"Multiple calls of the '{name}' tool result in the same response. Generation is interrupted."
+                if body.stream:
+                    return OpenAICompletionChunkResponse(id=str(uuid.uuid4()), created=int(time.time()),
+                                                         model=model_name, choices=[
+                            ChatCompletionChunkChoice(index=0, finish_reason="stop",
+                                                      delta=ChatCompletionMessage(role=ROLE_ASSISTANT,
+                                                                                  content=msg))])
+                else:
+                    return OpenAICompletionResponse(id=str(uuid.uuid4()), created=int(time.time()),
+                                                    model=model_name, choices=[
+                            ChatCompletionChoice(index=0, finish_reason="stop",
+                                                 message=ChatCompletionMessage(
+                                                     role=ROLE_ASSISTANT, content=msg))])
+
+            else:
+                # log
+                pass
 
     log.info(f"inbound history messages {len(messages)}")
 
@@ -195,16 +212,30 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
         generation_config.top_p = body.top_p or default_top_p
         generation_config.top_k = default_top_k
         generation_config.min_p = default_min_p
+
         if body.frequency_penalty:
             generation_config.frequency_penalty = body.frequency_penalty
+
         if body.logprobs:
             generation_config.logprobs = 1
 
     generation_config.repetition_penalty = default_repetition_penalty
 
+    # generation_config.num_beams = 15          # Всего 15 лучей-кандидатов
+    # generation_config.num_beam_groups = 3     # Разделяем на 3 независимые группы (по 5 лучей в каждой)
+    # generation_config.diversity_penalty = 1.5 # Штраф за генерацию повторяющихся токенов между группами
+
     def stream_generator() -> Generator[str, None, None]:
+        # test_chunk = OpenAICompletionChunkResponse(created=0, model=model_name, choices=[
+        #     ChatCompletionChunkChoice(index=0,finish_reason="stop", delta=ChatCompletionChunkDelta(role="choice",
+        #                                                                       refusal="refusal1")),
+        #     ChatCompletionChunkChoice(index=1,finish_reason="stop", delta=ChatCompletionChunkDelta(role="assistant",
+        #                                                                       refusal="refusal2")),
+        # ])
+        # yield f"data: {test_chunk.model_dump_json()}\n\n"
+
         for chunk in chunk_generator():
-            yield f"data: {chunk.model_dump_json()}\n\n"
+            yield to_text_event(chunk)
 
     def chunk_generator() -> Generator[OpenAICompletionChunkResponse, None, None]:
         chunk_queue: queue.Queue[OpenAICompletionChunkResponse | None] = queue.Queue()
@@ -246,6 +277,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.phrase_tick: float | None = None
                     self.possible_tool_call_expression_tick: float | None = None
                     self.phrase = ""
+                    self.full_generated = ""
                     self.empty_conversation_counter = 0
                     self.no_conversation_counter = 0
                     self.stop_inference = False
@@ -261,9 +293,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         self.states.append(State.THINK)
 
                 def end(self) -> None:
+                    self.full_generated = ""
                     self.log.debug("stream end")
 
-                def write(self, tokens: Sequence[typing.SupportsInt]) -> StreamingStatus:
+                def write(self, tokens: Sequence[SupportsInt]) -> StreamingStatus:
                     log = self.log
 
                     if not self.started:
@@ -286,6 +319,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         for t in decoded_tokens:
                             self.token_counter += 1
                             log.debug(f"token '{t}', num {self.token_counter}")
+                            self.full_generated += t
                             stream_status = self.process_token(t, self.token_counter)
                             if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
                                 # log
@@ -316,7 +350,14 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     elif is_conversation_end(token):
                         self.in_conversation = False
-                        self.__remove_state(expected_state=State.CONVERSATION)
+                        if self.__get_last_state() == State.TOOL_CALL:
+                            # sometimes the Qwen3.5 ends tool call by end conversation token
+                            # log
+                            self.__remove_state(expected_state=State.TOOL_CALL)
+                            chunk = self.handle_possible_tool_call(log)
+                            chunk_queue.put(chunk)
+                        else:
+                            self.__remove_state(expected_state=State.CONVERSATION)
 
                         self.token_conversation_start_number = -1
                         self.expect_role = False
@@ -392,24 +433,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         self.__remove_state(expected_state=State.TOOL_CALL)
                         log.debug(f"possible tool call end: {token}")
                         self.possible_tool_call_expression += token
-                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
-                        if not parsed_tool_calls:
-                            log.info(
-                                f"phrase like tool calls: {self.possible_tool_call_expression}")
-                            chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
-                        else:
-                            if log.isEnabledFor(logging.INFO):
-                                adapter = TypeAdapter(List[ToolCall])
-                                log.info(
-                                    f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
-
-                            self.tool_call_count += 1
-                            chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
-
-                        self.possible_call_in_progress = False
-                        self.possible_tool_call_expression = ""
-                        self.possible_tool_call_expression_tick = None
-
+                        chunk = self.handle_possible_tool_call(log)
                         chunk_queue.put(chunk)
                     else:
                         last_state = self.__get_last_state()
@@ -419,8 +443,19 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             possible_tool_call_expression_time = now_time - self.possible_tool_call_expression_tick
                             if possible_tool_call_expression_time >= 10:
                                 self.possible_tool_call_expression_tick = now_time
-                                log.debug(
+                                log.info(
                                     f"possible tool call part: {self.possible_tool_call_expression}")
+                                words = self.possible_tool_call_expression.split(" ")
+                                word_dict: dict[str, Any] = {}
+                                for i, word in enumerate(words):
+                                    word_stat: dict[str, Any] = word_dict.get(word, {})
+                                    count = word_stat.get("count", 0) + 1
+                                    word_stat["count"] = count
+                                    position = word_stat.get("position", [])
+                                    position.append(i)
+                                    word_stat["position"] = position
+
+
                         else:
                             if ROLE_ASSISTANT != self.role:
                                 log.warning(f"unexpected role {self.role}")
@@ -459,6 +494,26 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 else:
                                     log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
                     return None
+
+                def handle_possible_tool_call(self, log: Logger) -> OpenAICompletionChunkResponse:
+                    parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
+                    if not parsed_tool_calls:
+                        log.info(
+                            f"phrase like tool calls: {self.possible_tool_call_expression}")
+                        chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
+                    else:
+                        if log.isEnabledFor(logging.INFO):
+                            adapter = TypeAdapter(List[ToolCall])
+                            log.info(
+                                f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
+
+                        self.tool_call_count += 1
+                        chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
+
+                    self.possible_call_in_progress = False
+                    self.possible_tool_call_expression = ""
+                    self.possible_tool_call_expression_tick = None
+                    return chunk
 
             result: VLMDecodedResults
             try:
@@ -543,29 +598,43 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     reasoning_content += delta.reasoning_content
                     tool_calls += delta.tool_calls
 
-        unique_id = str(uuid.uuid4())
         message = ChatCompletionMessage()
         message.role = ROLE_ASSISTANT
         message.content = content
         message.reasoning_content = reasoning_content
         message.tool_calls = tool_calls
         choice = ChatCompletionChoice(index=0, finish_reason=finish_reason, message=message)
-        return OpenAICompletionResponse(id=unique_id, created=int(time.time()), model=model_name,
+        return OpenAICompletionResponse(id=str(uuid.uuid4()), created=int(time.time()), model=model_name,
                                         choices=[choice])
 
 
-def think_is_over(subword: str) -> bool:
-    return subword.strip() == REASONING_END
+def check_loop_call(i: int, message: ChatCompletionMessageParam, tool_call_stats: dict[Any, Any]) -> str | None:
+    tool_call_id = message.tool_call_id
+    name = message.name
+    content = message.content
+    if isinstance(content, str):
+        tool_call_stat: dict[str, Any] = tool_call_stats.get(name, {})
+        contents: dict[str, Any] = tool_call_stat.get("content", {})
+        content_meta: dict[str, Any] = contents.get(content, {})
+        count = content_meta.get("count", 0) + 1
+        content_meta["count"] = count
+        indexes = content_meta.get("indexes", [])
+        indexes.append(i)
+        content_meta["indexes"] = indexes
+        contents[content] = content_meta
+        tool_call_stat["content"] = contents
+        tool_call_stats[name] = tool_call_stat
 
-
-def think_is_started(subword: str) -> bool:
-    return subword.strip() == REASONING_START
+        loop_tool_call = count >= max_repeated_cool_calls_with_the_same_result
+    else:
+        loop_tool_call = False
+    return name if loop_tool_call else None
 
 
 def new_chunk(role: str, content: str | None = None, thinking: bool = False,
               tool_calls: Optional[List[ToolCall]] = None,
               finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
-    delta = ChatCompletionChunkDelta()
+    delta = ChatCompletionMessage()
     delta.role = role
     if thinking:
         delta.reasoning_content = content
@@ -577,69 +646,10 @@ def new_chunk(role: str, content: str | None = None, thinking: bool = False,
     return new_choices(delta=delta, finish_reason=finish_reason)
 
 
-def new_choices(delta: ChatCompletionChunkDelta, finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
+def new_choices(delta: ChatCompletionMessage, finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
     choice = ChatCompletionChunkChoice(index=0, finish_reason=finish_reason, delta=delta)
     choices = [choice]
     return OpenAICompletionChunkResponse(model=model_name, created=int(time.time()), choices=choices)
-
-
-def is_conversation_start(text: str) -> bool:
-    return CONVERSATION_START == text.strip()
-
-
-def is_conversation_end(text: str) -> bool:
-    return CONVERSATION_END == text.strip()
-
-
-def is_possible_tool_call_start(text: str) -> bool:
-    return TOOL_CALL_START == text.strip()
-
-
-def is_possible_tool_call_end(text: str) -> bool:
-    return TOOL_CALL_END == text.strip()
-
-
-def is_prompt_start_thinking(prompt: str) -> bool:
-    return prompt.endswith(REASONING_START, 0, len(prompt) - 1) if prompt.endswith(
-        '\n') else prompt.endswith(REASONING_START)
-
-
-def parse_tool_calls(text: str) -> List[ToolCall]:
-    """Parses Qwen3-Coder style unique XML tool call blocks."""
-    tool_call_blocks = re.findall(f"{TOOL_CALL_START}(.*?){TOOL_CALL_END}", text, re.DOTALL)
-    ts = int(time.time())
-
-    parsed_calls: list[ToolCall] = []
-    for i, call_block in enumerate(tool_call_blocks):
-        func_name = get_func_name(call_block)
-        if func_name is None:
-            # log
-            continue
-        arguments = get_arguments(call_block)
-        call_id = next(tool_call_counter)
-        parsed_calls.append(ToolCall(id=f"call_{ts}_{call_id}_{func_name}",
-                                     function=FunctionCall(name=func_name, arguments=arguments)))
-    return parsed_calls
-
-
-def get_arguments(call_block) -> str:
-    param_pattern = r"<parameter=(.*?)>(.*?)</parameter>"
-    parameters = re.findall(param_pattern, call_block, re.DOTALL)
-
-    arguments = {}
-    for param_name, param_value in parameters:
-        arguments[param_name.strip()] = param_value.strip()
-    if isinstance(arguments, dict):
-        arguments_str = json.dumps(arguments, ensure_ascii=False)
-    else:
-        arguments_str = str(arguments)
-    return arguments_str
-
-
-def get_func_name(call_block) -> str | None:
-    func_match = re.search(r"<function=(.*?)>", call_block)
-    func_name = func_match.group(1).strip() if func_match else None
-    return func_name
 
 
 if __name__ == "__main__":
