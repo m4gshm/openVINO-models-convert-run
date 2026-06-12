@@ -7,39 +7,46 @@
 #     "typing>=3.10.0.0",
 # ]
 # ///
+import asyncio
+import logging.config
+import os
+import queue
+import sys
 import time
 import uuid
 from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
+from typing import Any, Generator, List
 from typing import SupportsInt, Optional
 
+import openvino_genai as ov_genai
 import uvicorn
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from openvino_genai import Tokenizer
+from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
 from openvino_genai.py_openvino_genai import StreamingStatus
 from pydantic import TypeAdapter
+from pydantic.json import pydantic_encoder
 
-from commom_metric_mem import get_current_memory
-from common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
+from agent.commom_metric_mem import get_current_memory
+from agent.common.roles import ROLE_ASSISTANT, ROLE_USER, ROLE_MIDDLEWARE_WARNING
+from agent.common_log import LoggingRoute, log_format_prefix, log_format_simple
+from agent.common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
     ToolCall, OpenAICompletionResponse, \
-    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION
-from parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, think_is_over, \
+    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION, CHAT_COMPLETION_CHUNK
+from agent.parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
+    think_is_over, \
     is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
-from preprocess_tool_call import PreprocessToolCall
-
-model_name = "OmniCoder-9B-int4-sym-g128"
-model_path = f"./models/{model_name}/1"
-
-reasoning_supported = True
-
-ROLE_TOOL = 'tool'
-ROLE_ASSISTANT = "assistant"
-ROLE_USER = "user"
-ROLES: set[str] = {ROLE_ASSISTANT, ROLE_USER, ROLE_TOOL}
+from agent.preprocess_tool_call import PreprocessToolCall
 
 device_name = "GPU"
-model_cache_dir = f"./models_cache/{model_name}"
 
-import openvino_genai as ov_genai
+reasoning_supported = True
+model_name = "OmniCoder-9B-int4-sym-g128"
+model_path = f"./models/{model_name}/1"
+model_cache_dir = f"./models_cache/{model_name}"
 
 default_temperature = 0.4
 default_top_p = 0.95
@@ -68,23 +75,6 @@ config = {
     # "ATTENTION_BACKEND": "SDPA",
 }
 
-import asyncio
-import logging.config
-import os
-import queue
-import sys
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Generator, List
-
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
-from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
-from pydantic.json import pydantic_encoder
-
-from common_log import LoggingRoute, log_format_prefix, log_format_simple
-
-executor = ThreadPoolExecutor()
-
 # os.environ["LOG_LEVEL"] = "4"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
@@ -93,9 +83,6 @@ os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 log = logging.getLogger(__name__)
 log_inference = logging.getLogger("inference")
 log_inference_prompt = logging.getLogger("inference.prompt")
-
-app = FastAPI()
-app.router.route_class = LoggingRoute
 
 log.info(f"model loading {model_path}, device: {device_name}, scheduler_config: {scheduler_config.to_string()}")
 
@@ -116,9 +103,9 @@ except Exception as e:
     log.error(f"instantiate pipeline error: {e}", exc_info=e)
     sys.exit(1)
 
-
-def to_text_event(chunk: OpenAICompletionResponse):
-    return f"data: {chunk.model_dump_json()}\n\n"
+app = FastAPI()
+app.router.route_class = LoggingRoute
+executor = ThreadPoolExecutor()
 
 
 @app.post("/v1/chat/completions")
@@ -141,29 +128,19 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
     body.response_format = ResponseFormat(type="json_object")
     messages = body.messages
     preprocess_tool_call = PreprocessToolCall()
-    for i, message in enumerate(reversed(messages)):
-        if message.role == ROLE_TOOL:
-            looped_function = preprocess_tool_call.check_loop_call(i, message)
-            if looped_function:
-                response_id = str(uuid.uuid4())
-                response_time = int(time.time())
-                # log
-                msg = (f"Multiple calls of the '{looped_function.name}' tool "
-                       f"result in the same response '{looped_function.result}'. Generation is interrupted.")
-                c_delta: ChatCompletionMessage | None = None
-                c_message: ChatCompletionMessage | None = None
-                stream = body.stream == True
-                if stream:
-                    c_delta = ChatCompletionMessage(content=msg)
-                else:
-                    c_message = ChatCompletionMessage(content=msg)
-                return OpenAICompletionResponse(object=CHAT_COMPLETION, id=response_id, created=response_time,
-                                                model=model_name,
-                                                choices=[ChatCompletionChoice(delta=c_delta, message=c_message)])
-
-            else:
-                # log
-                pass
+    looped_function = preprocess_tool_call.check_loop_calls(messages)
+    if looped_function:
+        # log
+        result = ChatCompletionMessage(role=ROLE_ASSISTANT,
+                                       content=(f"Multiple calls of the '{looped_function.name}' tool "
+                                                f"result in the same response '{looped_function.result}'. "
+                                                f"Generation is interrupted."))
+        object = CHAT_COMPLETION_CHUNK if body.stream else CHAT_COMPLETION
+        response = OpenAICompletionResponse(object=object, id=str(uuid.uuid4()), created=int(time.time()),
+                                            model=model_name, choices=[
+                ChatCompletionChoice(delta=(result if body.stream else None),
+                                     message=(result if not body.stream else None))])
+        return response
 
     log.info(f"inbound history messages {len(messages)}")
 
@@ -218,7 +195,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     def stream_generator() -> Generator[str, None, None]:
         for chunk in chunk_generator():
-            yield to_text_event(chunk)
+            yield f"data: {chunk.model_dump_json()}\n\n"
 
     def chunk_generator() -> Generator[OpenAICompletionResponse, None, None]:
         chunk_queue: queue.Queue[OpenAICompletionResponse | None] = queue.Queue()

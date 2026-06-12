@@ -12,6 +12,7 @@ src_models/google
 src_models/nomic-ai
 src_models/ministralai
 src_models/ricdomolm
+src_models/codellama
 models_cache
 models/Qwen*/1
 models/gpt-oss-20b*/1
