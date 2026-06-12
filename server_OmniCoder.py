@@ -11,7 +11,6 @@ import time
 import uuid
 from collections.abc import Sequence
 from enum import Enum
-from logging import Logger
 from typing import SupportsInt, Optional
 
 import uvicorn
@@ -26,6 +25,7 @@ from common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, Ch
     ChatCompletionChoice, ChatCompletionMessage, ResponseFormat
 from parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, think_is_over, \
     is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
+from preprocess_tool_call import PreprocessToolCall
 
 model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"./models/{model_name}/1"
@@ -41,8 +41,6 @@ device_name = "GPU"
 model_cache_dir = f"./models_cache/{model_name}"
 
 import openvino_genai as ov_genai
-
-max_repeated_cool_calls_with_the_same_result = 5
 
 default_temperature = 0.4
 default_top_p = 0.95
@@ -72,13 +70,10 @@ config = {
 }
 
 import asyncio
-import json
 import logging.config
 import os
 import queue
-import re
 import sys
-import itertools
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Generator, List
 
@@ -145,14 +140,14 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     body.response_format = ResponseFormat(type="json_object")
     messages = body.messages
-
-    tool_call_stats = {}
+    preprocess_tool_call = PreprocessToolCall()
     for i, message in enumerate(reversed(messages)):
         if message.role == ROLE_TOOL:
-            name = check_loop_call(i, message, tool_call_stats)
-            if name:
+            looped_function = preprocess_tool_call.check_loop_call(i, message)
+            if looped_function:
                 # log
-                msg = f"Multiple calls of the '{name}' tool result in the same response. Generation is interrupted."
+                msg = (f"Multiple calls of the '{looped_function.name}' tool "
+                       f"result in the same response '{looped_function.result}'. Generation is interrupted.")
                 if body.stream:
                     return OpenAICompletionChunkResponse(id=str(uuid.uuid4()), created=int(time.time()),
                                                          model=model_name, choices=[
@@ -221,19 +216,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     generation_config.repetition_penalty = default_repetition_penalty
 
-    # generation_config.num_beams = 15          # Всего 15 лучей-кандидатов
-    # generation_config.num_beam_groups = 3     # Разделяем на 3 независимые группы (по 5 лучей в каждой)
-    # generation_config.diversity_penalty = 1.5 # Штраф за генерацию повторяющихся токенов между группами
-
     def stream_generator() -> Generator[str, None, None]:
-        # test_chunk = OpenAICompletionChunkResponse(created=0, model=model_name, choices=[
-        #     ChatCompletionChunkChoice(index=0,finish_reason="stop", delta=ChatCompletionChunkDelta(role="choice",
-        #                                                                       refusal="refusal1")),
-        #     ChatCompletionChunkChoice(index=1,finish_reason="stop", delta=ChatCompletionChunkDelta(role="assistant",
-        #                                                                       refusal="refusal2")),
-        # ])
-        # yield f"data: {test_chunk.model_dump_json()}\n\n"
-
         for chunk in chunk_generator():
             yield to_text_event(chunk)
 
@@ -307,12 +290,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     if is_disconnected():
                         log.info("stream finished by user disconnected")
-                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.STOP
 
                     if not stop_stream_handling.empty() and stop_stream_handling.get_nowait():
                         log.debug("stream finished by stop signal")
-                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.STOP
 
                     try:
@@ -323,17 +304,36 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             stream_status = self.process_token(t, self.token_counter)
                             if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
                                 # log
-                                # chunk_queue.put_nowait(None)
                                 return stream_status
                     except Exception as e:
                         log.error(f"streamer error: {e}", exc_info=e)
-                        # chunk_queue.put_nowait(None)
                         return StreamingStatus.CANCEL
 
                     return StreamingStatus.RUNNING
 
                 def process_token(self, token: str, token_number: int) -> StreamingStatus | None:
                     log = self.log
+
+                    def handle_possible_tool_call() -> OpenAICompletionChunkResponse:
+                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
+                        if not parsed_tool_calls:
+                            log.info(
+                                f"phrase like tool calls: {self.possible_tool_call_expression}")
+                            chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
+                        else:
+                            if log.isEnabledFor(logging.INFO):
+                                adapter = TypeAdapter(List[ToolCall])
+                                log.info(
+                                    f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
+
+                            self.tool_call_count += 1
+                            chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
+
+                        self.possible_call_in_progress = False
+                        self.possible_tool_call_expression = ""
+                        self.possible_tool_call_expression_tick = None
+                        return chunk
+
                     if is_conversation_start(token):
                         self.states.append(State.CONVERSATION)
                         self.in_conversation = True
@@ -351,11 +351,16 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     elif is_conversation_end(token):
                         self.in_conversation = False
                         if self.__get_last_state() == State.TOOL_CALL:
-                            # sometimes the Qwen3.5 ends tool call by end conversation token
-                            # log
+                            # sometimes Qwen3.5 ends tool call by end conversation token
+                            if log.isEnabledFor(logging.DEBUG):
+                                log.debug(
+                                    f"tool call ended by end conversation token: {self.possible_tool_call_expression}")
+                            else:
+                                log.info("tool call ended by end conversation token")
                             self.__remove_state(expected_state=State.TOOL_CALL)
-                            chunk = self.handle_possible_tool_call(log)
-                            chunk_queue.put(chunk)
+                            chunk = handle_possible_tool_call()
+                            if chunk:
+                                chunk_queue.put(chunk)
                         else:
                             self.__remove_state(expected_state=State.CONVERSATION)
 
@@ -433,7 +438,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         self.__remove_state(expected_state=State.TOOL_CALL)
                         log.debug(f"possible tool call end: {token}")
                         self.possible_tool_call_expression += token
-                        chunk = self.handle_possible_tool_call(log)
+                        chunk = handle_possible_tool_call()
                         chunk_queue.put(chunk)
                     else:
                         last_state = self.__get_last_state()
@@ -494,26 +499,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 else:
                                     log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
                     return None
-
-                def handle_possible_tool_call(self, log: Logger) -> OpenAICompletionChunkResponse:
-                    parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
-                    if not parsed_tool_calls:
-                        log.info(
-                            f"phrase like tool calls: {self.possible_tool_call_expression}")
-                        chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
-                    else:
-                        if log.isEnabledFor(logging.INFO):
-                            adapter = TypeAdapter(List[ToolCall])
-                            log.info(
-                                f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
-
-                        self.tool_call_count += 1
-                        chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
-
-                    self.possible_call_in_progress = False
-                    self.possible_tool_call_expression = ""
-                    self.possible_tool_call_expression_tick = None
-                    return chunk
 
             result: VLMDecodedResults
             try:
@@ -606,29 +591,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
         choice = ChatCompletionChoice(index=0, finish_reason=finish_reason, message=message)
         return OpenAICompletionResponse(id=str(uuid.uuid4()), created=int(time.time()), model=model_name,
                                         choices=[choice])
-
-
-def check_loop_call(i: int, message: ChatCompletionMessageParam, tool_call_stats: dict[Any, Any]) -> str | None:
-    tool_call_id = message.tool_call_id
-    name = message.name
-    content = message.content
-    if isinstance(content, str):
-        tool_call_stat: dict[str, Any] = tool_call_stats.get(name, {})
-        contents: dict[str, Any] = tool_call_stat.get("content", {})
-        content_meta: dict[str, Any] = contents.get(content, {})
-        count = content_meta.get("count", 0) + 1
-        content_meta["count"] = count
-        indexes = content_meta.get("indexes", [])
-        indexes.append(i)
-        content_meta["indexes"] = indexes
-        contents[content] = content_meta
-        tool_call_stat["content"] = contents
-        tool_call_stats[name] = tool_call_stat
-
-        loop_tool_call = count >= max_repeated_cool_calls_with_the_same_result
-    else:
-        loop_tool_call = False
-    return name if loop_tool_call else None
 
 
 def new_chunk(role: str, content: str | None = None, thinking: bool = False,
