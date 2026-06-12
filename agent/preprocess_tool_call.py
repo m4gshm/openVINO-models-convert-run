@@ -38,7 +38,7 @@ class PreprocessToolCall:
             else:
                 break
 
-            if repeated >= self.max_messages_to_check:
+            if repeated >= self.max_repeated_tool_calls_with_the_same_result:
                 return FunctionCallResult(name=name, result=content)
 
         return None
