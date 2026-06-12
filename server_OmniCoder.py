@@ -20,9 +20,8 @@ from pydantic import TypeAdapter
 
 from commom_metric_mem import get_current_memory
 from common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
-    OpenAICompletionChunkResponse, \
-    ChatCompletionChunkChoice, ToolCall, OpenAICompletionResponse, \
-    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat
+    ToolCall, OpenAICompletionResponse, \
+    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION
 from parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, think_is_over, \
     is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
 from preprocess_tool_call import PreprocessToolCall
@@ -118,7 +117,7 @@ except Exception as e:
     sys.exit(1)
 
 
-def to_text_event(chunk: OpenAICompletionChunkResponse):
+def to_text_event(chunk: OpenAICompletionResponse):
     return f"data: {chunk.model_dump_json()}\n\n"
 
 
@@ -133,7 +132,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
             if disconnected:
                 log.debug(f"disconnected http request")
         except asyncio.TimeoutError:
-            log.debug(f"disconnected http request check timeout")
+            pass
+            # log.debug(f"disconnected http request check timeout")
         return disconnected
 
     is_reasoning_enabled: bool = reasoning_supported and (body.model_config.get("reasoning") or True)
@@ -145,21 +145,21 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
         if message.role == ROLE_TOOL:
             looped_function = preprocess_tool_call.check_loop_call(i, message)
             if looped_function:
+                response_id = str(uuid.uuid4())
+                response_time = int(time.time())
                 # log
                 msg = (f"Multiple calls of the '{looped_function.name}' tool "
                        f"result in the same response '{looped_function.result}'. Generation is interrupted.")
-                if body.stream:
-                    return OpenAICompletionChunkResponse(id=str(uuid.uuid4()), created=int(time.time()),
-                                                         model=model_name, choices=[
-                            ChatCompletionChunkChoice(index=0, finish_reason="stop",
-                                                      delta=ChatCompletionMessage(role=ROLE_ASSISTANT,
-                                                                                  content=msg))])
+                c_delta: ChatCompletionMessage | None = None
+                c_message: ChatCompletionMessage | None = None
+                stream = body.stream == True
+                if stream:
+                    c_delta = ChatCompletionMessage(content=msg)
                 else:
-                    return OpenAICompletionResponse(id=str(uuid.uuid4()), created=int(time.time()),
-                                                    model=model_name, choices=[
-                            ChatCompletionChoice(index=0, finish_reason="stop",
-                                                 message=ChatCompletionMessage(
-                                                     role=ROLE_ASSISTANT, content=msg))])
+                    c_message = ChatCompletionMessage(content=msg)
+                return OpenAICompletionResponse(object=CHAT_COMPLETION, id=response_id, created=response_time,
+                                                model=model_name,
+                                                choices=[ChatCompletionChoice(delta=c_delta, message=c_message)])
 
             else:
                 # log
@@ -220,8 +220,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
         for chunk in chunk_generator():
             yield to_text_event(chunk)
 
-    def chunk_generator() -> Generator[OpenAICompletionChunkResponse, None, None]:
-        chunk_queue: queue.Queue[OpenAICompletionChunkResponse | None] = queue.Queue()
+    def chunk_generator() -> Generator[OpenAICompletionResponse, None, None]:
+        chunk_queue: queue.Queue[OpenAICompletionResponse | None] = queue.Queue()
         stop_stream_handling: queue.Queue[bool] = queue.Queue()
         start_stream_handling: queue.Queue[bool] = queue.Queue()
 
@@ -314,12 +314,12 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                 def process_token(self, token: str, token_number: int) -> StreamingStatus | None:
                     log = self.log
 
-                    def handle_possible_tool_call() -> OpenAICompletionChunkResponse:
+                    def handle_possible_tool_call() -> OpenAICompletionResponse:
                         parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
                         if not parsed_tool_calls:
                             log.info(
                                 f"phrase like tool calls: {self.possible_tool_call_expression}")
-                            chunk = new_chunk(role=self.role, content=self.possible_tool_call_expression)
+                            chunk = new_chunk_response(role=self.role, content=self.possible_tool_call_expression)
                         else:
                             if log.isEnabledFor(logging.INFO):
                                 adapter = TypeAdapter(List[ToolCall])
@@ -327,7 +327,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                     f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
 
                             self.tool_call_count += 1
-                            chunk = new_chunk(role=self.role, tool_calls=parsed_tool_calls)
+                            chunk = new_chunk_response(role=self.role, tool_calls=parsed_tool_calls)
 
                         self.possible_call_in_progress = False
                         self.possible_tool_call_expression = ""
@@ -493,8 +493,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                     return StreamingStatus.STOP
                             else:
                                 if self.in_conversation:
-                                    chunk = new_chunk(role=self.role, content=token,
-                                                      thinking=self.thinking_progress_counter > 0)
+                                    chunk = new_chunk_response(role=self.role, content=token,
+                                                               thinking=self.thinking_progress_counter > 0)
                                     chunk_queue.put(chunk)
                                 else:
                                     log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
@@ -568,34 +568,40 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
     if body.stream:
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
     else:
-        content = ""
-        reasoning_content = ""
-        tool_calls: list[ToolCall] = []
+        full_content = ""
+        full_reasoning_content = ""
+        full_tool_calls: list[ToolCall] = []
         finish_reason = "stop"
 
         for chunk_data in chunk_generator():
             choices = chunk_data.choices
             if choices:
-                finish_reason = choices[-1].finish_reason | finish_reason
+                finish_reason = choices[-1].finish_reason or finish_reason
                 for choice in choices:
                     delta = choice.delta
-                    content += delta.content
-                    reasoning_content += delta.reasoning_content
-                    tool_calls += delta.tool_calls
+                    delta_content = delta.content
+                    if delta_content:
+                        full_content += delta_content
+                    delta_reasoning_content = delta.reasoning_content
+                    if delta_reasoning_content:
+                        full_reasoning_content += delta_reasoning_content
+                    delta_tool_calls = delta.tool_calls
+                    if delta_tool_calls:
+                        full_tool_calls += delta_tool_calls
 
         message = ChatCompletionMessage()
         message.role = ROLE_ASSISTANT
-        message.content = content
-        message.reasoning_content = reasoning_content
-        message.tool_calls = tool_calls
-        choice = ChatCompletionChoice(index=0, finish_reason=finish_reason, message=message)
-        return OpenAICompletionResponse(id=str(uuid.uuid4()), created=int(time.time()), model=model_name,
-                                        choices=[choice])
+        message.content = full_content
+        message.reasoning_content = full_reasoning_content
+        message.tool_calls = full_tool_calls
+        return OpenAICompletionResponse(object=CHAT_COMPLETION, id=str(uuid.uuid4()), created=int(time.time()),
+                                        model=model_name, choices=[
+                ChatCompletionChoice(index=0, finish_reason=finish_reason, message=message)])
 
 
-def new_chunk(role: str, content: str | None = None, thinking: bool = False,
-              tool_calls: Optional[List[ToolCall]] = None,
-              finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
+def new_chunk_response(role: str, content: str | None = None, thinking: bool = False,
+                       tool_calls: Optional[List[ToolCall]] = None,
+                       finish_reason: str | None = None) -> OpenAICompletionResponse:
     delta = ChatCompletionMessage()
     delta.role = role
     if thinking:
@@ -605,13 +611,13 @@ def new_chunk(role: str, content: str | None = None, thinking: bool = False,
 
     if tool_calls:
         delta.tool_calls = tool_calls
-    return new_choices(delta=delta, finish_reason=finish_reason)
+
+    choices = [new_choice(delta=delta, finish_reason=finish_reason)]
+    return OpenAICompletionResponse(model=model_name, created=int(time.time()), choices=choices)
 
 
-def new_choices(delta: ChatCompletionMessage, finish_reason: str | None = None) -> OpenAICompletionChunkResponse:
-    choice = ChatCompletionChunkChoice(index=0, finish_reason=finish_reason, delta=delta)
-    choices = [choice]
-    return OpenAICompletionChunkResponse(model=model_name, created=int(time.time()), choices=choices)
+def new_choice(delta: ChatCompletionMessage, finish_reason: str | None = None) -> ChatCompletionChoice:
+    return ChatCompletionChoice(index=0, finish_reason=finish_reason, delta=delta)
 
 
 if __name__ == "__main__":

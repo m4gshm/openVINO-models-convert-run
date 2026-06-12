@@ -11,4 +11,6 @@ llama-server ^
   -fa on ^
   -ngl 99 ^
   -np 1 ^
+  --log-verbose ^
+  --log-verbosity 5 ^
   --port 8002

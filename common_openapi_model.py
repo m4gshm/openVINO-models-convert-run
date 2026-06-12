@@ -9,6 +9,9 @@ from typing import List, Optional, Union, Dict, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
+CHAT_COMPLETION = "chat.completion"
+
 
 # --- Request Components ---
 
@@ -108,16 +111,6 @@ class ChoiceLogprobs(BaseModel):
     content: Optional[List[Dict[str, Any]]] = None
 
 
-class ChatCompletionChoice(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    index: int
-    message: ChatCompletionMessage
-    finish_reason: str = Field(
-        description="Can be 'stop', 'length', 'tool_calls', 'content_filter', etc."
-    )
-    logprobs: Optional[ChoiceLogprobs] = None
-
-
 class CompletionUsage(BaseModel):
     model_config = ConfigDict(extra="allow")
     prompt_tokens: int
@@ -128,30 +121,13 @@ class CompletionUsage(BaseModel):
     completion_tokens_details: Optional[Dict[str, int]] = None
 
 
-class OpenAIResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    id: str | None = None
-    created: int = None
-    model: str
-    usage: Optional[CompletionUsage] = None
-    system_fingerprint: Optional[str] = None
-
-
 # --- Main Response Schema ---
 
-class OpenAICompletionResponse(OpenAIResponse):
-    """Official OpenAI Chat Completion Schema with undefined property tolerance."""
-    object: str = "chat.completion"
-    choices: List[ChatCompletionChoice]
-
-
-# --- Streaming Components ---
-
-class ChatCompletionChunkChoice(BaseModel):
+class ChatCompletionChoice(BaseModel):
     model_config = ConfigDict(extra="allow")
-    index: int
-    delta: ChatCompletionMessage
+    index: int = 0
+    delta: ChatCompletionMessage | None = None
+    message: ChatCompletionMessage | None = None
     finish_reason: Optional[str] = Field(
         default=None,
         description="Can be 'stop', 'length', 'tool_calls', or None during streaming."
@@ -159,9 +135,12 @@ class ChatCompletionChunkChoice(BaseModel):
     logprobs: Optional[ChoiceLogprobs] = None
 
 
-# --- Main Streaming Response Schema ---
-
-class OpenAICompletionChunkResponse(OpenAIResponse):
-    """Official OpenAI Chat Completion Chunk Schema (stream=True)."""
-    object: str = "chat.completion.chunk"
-    choices: List[ChatCompletionChunkChoice]
+class OpenAICompletionResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    object: str = CHAT_COMPLETION_CHUNK
+    id: str | None = None
+    created: int = None
+    model: str
+    usage: Optional[CompletionUsage] = None
+    system_fingerprint: Optional[str] = None
+    choices: List[ChatCompletionChoice]
