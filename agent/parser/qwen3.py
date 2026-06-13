@@ -4,7 +4,7 @@ import re
 import time
 from typing import List
 
-from agent.common_openapi_model import ToolCall, FunctionCall
+from agent.common.openai_model import ToolCall, FunctionCall
 
 TOOL_CALL_START = "<tool_call>"
 TOOL_CALL_END = "</tool_call>"

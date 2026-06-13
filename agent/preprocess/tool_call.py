@@ -1,5 +1,5 @@
+from agent.common.openai_model import ChatCompletionMessageParam
 from agent.common.roles import ROLE_TOOL
-from agent.common_openapi_model import ChatCompletionMessageParam
 
 
 class FunctionCallResult:

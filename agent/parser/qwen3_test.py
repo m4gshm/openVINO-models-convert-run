@@ -1,7 +1,7 @@
 import unittest
 
-from common_openapi_model import ToolCall
-from parser_qwen3 import parse_tool_calls
+from common.openai_model import ToolCall
+from parser.qwen3 import parse_tool_calls
 
 
 class TestAddFunction(unittest.TestCase):

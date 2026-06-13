@@ -30,16 +30,16 @@ from openvino_genai.py_openvino_genai import StreamingStatus
 from pydantic import TypeAdapter
 from pydantic.json import pydantic_encoder
 
-from agent.commom_metric_mem import get_current_memory
-from agent.common.roles import ROLE_ASSISTANT, ROLE_USER, ROLE_MIDDLEWARE_WARNING
-from agent.common_log import LoggingRoute, log_format_prefix, log_format_simple
-from agent.common_openapi_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
+from agent.common.metric_mem import get_current_memory
+from agent.common.roles import ROLE_ASSISTANT, ROLE_USER
+from agent.common.log import LoggingRoute, log_format_prefix, log_format_simple
+from agent.common.openai_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
     ToolCall, OpenAICompletionResponse, \
     ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION, CHAT_COMPLETION_CHUNK
-from agent.parser_qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
+from agent.parser.qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
     think_is_over, \
     is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
-from agent.preprocess_tool_call import PreprocessToolCall
+from agent.preprocess.tool_call import PreprocessToolCall
 
 device_name = "GPU"
 
