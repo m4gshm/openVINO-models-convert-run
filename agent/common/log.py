@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "fastapi>=0.136.3",
-# ]
-# ///
 import logging.config
 import os
 from typing import Callable

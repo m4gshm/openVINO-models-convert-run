@@ -2,6 +2,10 @@
 .kilo
 logs
 *.log
+venv
+venvp
+.venv
+.veai
 src_models/Qwen
 src_models/microsoft
 src_models/allenai

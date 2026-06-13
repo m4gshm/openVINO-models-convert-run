@@ -1,10 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "pydantic>=2.13.4",
-#     "typing>=3.10.0.0",
-# ]
-# ///
 from typing import List, Optional, Union, Dict, Any
 
 from pydantic import BaseModel, ConfigDict, Field

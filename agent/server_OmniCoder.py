@@ -1,12 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "fastapi>=0.136.3",
-#     "openvino-genai>=2026.2.0.0",
-#     "pydantic>=2.13.4",
-#     "typing>=3.10.0.0",
-# ]
-# ///
 import asyncio
 import logging.config
 import os
@@ -30,23 +21,25 @@ from openvino_genai.py_openvino_genai import StreamingStatus
 from pydantic import TypeAdapter
 from pydantic.json import pydantic_encoder
 
-from agent.common.metric_mem import get_current_memory
-from agent.common.roles import ROLE_ASSISTANT, ROLE_USER
 from agent.common.log import LoggingRoute, log_format_prefix, log_format_simple
-from agent.common.openai_model import OpenAIChatCompletionRequest, ToolDefinition, ChatCompletionMessageParam, \
+from agent.common.metric_mem import get_current_memory
+from agent.common.openai_model import OpenAIChatCompletionRequest, ChatCompletionMessageParam, \
     ToolCall, OpenAICompletionResponse, \
-    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION, CHAT_COMPLETION_CHUNK
+    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION, CHAT_COMPLETION_CHUNK, \
+    FunctionDefinition
+from agent.common.roles import ROLE_ASSISTANT, ROLE_USER
 from agent.parser.qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
     think_is_over, \
     is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
 from agent.preprocess.tool_call import PreprocessToolCall
+from client.veai.tool_call_fixer import fix_incorrect_arguments
 
 device_name = "GPU"
 
 reasoning_supported = True
 model_name = "OmniCoder-9B-int4-sym-g128"
-model_path = f"./models/{model_name}/1"
-model_cache_dir = f"./models_cache/{model_name}"
+model_path = f"../models/{model_name}/1"
+model_cache_dir = f"../models_cache/{model_name}"
 
 default_temperature = 0.4
 default_top_p = 0.95
@@ -127,6 +120,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     body.response_format = ResponseFormat(type="json_object")
     messages = body.messages
+    log.info(f"inbound history messages {len(messages)}")
+
     preprocess_tool_call = PreprocessToolCall()
     looped_function = preprocess_tool_call.check_loop_calls(messages)
     if looped_function:
@@ -142,18 +137,18 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                      message=(result if not body.stream else None))])
         return response
 
-    log.info(f"inbound history messages {len(messages)}")
-
-    messages: list[dict[str, Any]] = list(
-        map(ChatCompletionMessageParam.model_dump, body.messages)) if body.tools else []
+    tools = body.tools
+    function_by_name: dict[str, FunctionDefinition] = {}
+    tools_raw: list[dict[str, Any]] = []
+    for tool in (tools or []):
+        tools_raw.append(tool.model_dump())
+        function = tool.function
+        function_by_name[function.name] = function
 
     chat_history = ChatHistory()
-    chat_history_messages = messages
+    chat_history_messages = list(map(ChatCompletionMessageParam.model_dump, messages)) if messages else []
     chat_history.set_messages(chat_history_messages)
-
-    tools: list[dict[str, Any]] = list(map(ToolDefinition.model_dump, body.tools)) if body.tools else []
-    if tools:
-        chat_history.set_tools(tools)
+    chat_history.set_tools(tools_raw)
 
     tokenizer: Tokenizer = pipe.get_tokenizer()
     extra_context = {}
@@ -162,7 +157,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                 add_generation_prompt=True,
-                                                tools=tools,
+                                                tools=tools_raw,
                                                 extra_context=extra_context)
 
     log_inference_prompt.debug(full_prompt)
@@ -292,19 +287,20 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     log = self.log
 
                     def handle_possible_tool_call() -> OpenAICompletionResponse:
-                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression)
+                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression, function_by_name)
                         if not parsed_tool_calls:
                             log.info(
                                 f"phrase like tool calls: {self.possible_tool_call_expression}")
                             chunk = new_chunk_response(role=self.role, content=self.possible_tool_call_expression)
                         else:
+                            fixed_tool_calls = list(map(fix_incorrect_arguments, parsed_tool_calls))
                             if log.isEnabledFor(logging.INFO):
                                 adapter = TypeAdapter(List[ToolCall])
                                 log.info(
-                                    f"tool call: {adapter.dump_json(parsed_tool_calls).decode("utf-8")}")
+                                    f"tool call: {adapter.dump_json(fixed_tool_calls).decode("utf-8")}")
 
                             self.tool_call_count += 1
-                            chunk = new_chunk_response(role=self.role, tool_calls=parsed_tool_calls)
+                            chunk = new_chunk_response(role=self.role, tool_calls=fixed_tool_calls)
 
                         self.possible_call_in_progress = False
                         self.possible_tool_call_expression = ""

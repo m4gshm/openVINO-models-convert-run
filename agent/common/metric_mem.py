@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "psutil>=7.2.2",
-# ]
-# ///
 import os
 import psutil
 

@@ -1,0 +1,8 @@
+{
+  "id": "call_1781307063_0_ask_user_with_options",
+  "type": "function",
+  "function": {
+    "name":"ask_user_with_options",
+    "arguments": "{\"is_multiple_choice\": \"false\", \"options\": \"[\\\"First\\\", \\\"Second\\\"],\"}"
+  }
+}
