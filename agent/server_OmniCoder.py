@@ -16,7 +16,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from openvino_genai import Tokenizer
-from openvino_genai.py_openvino_genai import ChatHistory, VLMDecodedResults
+from openvino_genai.py_openvino_genai import ChatHistory, GenerationFinishReason
 from openvino_genai.py_openvino_genai import StreamingStatus
 from pydantic import TypeAdapter
 from pydantic.json import pydantic_encoder
@@ -30,7 +30,7 @@ from agent.common.openai_model import OpenAIChatCompletionRequest, ChatCompletio
 from agent.common.roles import ROLE_ASSISTANT, ROLE_USER
 from agent.parser.qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
     think_is_over, \
-    is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking
+    is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking, is_partial_tool_call
 from agent.preprocess.tool_call import PreprocessToolCall
 from client.veai.tool_call_fixer import fix_incorrect_arguments
 
@@ -41,6 +41,11 @@ model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"../models/{model_name}/1"
 model_cache_dir = f"../models_cache/{model_name}"
 
+
+prevent_no_assistant_inference_output=True
+
+default_max_new_tokens = 4096
+default_max_tokens = 32768
 default_temperature = 0.4
 default_top_p = 0.95
 default_top_k = 40
@@ -55,15 +60,15 @@ scheduler_config.cache_interval_multiplier = None  # 2
 scheduler_config.dynamic_split_fuse = True
 scheduler_config.use_sparse_attention = False
 
-# scheduler_config.cache_size = 8
-# scheduler_config.use_cache_eviction = True
+scheduler_config.cache_size = 8
+scheduler_config.use_cache_eviction = True
 
 config = {
     "CACHE_DIR": model_cache_dir,
     # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
     # "KV_CACHE_PRECISION": "u4",
     "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crashes process
-    "scheduler_config": scheduler_config,
+    # "scheduler_config": scheduler_config,
     "ATTENTION_BACKEND": "PA",
     # "ATTENTION_BACKEND": "SDPA",
 }
@@ -84,7 +89,9 @@ log.debug(f"consumed memory: {start_mem:.2f} MB")
 
 try:
     pipe = ov_genai.VLMPipeline(models_path=model_path, device=device_name, **config)
-    # pipe = ov_genai.ContinuousBatchingPipeline(models_path=model_path, device=device_name, **config)
+    # pipe = ov_genai.ContinuousBatchingPipeline(models_path=model_path, device=device_name,
+    #                                            scheduler_config=scheduler_config,
+    #                                            **config)
 
     log.info(f"model loaded successfully")
 
@@ -163,10 +170,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
     log_inference_prompt.debug(full_prompt)
 
     generation_config = ov_genai.GenerationConfig()
-    if body.max_completion_tokens:
-        generation_config.max_new_tokens = body.max_completion_tokens
-    if body.max_tokens:
-        generation_config.max_length = body.max_tokens
+    generation_config.max_new_tokens = body.max_completion_tokens or default_max_new_tokens
+    generation_config.max_length = body.max_tokens or default_max_tokens
     generation_config.apply_chat_template = False if full_prompt else True
 
     temp = body.temperature or default_temperature
@@ -287,12 +292,15 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     log = self.log
 
                     def handle_possible_tool_call() -> OpenAICompletionResponse:
-                        parsed_tool_calls = parse_tool_calls(self.possible_tool_call_expression, function_by_name)
+                        parsed_tool_calls, partial = parse_tool_calls(self.possible_tool_call_expression,
+                                                                      function_by_name)
                         if not parsed_tool_calls:
                             log.info(
                                 f"phrase like tool calls: {self.possible_tool_call_expression}")
                             chunk = new_chunk_response(role=self.role, content=self.possible_tool_call_expression)
                         else:
+                            if partial:
+                                pass
                             fixed_tool_calls = list(map(fix_incorrect_arguments, parsed_tool_calls))
                             if log.isEnabledFor(logging.INFO):
                                 adapter = TypeAdapter(List[ToolCall])
@@ -327,13 +335,17 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             # sometimes Qwen3.5 ends tool call by end conversation token
                             if log.isEnabledFor(logging.DEBUG):
                                 log.debug(
-                                    f"tool call ended by end conversation token: {self.possible_tool_call_expression}")
+                                    f"tool call ended by end conversation token '{self.possible_tool_call_expression}'")
                             else:
                                 log.info("tool call ended by end conversation token")
                             self.__remove_state(expected_state=State.TOOL_CALL)
-                            chunk = handle_possible_tool_call()
-                            if chunk:
-                                chunk_queue.put(chunk)
+                            if is_partial_tool_call(self.possible_tool_call_expression):
+                                log.info(
+                                    f"partial tool call ended by end conversation token '{self.possible_tool_call_expression}'")
+                            else:
+                                chunk = handle_possible_tool_call()
+                                if chunk:
+                                    chunk_queue.put(chunk)
                         else:
                             self.__remove_state(expected_state=State.CONVERSATION)
 
@@ -435,7 +447,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
 
                         else:
-                            if ROLE_ASSISTANT != self.role:
+                            is_assistant = ROLE_ASSISTANT == self.role
+                            if not is_assistant:
                                 log.warning(f"unexpected role {self.role}")
 
                             self.phrase = self.phrase + token
@@ -465,7 +478,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                         f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
                                     return StreamingStatus.STOP
                             else:
-                                if self.in_conversation:
+                                if self.in_conversation and (is_assistant or not prevent_no_assistant_inference_output):
                                     chunk = new_chunk_response(role=self.role, content=token,
                                                                thinking=self.thinking_progress_counter > 0)
                                     chunk_queue.put(chunk)
@@ -473,7 +486,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                     log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
                     return None
 
-            result: VLMDecodedResults
             try:
                 pipe.start_chat()
                 if log_inference.isEnabledFor(logging.DEBUG):
@@ -490,16 +502,24 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                 before_generate_mem = get_current_memory()
                 streamer = Streamer(start_thinking=is_prompt_start_thinking(full_prompt))
-                result = pipe.generate(prompt=full_prompt, generation_config=generation_config, streamer=streamer)
+                generate_result = pipe.generate(prompt=full_prompt, generation_config=generation_config,
+                                                streamer=streamer)
                 chunk_queue.put_nowait(None)
                 after_generate_mem = get_current_memory()
                 generate_cost = after_generate_mem - before_generate_mem
                 log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
 
+                inference_finish_reasons = generate_result.finish_reasons
                 if log_inference.isEnabledFor(logging.DEBUG):
-                    log_inference.debug(f"inference finished, reason={result.finish_reasons}, result={result.texts}")
+                    log_inference.debug(f"inference finished, "
+                                        f"reason={inference_finish_reasons}, "
+                                        f"result={generate_result.texts}")
                 else:
                     log_inference.info(f"inference finished")
+                inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
+                if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
+                    log.warning(f"inference finished by unexpected status {inference_finish_reason}")
+
             except Exception as e:
                 log_inference.error(f"inference error: {e}", exc_info=e)
                 raise

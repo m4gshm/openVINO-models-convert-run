@@ -1,0 +1,7 @@
+<tool_call>
+<function=write_file>
+<parameter=allow_overwrite>
+false
+</parameter>
+<parameter=content>
+no finished parameter

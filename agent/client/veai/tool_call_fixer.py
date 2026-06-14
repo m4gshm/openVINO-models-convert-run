@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 
 
 def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
-    function = tool_call.function
+    # function = tool_call.function
     # if "ask_user_with_options" == function.name:
     #     args_raw = function.arguments
     #     args: dict[str, Any] | None = None
