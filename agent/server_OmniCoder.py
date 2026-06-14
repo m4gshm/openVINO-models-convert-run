@@ -7,9 +7,10 @@ import time
 import uuid
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Generator, List
-from typing import SupportsInt, Optional
+from typing import SupportsInt
 
 import openvino_genai as ov_genai
 import uvicorn
@@ -23,16 +24,24 @@ from pydantic.json import pydantic_encoder
 
 from agent.common.log import LoggingRoute, log_format_prefix, log_format_simple
 from agent.common.metric_mem import get_current_memory
-from agent.common.openai_model import OpenAIChatCompletionRequest, ChatCompletionMessageParam, \
-    ToolCall, OpenAICompletionResponse, \
-    ChatCompletionChoice, ChatCompletionMessage, ResponseFormat, CHAT_COMPLETION, CHAT_COMPLETION_CHUNK, \
-    FunctionDefinition
-from agent.common.roles import ROLE_ASSISTANT, ROLE_USER
+from agent.common.openai_model import ResponseFormat, FunctionDefinition, ToolCall
+from agent.common.roles import ROLE_ASSISTANT, ROLE_USER, ROLE_TOOL
 from agent.parser.qwen3 import parse_tool_calls, is_conversation_start, is_conversation_end, think_is_started, \
     think_is_over, \
-    is_possible_tool_call_start, is_possible_tool_call_end, is_prompt_start_thinking, is_partial_tool_call
+    is_tool_call_start, is_tool_call_end, is_prompt_start_thinking, is_partial_tool_call, \
+    new_tool_call
 from agent.preprocess.tool_call import PreprocessToolCall
 from client.veai.tool_call_fixer import fix_incorrect_arguments
+from common.openai_api import new_response, new_message, new_chunk_response
+from common.openai_model import ChatCompletionMessage, OpenAIChatCompletionRequest, OpenAICompletionResponse, \
+    ChatCompletionMessageParam
+from tool_select_options import detect_select_options
+
+WARN_GENERATION_IS_INTERRUPTED_ = "Generation is interrupted."
+
+USER_SELECT_CONTINUE = "continue"
+USER_SELECT_INTERRUPT = "interrupt"
+MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
 device_name = "GPU"
 
@@ -42,6 +51,9 @@ model_path = f"../models/{model_name}/1"
 model_cache_dir = f"../models_cache/{model_name}"
 
 prevent_no_assistant_inference_output = True
+
+tool_call_parting_duration_warning = timedelta(minutes=2)
+tool_call_parting_duration_limit = timedelta(minutes=10)
 
 default_max_new_tokens = 4096
 default_max_tokens = 65536
@@ -126,24 +138,41 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
     body.response_format = ResponseFormat(type="json_object")
     messages = body.messages
+
+    last_message = messages[-1] if messages else None
+    stream = body.stream
+    if last_message:
+        if is_middleware_checkpoint(last_message):
+            if USER_SELECT_INTERRUPT in str(last_message.content).lower():
+                return new_response(
+                    chat_completion_message=ChatCompletionMessage(role=ROLE_ASSISTANT, content="Interrupted"),
+                    stream=stream, finish_reason="stop")
+
     log.info(f"inbound history messages {len(messages)}")
+
+    # remove middleware injects from messages
+    # messages = [message for message in messages if not is_middleware_checkpoint(message)]
+    # log.debug(f"messages without middleware checkpoints {len(messages)}")
+
+    tools = body.tools
+    request_user_select = detect_select_options(tools)
 
     preprocess_tool_call = PreprocessToolCall()
     looped_function = preprocess_tool_call.check_loop_calls(messages)
     if looped_function:
         # log
-        result = ChatCompletionMessage(role=ROLE_ASSISTANT,
-                                       content=(f"Multiple calls of the '{looped_function.name}' tool "
-                                                f"result in the same response '{looped_function.result}'. "
-                                                f"Generation is interrupted."))
-        object = CHAT_COMPLETION_CHUNK if body.stream else CHAT_COMPLETION
-        response = OpenAICompletionResponse(object=object, id=str(uuid.uuid4()), created=int(time.time()),
-                                            model=model_name, choices=[
-                ChatCompletionChoice(delta=(result if body.stream else None),
-                                     message=(result if not body.stream else None))])
-        return response
+        msg = f"Multiple calls of the '{looped_function.name}' tool " \
+              f"result in the same response '{looped_function.result}'. "
+        if request_user_select:
+            # log
+            question = request_user_select.new_call(msg + "What to do next?",
+                                                    [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
+            tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()), function=question)
+            completion_message = new_message(tool_calls=[tool_call])
+        else:
+            completion_message = new_message(content=(msg + WARN_GENERATION_IS_INTERRUPTED_))
+        return new_response(chat_completion_message=completion_message, finish_reason="stop", stream=(stream == True))
 
-    tools = body.tools
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
     for tool in (tools or []):
@@ -227,14 +256,15 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.log = logging.getLogger("inference.stream")
                     self.role = ROLE_ASSISTANT
                     self.prev_role = None
-                    self.possible_tool_call_expression = ""
-                    self.possible_call_in_progress = False
+                    self.tool_call_expression = ""
+                    self.tool_call_parsing_in_progress = False
                     self.tool_call_count = 0
                     self.token_conversation_start_number: int = -1
                     self.expect_role = False
                     self.user_phrase_generated = False
                     self.phrase_tick: float | None = None
-                    self.possible_tool_call_expression_tick: float | None = None
+                    self.tool_call_parsing_tick: float | None = None
+                    self.tool_call_parsing_start_time: float | None = None
                     self.phrase = ""
                     self.full_generated = ""
                     self.empty_conversation_counter = 0
@@ -290,13 +320,13 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                 def process_token(self, token: str, token_number: int) -> StreamingStatus | None:
                     log = self.log
 
-                    def handle_possible_tool_call() -> OpenAICompletionResponse:
-                        parsed_tool_calls, partial = parse_tool_calls(self.possible_tool_call_expression,
-                                                                      function_by_name)
+                    def handle_tool_call() -> OpenAICompletionResponse:
+                        parsed_tool_calls, partial = parse_tool_calls(self.tool_call_expression, function_by_name)
                         if not parsed_tool_calls:
                             log.info(
-                                f"phrase like tool calls: {self.possible_tool_call_expression}")
-                            chunk = new_chunk_response(role=self.role, content=self.possible_tool_call_expression)
+                                f"phrase like tool calls: {self.tool_call_expression}")
+                            chunk = new_chunk_response(role=self.role, content=self.tool_call_expression,
+                                                       model=model_name)
                         else:
                             if partial:
                                 pass
@@ -307,13 +337,14 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                     f"tool call: {adapter.dump_json(fixed_tool_calls).decode("utf-8")}")
 
                             self.tool_call_count += 1
-                            chunk = new_chunk_response(role=self.role, tool_calls=fixed_tool_calls)
+                            chunk = new_chunk_response(role=self.role, tool_calls=fixed_tool_calls, model=model_name)
 
-                        self.possible_call_in_progress = False
-                        self.possible_tool_call_expression = ""
-                        self.possible_tool_call_expression_tick = None
+                        self.tool_call_parsing_in_progress = False
+                        self.tool_call_expression = ""
+                        self.tool_call_parsing_tick = None
                         return chunk
 
+                    now_time = time.perf_counter()
                     if is_conversation_start(token):
                         self.states.append(State.CONVERSATION)
                         self.in_conversation = True
@@ -334,17 +365,15 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             # sometimes Qwen3.5 ends tool call by end conversation token
                             if log.isEnabledFor(logging.DEBUG):
                                 log.debug(
-                                    f"tool call ended by end conversation token '{self.possible_tool_call_expression}'")
+                                    f"tool call ended by end conversation token '{self.tool_call_expression}'")
                             else:
                                 log.info("tool call ended by end conversation token")
                             self.__remove_state(expected_state=State.TOOL_CALL)
-                            if is_partial_tool_call(self.possible_tool_call_expression):
+                            if is_partial_tool_call(self.tool_call_expression):
                                 log.info(
-                                    f"partial tool call ended by end conversation token '{self.possible_tool_call_expression}'")
+                                    f"partial tool call ended by end conversation token '{self.tool_call_expression}'")
                             else:
-                                chunk = handle_possible_tool_call()
-                                if chunk:
-                                    chunk_queue.put(chunk)
+                                chunk_queue.put(handle_tool_call())
                         else:
                             self.__remove_state(expected_state=State.CONVERSATION)
 
@@ -363,7 +392,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                         if self.empty_conversation_counter > 20:
                             log.warning(
-                                f"many empty conversations ({self.empty_conversation_counter}), abort inference")
+                                f"many empty conversations ({self.empty_conversation_counter}), interrupt inference")
                             return StreamingStatus.CANCEL
 
                         if self.tool_call_count > 0:
@@ -384,8 +413,9 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                     elif think_is_started(token):
                         self.states.append(State.THINK)
-                        if len(self.possible_tool_call_expression) > 0:
-                            log.warning(f"start think token inside tool_call {self.possible_tool_call_expression}")
+                        if self.tool_call_parsing_in_progress:
+                            self.tool_call_parsing_start_time = None
+                            log.warning(f"start think token inside tool_call {self.tool_call_expression}")
                         self.thinking_progress_counter += 1
                         if self.thinking_progress_counter == 1:
                             log.debug("thinking is starting")
@@ -394,9 +424,10 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 f"More thinking for God of thinking!!! {self.thinking_progress_counter}")
                     elif think_is_over(token):
                         self.__remove_state(expected_state=State.THINK)
-                        if len(self.possible_tool_call_expression) > 0:
+                        if self.tool_call_parsing_in_progress:
+                            self.tool_call_parsing_start_time = now_time
                             log.warning(
-                                f"stop think token inside tool_call: '{self.possible_tool_call_expression}', phrase: '{self.phrase}'")
+                                f"stop think token inside tool_call: '{self.tool_call_expression}', phrase: '{self.phrase}'")
 
                         if self.thinking_progress_counter > 0:
                             self.thinking_progress_counter -= 1
@@ -405,9 +436,9 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                             else:
                                 log.debug(
                                     f"intensity of thinking decreased {self.thinking_progress_counter}")
-                    elif is_possible_tool_call_start(token):
+                    elif is_tool_call_start(token):
                         self.states.append(State.TOOL_CALL)
-                        log.debug(f"possible tool call start: {token}")
+                        log.debug(f"tool call start: {token}")
 
                         phrase = self.phrase.rstrip()
                         if len(phrase) > 0:
@@ -415,26 +446,38 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                         self.__clean_phrase()
 
-                        self.possible_tool_call_expression_tick = time.time()
-                        self.possible_call_in_progress = True
-                        self.possible_tool_call_expression += token
-                    elif is_possible_tool_call_end(token):
+                        self.tool_call_parsing_tick = now_time
+                        self.tool_call_parsing_start_time = now_time
+                        self.tool_call_parsing_in_progress = True
+                        self.tool_call_expression += token
+                    elif is_tool_call_end(token):
+                        self.tool_call_parsing_start_time = None
                         self.__remove_state(expected_state=State.TOOL_CALL)
-                        log.debug(f"possible tool call end: {token}")
-                        self.possible_tool_call_expression += token
-                        chunk = handle_possible_tool_call()
-                        chunk_queue.put(chunk)
+                        log.debug(f"tool call end: {token}")
+                        self.tool_call_expression += token
+                        chunk_queue.put(handle_tool_call())
                     else:
                         last_state = self.__get_last_state()
-                        if self.possible_call_in_progress and last_state == State.TOOL_CALL:
-                            self.possible_tool_call_expression += token
-                            now_time = time.time()
-                            possible_tool_call_expression_time = now_time - self.possible_tool_call_expression_tick
-                            if possible_tool_call_expression_time >= 10:
-                                self.possible_tool_call_expression_tick = now_time
-                                log.info(
-                                    f"possible tool call part: {self.possible_tool_call_expression}")
-                                words = self.possible_tool_call_expression.split(" ")
+                        if self.tool_call_parsing_in_progress and last_state == State.TOOL_CALL:
+                            self.tool_call_expression += token
+                            parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
+                            if parsing_time >= tool_call_parting_duration_warning:
+                                chunk = new_chunk_response(role=ROLE_ASSISTANT, model=model_name,
+                                                           content=f"Long parsing of tool call ({parsing_time})")
+                                chunk_queue.put(chunk)
+                            elif parsing_time >= tool_call_parting_duration_limit:
+                                chunk = new_chunk_response(role=ROLE_ASSISTANT, model=model_name,
+                                                           content=f"Tool call parsing exceeded time limit"
+                                                                   f" {tool_call_parting_duration_limit}. "
+                                                                   f"{WARN_GENERATION_IS_INTERRUPTED_}")
+                                chunk_queue.put(chunk)
+                                return StreamingStatus.CANCEL
+
+                            tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
+                            if tool_call_snapshot_time >= 10:
+                                self.tool_call_parsing_tick = now_time
+                                log.info(f"tool call part: {self.tool_call_expression}")
+                                words = self.tool_call_expression.split(" ")
                                 word_dict: dict[str, Any] = {}
                                 for i, word in enumerate(words):
                                     word_stat: dict[str, Any] = word_dict.get(word, {})
@@ -443,8 +486,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                     position = word_stat.get("position", [])
                                     position.append(i)
                                     word_stat["position"] = position
-
-
                         else:
                             is_assistant = ROLE_ASSISTANT == self.role
                             if not is_assistant:
@@ -452,7 +493,6 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
 
                             self.phrase = self.phrase + token
 
-                            now_time = time.time()
                             if self.phrase_tick is None:
                                 self.phrase_tick = now_time
 
@@ -480,7 +520,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                 if self.in_conversation:
                                     if is_assistant or not prevent_no_assistant_inference_output:
                                         chunk = new_chunk_response(role=self.role, content=token,
-                                                                   thinking=self.thinking_progress_counter > 0)
+                                                                   thinking=self.thinking_progress_counter > 0,
+                                                                   model=model_name)
                                         chunk_queue.put(chunk)
                                     else:
                                         log.warning(
@@ -561,7 +602,7 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     log.error(f"waiting inference completion error: {e}", exc_info=e)
             log.info("inference handling is done")
 
-    if body.stream:
+    if stream:
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
     else:
         full_content = ""
@@ -585,35 +626,17 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     if delta_tool_calls:
                         full_tool_calls += delta_tool_calls
 
-        message = ChatCompletionMessage()
-        message.role = ROLE_ASSISTANT
-        message.content = full_content
-        message.reasoning_content = full_reasoning_content
-        message.tool_calls = full_tool_calls
-        return OpenAICompletionResponse(object=CHAT_COMPLETION, id=str(uuid.uuid4()), created=int(time.time()),
-                                        model=model_name, choices=[
-                ChatCompletionChoice(index=0, finish_reason=finish_reason, message=message)])
+    return new_response(chat_completion_message=
+                        new_message(full_content, full_reasoning_content, full_tool_calls),
+                        finish_reason=finish_reason, stream=False)
 
 
-def new_chunk_response(role: str, content: str | None = None, thinking: bool = False,
-                       tool_calls: Optional[List[ToolCall]] = None,
-                       finish_reason: str | None = None) -> OpenAICompletionResponse:
-    delta = ChatCompletionMessage()
-    delta.role = role
-    if thinking:
-        delta.reasoning_content = content
-    else:
-        delta.content = content
-
-    if tool_calls:
-        delta.tool_calls = tool_calls
-
-    choices = [new_choice(delta=delta, finish_reason=finish_reason)]
-    return OpenAICompletionResponse(model=model_name, created=int(time.time()), choices=choices)
-
-
-def new_choice(delta: ChatCompletionMessage, finish_reason: str | None = None) -> ChatCompletionChoice:
-    return ChatCompletionChoice(index=0, finish_reason=finish_reason, delta=delta)
+def is_middleware_checkpoint(last_message: ChatCompletionMessageParam) -> str | None | bool:
+    is_tool = last_message.role == ROLE_TOOL
+    if not is_tool:
+        return False
+    tool_call_id = last_message.tool_call_id
+    return tool_call_id and tool_call_id.startswith(MIDDLEWARE_CHEKPOINT)
 
 
 if __name__ == "__main__":

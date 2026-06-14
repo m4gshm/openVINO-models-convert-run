@@ -7,6 +7,7 @@ from typing import Any
 
 import json_repair
 
+from common.openai_api import new_tool_call
 from common.openai_model import ToolCall, FunctionCall, FunctionDefinition
 
 EXPECTED_PROPERTY_TYPE = 'type'
@@ -32,7 +33,6 @@ CONVERSATION_START = "<|im_start|>"
 CONVERSATION_END = "<|im_end|>"
 
 log = logging.getLogger(__name__)
-tool_call_counter = itertools.count(start=0)
 
 
 def think_is_over(subword: str) -> bool:
@@ -51,11 +51,11 @@ def is_conversation_end(text: str) -> bool:
     return CONVERSATION_END == text.strip()
 
 
-def is_possible_tool_call_start(text: str) -> bool:
+def is_tool_call_start(text: str) -> bool:
     return TOOL_CALL_START == text.strip()
 
 
-def is_possible_tool_call_end(text: str) -> bool:
+def is_tool_call_end(text: str) -> bool:
     return TOOL_CALL_END == text.strip()
 
 
@@ -112,9 +112,7 @@ def parse_tool_calls(text: str, supported_functions: dict[str, FunctionDefinitio
             if partial_param:
                 partial = True
 
-            call_id = next(tool_call_counter)
-            parsed_calls.append(ToolCall(id=f"call_{ts}_{call_id}_{func_name}",
-                                         function=FunctionCall(name=func_name, arguments=arguments)))
+            parsed_calls.append(new_tool_call(FunctionCall(name=func_name, arguments=arguments)))
     return parsed_calls, partial
 
 
