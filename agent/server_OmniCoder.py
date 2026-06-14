@@ -41,11 +41,10 @@ model_name = "OmniCoder-9B-int4-sym-g128"
 model_path = f"../models/{model_name}/1"
 model_cache_dir = f"../models_cache/{model_name}"
 
-
-prevent_no_assistant_inference_output=True
+prevent_no_assistant_inference_output = True
 
 default_max_new_tokens = 4096
-default_max_tokens = 32768
+default_max_tokens = 65536
 default_temperature = 0.4
 default_top_p = 0.95
 default_top_k = 40
@@ -478,10 +477,14 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                                         f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
                                     return StreamingStatus.STOP
                             else:
-                                if self.in_conversation and (is_assistant or not prevent_no_assistant_inference_output):
-                                    chunk = new_chunk_response(role=self.role, content=token,
-                                                               thinking=self.thinking_progress_counter > 0)
-                                    chunk_queue.put(chunk)
+                                if self.in_conversation:
+                                    if is_assistant or not prevent_no_assistant_inference_output:
+                                        chunk = new_chunk_response(role=self.role, content=token,
+                                                                   thinking=self.thinking_progress_counter > 0)
+                                        chunk_queue.put(chunk)
+                                    else:
+                                        log.warning(
+                                            f"prevent generating by unexpected role {self.role}, token '{token}'")
                                 else:
                                     log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
                     return None
