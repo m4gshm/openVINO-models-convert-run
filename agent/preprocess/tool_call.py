@@ -18,10 +18,6 @@ class PreprocessToolCall:
         if not is_last_tool_call:
             return None
 
-        last_message.tool_call_id
-        for i in range(len(messages)):
-
-
         repeated = 0
         # reverse loop from prelast message
         for i in range(len(messages)):
