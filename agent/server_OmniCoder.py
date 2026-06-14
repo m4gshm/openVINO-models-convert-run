@@ -35,6 +35,7 @@ from client.veai.tool_call_fixer import fix_incorrect_arguments
 from common.openai_api import new_response, new_message, new_chunk_response
 from common.openai_model import ChatCompletionMessage, OpenAIChatCompletionRequest, OpenAICompletionResponse, \
     ChatCompletionMessageParam
+from common.time import format_time
 from tool_select_options import detect_select_options
 
 WARN_GENERATION_IS_INTERRUPTED_ = "Generation is interrupted."
@@ -265,6 +266,8 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                     self.phrase_tick: float | None = None
                     self.tool_call_parsing_tick: float | None = None
                     self.tool_call_parsing_start_time: float | None = None
+                    self.tool_call_parsing_long_time_warned: bool = False
+                    self.tool_call_parsing_max_time_warned: bool = False
                     self.phrase = ""
                     self.full_generated = ""
                     self.empty_conversation_counter = 0
@@ -461,17 +464,19 @@ async def chat(body: OpenAIChatCompletionRequest, request: Request):
                         if self.tool_call_parsing_in_progress and last_state == State.TOOL_CALL:
                             self.tool_call_expression += token
                             parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
-                            if parsing_time >= tool_call_parting_duration_warning:
+                            if not self.tool_call_parsing_long_time_warned and parsing_time >= tool_call_parting_duration_warning:
                                 chunk = new_chunk_response(role=ROLE_ASSISTANT, model=model_name,
-                                                           content=f"Long parsing of tool call ({parsing_time})")
+                                                           content=f"Long parsing of tool call "
+                                                                   f"({format_time(tool_call_parting_duration_warning)})")
                                 chunk_queue.put(chunk)
-                            elif parsing_time >= tool_call_parting_duration_limit:
+                                self.tool_call_parsing_long_time_warned = True
+                            elif self.tool_call_parsing_max_time_warned and parsing_time >= tool_call_parting_duration_limit:
                                 chunk = new_chunk_response(role=ROLE_ASSISTANT, model=model_name,
                                                            content=f"Tool call parsing exceeded time limit"
-                                                                   f" {tool_call_parting_duration_limit}. "
-                                                                   f"{WARN_GENERATION_IS_INTERRUPTED_}")
+                                                                   f" {format_time(tool_call_parting_duration_limit)}.\n"
+                                                                   f"```\n{self.tool_call_expression}\n```")
                                 chunk_queue.put(chunk)
-                                return StreamingStatus.CANCEL
+                                self.tool_call_parsing_max_time_warned = True
 
                             tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
                             if tool_call_snapshot_time >= 10:
