@@ -61,7 +61,7 @@ class OpenAIChatCompletionRequest(BaseModel):
     response_format: Optional[ResponseFormat] = None
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = None
-    stream: Optional[bool] = False
+    stream: Optional[bool] = True
     stream_options: Optional[StreamOptions] = None
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
