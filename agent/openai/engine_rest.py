@@ -133,13 +133,13 @@ class Controller:
         generation_config.max_length = body.max_tokens or self.generate_config.default_max_tokens
         generation_config.apply_chat_template = False if full_prompt else True
 
-        temp = body.temperature or self.generate_config.default_temperature
-        if temp < 0.05:
+        temperature = body.temperature or self.generate_config.default_temperature
+        if temperature < 0.05:
             # Greedy Search
             generation_config.do_sample = False
         else:
             generation_config.do_sample = True
-            generation_config.temperature = temp
+            generation_config.temperature = temperature
             generation_config.top_p = body.top_p or self.generate_config.default_top_p
             generation_config.top_k = self.generate_config.default_top_k
             generation_config.min_p = self.generate_config.default_min_p
