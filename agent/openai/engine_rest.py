@@ -22,6 +22,7 @@ from openai import GenerateConfig
 from parser.base import Parser
 from preprocess.tool_call import PreprocessToolCall
 from tool_select_options import detect_select_options
+from veai.tool_call_fixer import fix_tool_definition_optional_property_as_null_type
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +108,8 @@ class Controller:
         function_by_name: dict[str, FunctionDefinition] = {}
         tools_raw: list[dict[str, Any]] = []
         for tool in (tools or []):
-            tools_raw.append(tool.model_dump())
+            fixed_tool = fix_tool_definition_optional_property_as_null_type(tool)
+            tools_raw.append(fixed_tool.model_dump())
             function = tool.function
             function_by_name[function.name] = function
 
@@ -121,6 +123,16 @@ class Controller:
         if self.generate_config.reasoning_supported:
             extra_context["enable_thinking"] = is_reasoning_enabled
 
+        # for i, t in enumerate(tools_raw):
+        #     try:
+        #         tokenizer.apply_chat_template(history=chat_history,
+        #                                       add_generation_prompt=True,
+        #                                       tools=[t],
+        #                                       extra_context=extra_context)
+        #     except Exception as e:
+        #         t = tools_raw[i]
+        #         log.error(f"error on {i}, {t}, {e}")
+
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     tools=tools_raw,
@@ -133,13 +145,13 @@ class Controller:
         generation_config.max_length = body.max_tokens or self.generate_config.default_max_tokens
         generation_config.apply_chat_template = False if full_prompt else True
 
-        temperature = body.temperature or self.generate_config.default_temperature
-        if temperature < 0.05:
+        temp = body.temperature or self.generate_config.default_temperature
+        if temp < 0.05:
             # Greedy Search
             generation_config.do_sample = False
         else:
             generation_config.do_sample = True
-            generation_config.temperature = temperature
+            generation_config.temperature = temp
             generation_config.top_p = body.top_p or self.generate_config.default_top_p
             generation_config.top_k = self.generate_config.default_top_k
             generation_config.min_p = self.generate_config.default_min_p
@@ -283,3 +295,4 @@ class Controller:
         return new_response(chat_completion_message=
                             new_message(full_content, full_reasoning_content, full_tool_calls),
                             finish_reason=finish_reason, stream=False)
+

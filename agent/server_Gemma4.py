@@ -11,18 +11,17 @@ from server import init_engine
 
 device = "GPU"
 
-model = "OmniCoder-9B-int4-sym-g128"
+model = "gemma-4-E2B-it-int8-asym"
 model_path = f"../models/{model}/1"
 model_cache_dir = f"../models_cache/{model}"
 
 streamer_config = StreamerConfig()
 
 generate_config = openai.GenerateConfig(
-    default_temperature=0.4,
+    default_temperature=1.0,
     default_top_p=0.95,
-    default_top_k=40,
-    default_min_p=0.05,
-    default_repetition_penalty=1.1,
+    default_top_k=64,
+    default_min_p=0.05
 )
 
 # scheduler_config = ov_genai.SchedulerConfig()
@@ -41,7 +40,7 @@ pipe_config = {
     # "KV_CACHE_PRECISION": "u4",
     "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crashes process
     # "scheduler_config": scheduler_config,
-    "ATTENTION_BACKEND": "PA",
+    # "ATTENTION_BACKEND": "PA",
     # "ATTENTION_BACKEND": "SDPA",
 }
 

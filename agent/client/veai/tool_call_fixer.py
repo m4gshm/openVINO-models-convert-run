@@ -1,16 +1,17 @@
-import json
 import logging
 from typing import Any
 
-import json_repair
-
-from common.openai_model import ToolCall
+from common.openai_model import ToolCall, ToolDefinition
 
 log = logging.getLogger(__name__)
 
 
 def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
-    # function = tool_call.function
+    function = tool_call.function
+    if "edit_file" == function.name:
+        pass
+    elif "write_file" == function.name:
+        pass
     # if "ask_user_with_options" == function.name:
     #     args_raw = function.arguments
     #     try:
@@ -46,3 +47,43 @@ def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
     #         log.info(f"function after repairing, function {function.name}, arguments '{args}'")
 
     return tool_call
+
+
+def fix_tool_definition_optional_property_as_null_type(tool: ToolDefinition) -> ToolDefinition:
+    function = tool.function
+    function.parameters = _fix_tool_definition_optional_property_as_null_type(function.parameters, function.name)
+    return tool
+
+
+def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, Any], parent_name: str) -> dict[str, Any]:
+    properties = parameters.get("properties", {})
+    required: list | None = parameters.get("required")
+    for prop_name, prop_params in properties.items():
+        params: dict[str, Any] = prop_params
+        type = params.get("type")
+        if isinstance(type, list):
+            if len(type) >= 1:
+                opt = False
+                for i in range(1, len(type)):
+                    if type[i] == "null":
+                        opt = True
+                        break
+
+                new_type = type[0]
+                params["type"] = new_type
+
+                if opt and required:
+                    required.remove(prop_name)
+                    parameters["required"] = required
+                    
+                log.debug(
+                    f"fix parameter type: parent object '{parent_name}', property '{prop_name}',"
+                    f" new type '{new_type}', old type '{type}', optional {opt}")
+
+                if type == "object":
+                    sub_properties = params.get("properties")
+                    if isinstance(sub_properties, dict):
+                        params["properties"] = _fix_tool_definition_optional_property_as_null_type(sub_properties,
+                                                                                                   prop_name)
+
+    return properties

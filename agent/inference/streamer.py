@@ -82,10 +82,10 @@ class Streamer(ov_genai.StreamerBase):
         # by default conversation is opened by assistant in chat template
         self.states: list[State] = [State.CONVERSATION]
         self.in_conversation = True
-
+        self.thinking_progress_counter = 0
         if start_thinking > 0:
-            self.thinking_progress_counter = 1
             self.states.append(State.THINK)
+            self.thinking_progress_counter += 1
 
     def end(self) -> None:
         self.full_generated = ""
