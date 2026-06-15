@@ -66,6 +66,10 @@ LOGGING_CONFIG = {
             "handlers": ["file_http"],
             "propagate": False,
         },
+        "veai.tool_call_fixer": {
+            "level": "INFO",
+            "propagate": True,
+        },
         "inference": {
             "level": "DEBUG",
             "propagate": True,

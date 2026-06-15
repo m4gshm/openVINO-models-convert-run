@@ -12,6 +12,8 @@ def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
         pass
     elif "write_file" == function.name:
         pass
+    elif "read_file" == function.name:
+        pass
     # if "ask_user_with_options" == function.name:
     #     args_raw = function.arguments
     #     try:
@@ -75,7 +77,7 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
                 if opt and required:
                     required.remove(prop_name)
                     parameters["required"] = required
-                    
+
                 log.debug(
                     f"fix parameter type: parent object '{parent_name}', property '{prop_name}',"
                     f" new type '{new_type}', old type '{type}', optional {opt}")

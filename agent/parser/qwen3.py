@@ -113,6 +113,7 @@ class Qwen3Parser(Parser):
 
         arguments: dict[str, str | dict[str, Any] | list[Any]] = {}
 
+        partial = False
         parameter_blocks = function_block.split(PARAMETER_START_PREF)
         for parameter_block in parameter_blocks:
             parameter_block = parameter_block.lstrip()

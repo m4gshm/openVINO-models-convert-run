@@ -18,7 +18,7 @@ model_cache_dir = f"../models_cache/{model}"
 streamer_config = StreamerConfig()
 
 generate_config = openai.GenerateConfig(
-    default_temperature=0.4,
+    default_temperature=0.6,
     default_top_p=0.95,
     default_top_k=40,
     default_min_p=0.05,
