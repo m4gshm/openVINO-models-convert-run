@@ -11,7 +11,7 @@ from server import init_engine
 
 device = "GPU"
 
-model = "OmniCoder-9B-int4-sym-g128"
+model = "Qwen2.5-Coder-7B-Instruct-int4-sym-g128-r1-se"
 model_path = f"../models/{model}/1"
 model_cache_dir = f"../models_cache/{model}"
 

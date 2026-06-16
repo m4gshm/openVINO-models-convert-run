@@ -5,11 +5,11 @@ from typing import Any
 import openvino_genai as ov_genai
 from fastapi import FastAPI
 
-from common.log import LoggingRoute
 from common.metric_mem import get_current_memory
 from inference.streamer import StreamerConfig
 from openai import GenerateConfig
 from openai.engine_rest import Controller
+from openai.logger_rest import LoggingRoute
 from parser.qwen3 import Qwen3Parser
 
 
@@ -42,8 +42,8 @@ def init_engine(model: str, model_path: str, device: str, generate_config: Gener
     parser = Qwen3Parser()
 
     app: FastAPI = FastAPI()
-    app.router.route_class = LoggingRoute
-    controller = Controller(model_name=model, parser=parser, pipe=pipe, generate_config=generate_config,
-                            streamer_config=streamer_config)
-    app.include_router(controller.router)
+    app_router = app.router
+    app_router.route_class = LoggingRoute
+    Controller(model_name=model, parser=parser, pipe=pipe, generate_config=generate_config,
+               streamer_config=streamer_config, router=app_router)
     return app

@@ -58,15 +58,6 @@ class Qwen3Parser(Parser):
         return prompt.endswith(REASONING_START, 0, len(prompt) - 1) if prompt.endswith(
             '\n') else prompt.endswith(REASONING_START)
 
-    def is_partial_tool_call(self,text: str) -> bool:
-        strip = text.strip()
-        if strip.endswith(TOOL_CALL_END):
-            return False
-        elif strip.endswith(FUNCTION_END):
-            return False
-        else:
-            return True
-
     def parse_tool_calls(self,text: str, supported_functions: dict[str, FunctionDefinition] | None = None) -> tuple[
         list[ToolCall], bool]:
         text = text.lstrip()

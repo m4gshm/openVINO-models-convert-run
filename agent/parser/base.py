@@ -34,10 +34,6 @@ class Parser(ABC):
         pass
 
     @abstractmethod
-    def is_partial_tool_call(self, text: str) -> bool:
-        pass
-
-    @abstractmethod
     def parse_tool_calls(self, text: str, supported_functions: dict[str, FunctionDefinition] | None = None) -> tuple[
         list[ToolCall], bool]:
         pass

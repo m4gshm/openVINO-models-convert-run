@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Generator
 
 import openvino_genai as ov_genai
-from fastapi import APIRouter
+from fastapi.routing import APIRouter
 from openvino_genai import VLMPipeline, ChatHistory, GenerationFinishReason
 from openvino_genai.py_openvino_genai import MeanStdPair
 from starlette.requests import Request
@@ -38,8 +38,7 @@ MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
 class Controller:
     def __init__(self, model_name: str, parser: Parser, pipe: VLMPipeline, streamer_config: StreamerConfig,
-                 generate_config: GenerateConfig):
-        router = APIRouter()
+                 generate_config: GenerateConfig, router: APIRouter = APIRouter()):
         router.post("/v1/chat/completions")(self.chat)
         self.router = router
         self.parser = parser

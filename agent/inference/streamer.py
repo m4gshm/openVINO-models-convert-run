@@ -175,11 +175,8 @@ class Streamer(ov_genai.StreamerBase):
                 else:
                     log.info("tool call ended by end conversation token")
                 self.__remove_state(expected_state=State.TOOL_CALL)
-                if self.parser.is_partial_tool_call(self.tool_call_expression):
-                    log.info(
-                        f"partial tool call ended by end conversation token '{self.tool_call_expression}'")
-                else:
-                    self.chunk_queue.put(handle_tool_call())
+
+                self.chunk_queue.put(handle_tool_call())
             else:
                 self.__remove_state(expected_state=State.CONVERSATION)
 
@@ -332,5 +329,10 @@ class Streamer(ov_genai.StreamerBase):
                             log.warning(
                                 f"prevent generating by unexpected role {self.role}, token '{token}'")
                     else:
-                        log.warning(f"generated out of conversation: '{self.phrase.rstrip()}'")
+                        phrase_rstrip = self.phrase.rstrip()
+                        log_msg = f"generated out of conversation: '{phrase_rstrip}'"
+                        if len(phrase_rstrip) > 0:
+                            log.warning(log_msg)
+                        else:
+                            log.debug(log_msg)
         return None

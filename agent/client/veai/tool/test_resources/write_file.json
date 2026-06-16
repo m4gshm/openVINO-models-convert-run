@@ -1,0 +1,27 @@
+{
+  "type": "function",
+  "function": {
+    "name": "write_file",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "target_file": {
+          "type": "string",
+        },
+        "content": {
+          "type": "string",
+        },
+        "allow_overwrite": {
+          "type": "boolean",
+        }
+      },
+      "required": [
+        "target_file",
+        "content",
+        "allow_overwrite"
+      ]
+    },
+    "strict": true
+  }
+}

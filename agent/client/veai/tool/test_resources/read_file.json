@@ -1,0 +1,31 @@
+{
+  "type": "function",
+  "function": {
+    "name": "read_file",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "target_file": {
+          "type": "string",
+        },
+        "start_line": {
+          "type": "integer",
+        },
+        "end_line": {
+          "type": "integer",
+        },
+        "line_offset": {
+          "type": "integer",
+        }
+      },
+      "required": [
+        "target_file",
+        "start_line",
+        "end_line",
+        "line_offset"
+      ]
+    },
+    "strict": true
+  }
+}

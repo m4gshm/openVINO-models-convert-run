@@ -1,0 +1,30 @@
+{
+  "type": "function",
+  "function": {
+    "name": "ask_user_with_options",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "is_multiple_choice": {
+          "type": "boolean",
+        }
+      },
+      "required": [
+        "question",
+        "options",
+        "is_multiple_choice"
+      ]
+    },
+    "strict": true
+  }
+}
