@@ -71,7 +71,6 @@ class Controller:
 
         is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (body.model_config.get("reasoning") or True)
 
-        body.response_format = ResponseFormat(type="json_object")
         messages = body.messages
 
         last_message = messages[-1] if messages else None
