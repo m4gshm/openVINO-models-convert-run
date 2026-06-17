@@ -18,14 +18,22 @@ model_path = f"../models/{model}/1"
 model_cache_dir = f"../models_cache/{model}"
 
 streamer_config = StreamerConfig()
+scheduler_config = py_openvino_genai.SchedulerConfig()
+scheduler_config.max_num_batched_tokens = 256
+scheduler_config.cache_size = 8
+# scheduler_config.max_num_seqs = 1
+scheduler_config.dynamic_split_fuse = True
+# scheduler_config.use_cache_eviction = True
+
 
 generate_config = openai.GenerateConfig(
-    default_temperature=0.5,
+    default_temperature=0.4,
     default_top_p=0.95,
     default_top_k=40,
     default_min_p=0.05,
     default_repetition_penalty=1.1,
 )
+
 
 pipeline_properties = {
     "CACHE_DIR": model_cache_dir,
@@ -40,13 +48,6 @@ tokenizer_properties = {
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
-
-scheduler_config = py_openvino_genai.SchedulerConfig()
-scheduler_config.max_num_batched_tokens = 256
-scheduler_config.cache_size = 4
-scheduler_config.max_num_seqs = 2
-scheduler_config.dynamic_split_fuse = True
-scheduler_config.use_cache_eviction = True
 
 if __name__ == "__main__":
     log = logging.getLogger(__name__)

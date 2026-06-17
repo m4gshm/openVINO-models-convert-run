@@ -44,7 +44,7 @@ request_counter = itertools.count(start=0)
 
 class ControllerConfig(BaseModel):
     model_name: str
-    request_timeout: timedelta = timedelta(minutes=2)
+    request_timeout: timedelta = timedelta(minutes=5)
 
 
 class Controller:
@@ -199,6 +199,7 @@ class Controller:
                 yield f"data: {chunk.model_dump_json()}\n\n"
 
         def chunk_generator() -> Generator[OpenAICompletionResponse, None, None]:
+            before_generate_mem = get_current_memory()
             try:
                 if log_inference.isEnabledFor(logging.DEBUG):
                     log_inference.debug(
@@ -211,8 +212,6 @@ class Controller:
                         f"frequency_penalty={generation_config.frequency_penalty:.2f}")
                 else:
                     log_inference.info(f"inference starting")
-
-                before_generate_mem = get_current_memory()
 
                 start_thinking = self.parser.is_prompt_start_thinking(full_prompt)
                 streamer = (Streamer(tokenizer=tokenizer, parser=self.parser, is_stop=is_disconnected,
@@ -231,6 +230,7 @@ class Controller:
                     request_time = timedelta(seconds=(now_time - request_start))
                     if request_time >= self.config.request_timeout:
                         log.warning("inference request timeout")
+                        generate_result.stop(GenerationFinishReason.NONE)
                         yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
 
                 unique_id = str(uuid.uuid4())
@@ -258,10 +258,7 @@ class Controller:
                             yield new_response(stream=stream, finish_reason=stop_signal.value)
                             break
 
-                after_generate_mem = get_current_memory()
-                delta = after_generate_mem - before_generate_mem
                 log.info(f"inference finished with reason {final_stop_reason}")
-                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, delta: {delta:.2f} MB")
             except Exception as e:
                 log_inference.error(f"inference error: {e}", exc_info=e)
                 yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
@@ -269,6 +266,9 @@ class Controller:
             finally:
                 with self.active_handles_lock:
                     del self.active_handles[request_id]
+                after_generate_mem = get_current_memory()
+                delta = after_generate_mem - before_generate_mem
+                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, delta: {delta:.2f} MB")
 
         if stream:
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
