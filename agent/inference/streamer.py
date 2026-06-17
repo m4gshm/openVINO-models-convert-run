@@ -2,11 +2,9 @@ import logging
 import time
 from datetime import timedelta
 from enum import Enum
-from queue import Queue
-from typing import Sequence, SupportsInt, Callable, List, Any
+from typing import Sequence, SupportsInt, Callable, List
 
-import openvino_genai as ov_genai
-from openvino_genai.py_openvino_genai import StreamingStatus, Tokenizer
+from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason
 from pydantic import TypeAdapter, BaseModel
 
 from common.openai_api import new_chunk_response
@@ -29,7 +27,39 @@ class State(Enum):
     TOOL_CALL = 3
 
 
-class Streamer(ov_genai.StreamerBase):
+class StopSignal(Enum):
+    STOP = "stop", GenerationFinishReason.STOP
+    TOOL_CALL = "tool_call", GenerationFinishReason.TOOL_CALL
+    CANCEL = "cancel", GenerationFinishReason.NONE
+
+    def __new__(cls, *args, **kwds):
+        obj = object.__new__(cls)
+        obj._value_ = args[0]
+        return obj
+
+    def __init__(self, _: str, finish_reason: GenerationFinishReason):
+        self._finish_reason_ = finish_reason
+
+    def __str__(self):
+        return self.value
+
+    @property
+    def value(self) -> str:
+        return self._value_
+
+    @property
+    def finish_reason(self):
+        return self._finish_reason_
+
+
+def get_stop_signal_by_finish_reason(finish_reason: GenerationFinishReason) -> StopSignal | None:
+    for e in StopSignal:
+        if e.finish_reason == finish_reason:
+            return e
+    return None
+
+
+class Streamer:
     def __clean_phrase(self):
         self.phrase = ""
         self.phrase_tick = None
@@ -44,29 +74,25 @@ class Streamer(ov_genai.StreamerBase):
         else:
             self.log.error(f"unexpected state {s}, expected {expected_state}")
 
-    def __init__(self, tokenizer: Tokenizer, parser: Parser, chunk_queue: Queue[OpenAICompletionResponse | None],
-                 stop_stream_handling: Queue[bool], start_stream_handling: Queue[bool],
-                 is_disconnected: Callable[[], bool], supported_functions: dict[str, FunctionDefinition],
+    def __init__(self, tokenizer: Tokenizer, parser: Parser, is_stop: Callable[[], bool],
+                 supported_functions: dict[str, FunctionDefinition],
                  config: StreamerConfig, start_thinking: bool = True):
         super().__init__()
         self.log = logging.getLogger("inference.stream")
         self.tokenizer = tokenizer
         self.parser = parser
-        self.chunk_queue = chunk_queue
-        self.is_disconnected = is_disconnected
+        self.is_stop = is_stop
         self.supported_functions = supported_functions
         self.config = config
-        self.stop_stream_handling = stop_stream_handling
-        self.start_stream_handling = start_stream_handling
         self.role = ROLE_ASSISTANT
         self.prev_role = None
-        self.tool_call_expression = ""
-        self.tool_call_parsing_in_progress = False
-        self.tool_call_count = 0
         self.token_conversation_start_number: int = -1
         self.expect_role = False
         self.user_phrase_generated = False
         self.phrase_tick: float | None = None
+        self.tool_call_count = 0
+        self.tool_call_expression = ""
+        self.tool_call_parsing_in_progress = False
         self.tool_call_parsing_tick: float | None = None
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False
@@ -87,43 +113,36 @@ class Streamer(ov_genai.StreamerBase):
             self.states.append(State.THINK)
             self.thinking_progress_counter += 1
 
-    def end(self) -> None:
-        self.full_generated = ""
-        self.log.debug("stream end")
-
-    def write(self, tokens: Sequence[SupportsInt]) -> StreamingStatus:
+    def write(self, tokens: Sequence[SupportsInt]) -> tuple[list[OpenAICompletionResponse], StopSignal | None]:
         log = self.log
 
         if not self.started:
-            self.start_stream_handling.put(True)
             self.started = True
 
         decoded_tokens: list[str] = self.tokenizer.decode(tokens=[tokens], skip_special_tokens=False)
 
-        if self.is_disconnected():
+        if self.is_stop():
             log.info("stream finished by user disconnected")
-            return StreamingStatus.STOP
+            return [], StopSignal.STOP
 
-        if not self.stop_stream_handling.empty() and self.stop_stream_handling.get_nowait():
-            log.debug("stream finished by stop signal")
-            return StreamingStatus.STOP
-
+        result: list[OpenAICompletionResponse] = []
         try:
             for t in decoded_tokens:
                 self.token_counter += 1
                 log.debug(f"token '{t}', num {self.token_counter}")
                 self.full_generated += t
-                stream_status = self.process_token(t, self.token_counter)
-                if not (stream_status == StreamingStatus.RUNNING or stream_status is None):
+                token_result, stop_signal = self.process_token(t, self.token_counter)
+                result += token_result
+                if stop_signal:
                     # log
-                    return stream_status
+                    return result, stop_signal
         except Exception as e:
             log.error(f"streamer error: {e}", exc_info=e)
-            return StreamingStatus.CANCEL
+            return result, StopSignal.CANCEL
 
-        return StreamingStatus.RUNNING
+        return result, None
 
-    def process_token(self, token: str, token_number: int) -> StreamingStatus | None:
+    def process_token(self, token: str, token_number: int) -> tuple[list[OpenAICompletionResponse], StopSignal | None]:
         log = self.log
 
         def handle_tool_call() -> OpenAICompletionResponse:
@@ -164,7 +183,7 @@ class Streamer(ov_genai.StreamerBase):
                     f"phrase before conversation: '{phrase}', last token num: {token_number}")
 
             self.__clean_phrase()
-
+            return [], None
         elif self.parser.is_conversation_end(token):
             self.in_conversation = False
             if self.__get_last_state() == State.TOOL_CALL:
@@ -176,7 +195,7 @@ class Streamer(ov_genai.StreamerBase):
                     log.info("tool call ended by end conversation token")
                 self.__remove_state(expected_state=State.TOOL_CALL)
 
-                self.chunk_queue.put(handle_tool_call())
+                return [handle_tool_call()], None
             else:
                 self.__remove_state(expected_state=State.CONVERSATION)
 
@@ -196,13 +215,14 @@ class Streamer(ov_genai.StreamerBase):
             if self.empty_conversation_counter > 20:
                 log.warning(
                     f"many empty conversations ({self.empty_conversation_counter}), interrupt inference")
-                return StreamingStatus.CANCEL
+                return [], StopSignal.CANCEL
 
-            if self.tool_call_count > 0:
-                log.debug(
-                    f"stop inference by ending conversation with tool calling (count {self.tool_call_count})")
-                return StreamingStatus.TOOL_CALL_STOP
-            return None
+            # if self.tool_call_count > 0:
+            #     log.debug(
+            #         f"stop inference by ending conversation with tool calling (count {self.tool_call_count})")
+            #     return StreamingStatus.TOOL_CALL_STOP
+
+            return [], None
         elif self.expect_role and self.in_conversation and token_number - self.token_conversation_start_number == 1:
             if len(token.rstrip()) > 0:  # conversation role
                 self.expect_role = False
@@ -213,7 +233,7 @@ class Streamer(ov_genai.StreamerBase):
                 log.debug(f"set conversation role {self.role}, prev {self.prev_role}")
             else:
                 log.debug("empty role for conversation start")
-
+            return [], None
         elif self.parser.think_is_started(token):
             self.states.append(State.THINK)
             if self.tool_call_parsing_in_progress:
@@ -225,6 +245,7 @@ class Streamer(ov_genai.StreamerBase):
             else:
                 log.debug(
                     f"More thinking for God of thinking!!! {self.thinking_progress_counter}")
+            return [], None
         elif self.parser.think_is_over(token):
             self.__remove_state(expected_state=State.THINK)
             if self.tool_call_parsing_in_progress:
@@ -239,6 +260,7 @@ class Streamer(ov_genai.StreamerBase):
                 else:
                     log.debug(
                         f"intensity of thinking decreased {self.thinking_progress_counter}")
+            return [], None
         elif self.parser.is_tool_call_start(token):
             self.states.append(State.TOOL_CALL)
             log.debug(f"tool call start: {token}")
@@ -253,42 +275,44 @@ class Streamer(ov_genai.StreamerBase):
             self.tool_call_parsing_start_time = now_time
             self.tool_call_parsing_in_progress = True
             self.tool_call_expression += token
+            return [], None
         elif self.parser.is_tool_call_end(token):
             self.tool_call_parsing_start_time = None
             self.__remove_state(expected_state=State.TOOL_CALL)
             log.debug(f"tool call end: {token}")
             self.tool_call_expression += token
-            self.chunk_queue.put(handle_tool_call())
+            return [handle_tool_call()], StopSignal.TOOL_CALL
         else:
             last_state = self.__get_last_state()
             if self.tool_call_parsing_in_progress and last_state == State.TOOL_CALL:
+                result: list[OpenAICompletionResponse] = []
                 self.tool_call_expression += token
                 parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
                 if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
                     chunk = new_chunk_response(role=ROLE_ASSISTANT, content=f"Long parsing of tool call "
                                                                             f"({format_time(self.config.tool_call_parting_duration_warning)})")
-                    self.chunk_queue.put(chunk)
+                    result.append(chunk)
                     self.tool_call_parsing_long_time_warned = True
                 elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
                     chunk = new_chunk_response(role=ROLE_ASSISTANT, content=f"Tool call parsing exceeded time limit"
                                                                             f" {format_time(self.config.tool_call_parting_duration_limit)}.\n"
                                                                             f"```\n{self.tool_call_expression}\n```")
-                    self.chunk_queue.put(chunk)
+                    result.append(chunk)
                     self.tool_call_parsing_max_time_warned = True
-
                 tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
                 if tool_call_snapshot_time >= 10:
                     self.tool_call_parsing_tick = now_time
                     log.info(f"tool call part: {self.tool_call_expression}")
-                    words = self.tool_call_expression.split(" ")
-                    word_dict: dict[str, Any] = {}
-                    for i, word in enumerate(words):
-                        word_stat: dict[str, Any] = word_dict.get(word, {})
-                        count = word_stat.get("count", 0) + 1
-                        word_stat["count"] = count
-                        position = word_stat.get("position", [])
-                        position.append(i)
-                        word_stat["position"] = position
+                    # words = self.tool_call_expression.split(" ")
+                    # word_dict: dict[str, Any] = {}
+                    # for i, word in enumerate(words):
+                    #     word_stat: dict[str, Any] = word_dict.get(word, {})
+                    #     count = word_stat.get("count", 0) + 1
+                    #     word_stat["count"] = count
+                    #     position = word_stat.get("position", [])
+                    #     position.append(i)
+                    #     word_stat["position"] = position
+                return result, None
             else:
                 is_assistant = ROLE_ASSISTANT == self.role
                 if not is_assistant:
@@ -308,9 +332,9 @@ class Streamer(ov_genai.StreamerBase):
                 if phrase_end:
                     phrase = self.phrase.rstrip()
                     if len(phrase) > 0:
+                        self.__clean_phrase()
                         log.info(
                             f"{self.role} phrase: '{phrase}', last token num: {token_number}")
-                        self.__clean_phrase()
 
                 if not last_state:
                     log.debug("no more conversations")
@@ -318,13 +342,14 @@ class Streamer(ov_genai.StreamerBase):
                     if self.no_conversation_counter > 5:
                         log.debug(
                             f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
-                        return StreamingStatus.STOP
+                    return [], StopSignal.STOP
                 else:
+                    result: list[OpenAICompletionResponse] = []
                     if self.in_conversation:
                         if is_assistant or not self.config.prevent_no_assistant_inference_output:
                             chunk = new_chunk_response(role=self.role, content=token,
                                                        thinking=self.thinking_progress_counter > 0)
-                            self.chunk_queue.put(chunk)
+                            result.append(chunk)
                         else:
                             log.warning(
                                 f"prevent generating by unexpected role {self.role}, token '{token}'")
@@ -335,4 +360,5 @@ class Streamer(ov_genai.StreamerBase):
                             log.warning(log_msg)
                         else:
                             log.debug(log_msg)
-        return None
+
+                    return result, None

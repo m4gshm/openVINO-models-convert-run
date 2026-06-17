@@ -1,7 +1,9 @@
 import logging.config
 import os
+from zipapp import shebang_encoding
 
 import uvicorn
+from openvino_genai import py_openvino_genai
 from pydantic.json import pydantic_encoder
 
 import openai
@@ -25,31 +27,26 @@ generate_config = openai.GenerateConfig(
     default_repetition_penalty=1.1,
 )
 
-# scheduler_config = ov_genai.SchedulerConfig()
-# scheduler_config.enable_prefix_caching = True
-# scheduler_config.max_num_batched_tokens = 256
-# scheduler_config.max_num_seqs = 1
-# scheduler_config.cache_interval_multiplier = None  # 2
-# scheduler_config.dynamic_split_fuse = True
-# scheduler_config.use_sparse_attention = False
-# scheduler_config.cache_size = 8
-# scheduler_config.use_cache_eviction = True
-
-pipe_config = {
+pipeline_properties = {
     "CACHE_DIR": model_cache_dir,
-    # "GPU_ENABLE_LARGE_ALLOCATIONS": "YES",
-    # "KV_CACHE_PRECISION": "u4",
-    "PERFORMANCE_HINT": "LATENCY",  # THROUGHPUT crashes process
-    # "scheduler_config": scheduler_config,
-    "ATTENTION_BACKEND": "PA",
-    # "ATTENTION_BACKEND": "SDPA",
-    "ENABLE_MMAP": True
+    "PERFORMANCE_HINT": "LATENCY",
+}
+
+tokenizer_properties = {
+    "LOG_LEVEL": "LOG_TRACE",
 }
 
 # os.environ["LOG_LEVEL"] = "4"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
+
+scheduler_config = py_openvino_genai.SchedulerConfig()
+scheduler_config.max_num_batched_tokens = 256
+scheduler_config.cache_size = 4
+scheduler_config.max_num_seqs = 2
+scheduler_config.dynamic_split_fuse = True
+scheduler_config.use_cache_eviction = True
 
 if __name__ == "__main__":
     log = logging.getLogger(__name__)
@@ -61,7 +58,11 @@ if __name__ == "__main__":
             log_format_prefix + " - %(client_addr)s - '%(request_line)s' %(status_code)s"
     )
 
-    app = init_engine(model=model, model_path=model_path, device=device, generate_config=generate_config,
-                      streamer_config=streamer_config, pipe_config=pipe_config)
+    app = init_engine(model=model, model_path=model_path, device=device,
+                      generate_config=generate_config,
+                      streamer_config=streamer_config,
+                      scheduler_config=scheduler_config,
+                      pipeline_properties=pipeline_properties,
+                      tokenizer_properties=tokenizer_properties)
 
     uvicorn.run(app, host="127.0.0.1", port=8888)

@@ -1,23 +1,27 @@
 import asyncio
+import itertools
 import logging
-import queue
+import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import Any, Generator
 
-import openvino_genai as ov_genai
+import openvino_genai
 from fastapi.routing import APIRouter
-from openvino_genai import VLMPipeline, ChatHistory, GenerationFinishReason
-from openvino_genai.py_openvino_genai import MeanStdPair
+from openvino_genai import ChatHistory
+from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason
+from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from common.metric_mem import get_current_memory
 from common.openai_api import new_response, new_tool_call, new_message
-from common.openai_model import OpenAIChatCompletionRequest, ChatCompletionMessageParam, ResponseFormat, \
-    ChatCompletionMessage, FunctionDefinition, OpenAICompletionResponse, ToolCall
+from common.openai_model import OpenAIChatCompletionRequest, ChatCompletionMessageParam, ChatCompletionMessage, \
+    FunctionDefinition, OpenAICompletionResponse, ToolCall
 from common.roles import ROLE_TOOL, ROLE_ASSISTANT
-from inference.streamer import Streamer, StreamerConfig
+from inference.streamer import Streamer, StreamerConfig, StopSignal, get_stop_signal_by_finish_reason
 from openai import GenerateConfig
 from parser.base import Parser
 from preprocess.tool_call import PreprocessToolCall
@@ -35,18 +39,54 @@ USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
 MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
+request_counter = itertools.count(start=0)
+
+
+class ControllerConfig(BaseModel):
+    model_name: str
+    request_timeout: timedelta = timedelta(minutes=2)
+
 
 class Controller:
-    def __init__(self, model_name: str, parser: Parser, pipe: VLMPipeline, streamer_config: StreamerConfig,
-                 generate_config: GenerateConfig, router: APIRouter = APIRouter()):
+    def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
+                 streamer_config: StreamerConfig, generate_config: GenerateConfig, router: APIRouter = APIRouter()):
         router.post("/v1/chat/completions")(self.chat)
         self.router = router
         self.parser = parser
         self.pipe = pipe
         self.streamer_config = streamer_config
         self.generate_config = generate_config
-        self.model_name = model_name
+        self.config = config
         self.executor = ThreadPoolExecutor()
+        self.active_handles_lock = threading.Lock()
+        self.active_handles: dict[int, GenerationHandle] = {}
+
+        self.stop_event = threading.Event()
+        self.engine_thread = threading.Thread(target=self._engine_loop, daemon=True)
+        self.engine_thread.start()
+
+    def _engine_loop(self):
+        while not self.stop_event.is_set():
+            if self.pipe.has_non_finished_requests():
+                self.pipe.step()
+            else:
+                time.sleep(0.005)
+
+    def shutdown(self):
+        with self.active_handles_lock:
+            active_ids = list(self.active_handles.keys())
+            for req_id in active_ids:
+                handle = self.active_handles.get(req_id)
+                if handle:
+                    try:
+                        # log
+                        handle.cancel()
+                    except Exception as e:
+                        # log
+                        pass
+
+        self.stop_event.set()
+        self.engine_thread.join(timeout=2.0)
 
     async def chat(self, body: OpenAIChatCompletionRequest, request: Request):
         def is_middleware_checkpoint(last_message: ChatCompletionMessageParam) -> str | None | bool:
@@ -69,7 +109,8 @@ class Controller:
                 # log.debug(f"disconnected http request check timeout")
             return disconnected
 
-        is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (body.model_config.get("reasoning") or True)
+        is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
+                body.model_config.get("reasoning") or True)
 
         messages = body.messages
 
@@ -121,24 +162,15 @@ class Controller:
         if self.generate_config.reasoning_supported:
             extra_context["enable_thinking"] = is_reasoning_enabled
 
-        # for i, t in enumerate(tools_raw):
-        #     try:
-        #         tokenizer.apply_chat_template(history=chat_history,
-        #                                       add_generation_prompt=True,
-        #                                       tools=[t],
-        #                                       extra_context=extra_context)
-        #     except Exception as e:
-        #         t = tools_raw[i]
-        #         log.error(f"error on {i}, {t}, {e}")
+        request_id = next(request_counter)
 
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     tools=tools_raw,
                                                     extra_context=extra_context)
-
         log_inference_prompt.debug(full_prompt)
 
-        generation_config = ov_genai.GenerationConfig()
+        generation_config = openvino_genai.py_openvino_genai.GenerationConfig()
         generation_config.max_new_tokens = body.max_completion_tokens or self.generate_config.default_max_new_tokens
         generation_config.max_length = body.max_tokens or self.generate_config.default_max_tokens
         generation_config.apply_chat_template = False if full_prompt else True
@@ -167,104 +199,76 @@ class Controller:
                 yield f"data: {chunk.model_dump_json()}\n\n"
 
         def chunk_generator() -> Generator[OpenAICompletionResponse, None, None]:
-            chunk_queue: queue.Queue[OpenAICompletionResponse | None] = queue.Queue()
-            stop_stream_handling: queue.Queue[bool] = queue.Queue()
-            start_stream_handling: queue.Queue[bool] = queue.Queue()
-
-            def run_inference():
-                try:
-                    self.pipe.start_chat()
-                    if log_inference.isEnabledFor(logging.DEBUG):
-                        log_inference.debug(
-                            f"inference starting with parameters max_length={generation_config.max_length}, "
-                            f"max_new_tokens={generation_config.max_new_tokens}, "
-                            f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
-                            f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
-                            f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
-                            f"presence_penalty={generation_config.presence_penalty:.2f}, "
-                            f"frequency_penalty={generation_config.frequency_penalty:.2f}")
-                    else:
-                        log_inference.info(f"inference starting")
-
-                    before_generate_mem = get_current_memory()
-
-                    start_thinking = self.parser.is_prompt_start_thinking(full_prompt)
-                    generate_result = self.pipe.generate(prompt=full_prompt, generation_config=generation_config,
-                                                         streamer=(Streamer(tokenizer=tokenizer, parser=self.parser,
-                                                                            chunk_queue=chunk_queue,
-                                                                            is_disconnected=is_disconnected,
-                                                                            supported_functions=function_by_name,
-                                                                            stop_stream_handling=stop_stream_handling,
-                                                                            start_stream_handling=start_stream_handling,
-                                                                            start_thinking=start_thinking,
-                                                                            config=self.streamer_config)))
-                    chunk_queue.put_nowait(None)
-                    after_generate_mem = get_current_memory()
-                    generate_cost = after_generate_mem - before_generate_mem
-                    log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
-
-                    metrics = generate_result.perf_metrics
-
-                    def to_str(d: MeanStdPair) -> str:
-                        return f"std {d.std} , mean {d.mean}"
-
-                    inference_finish_reasons = generate_result.finish_reasons
-                    log_msg = (
-                        f"inference finished with reason '{inference_finish_reasons}'\n"
-                        f"num_input_tokens:{metrics.get_num_input_tokens()}\n"
-                        f"generated_tokens:{metrics.get_num_generated_tokens()}\n"
-                        f"generate_duration: {to_str(metrics.get_generate_duration())}\n"
-                        f"inference_duration: {to_str(metrics.get_inference_duration())}\n"
-                        f"ttft: {to_str(metrics.get_ttft())}\n"
-                        f"throughput: {to_str(metrics.get_throughput())}\n"
-                    )
-                    if log_inference.isEnabledFor(logging.DEBUG):
-                        log_inference.debug(f"{log_msg}\nresult: {generate_result.texts}")
-                    else:
-                        log_inference.info(log_msg)
-
-                    inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
-                    if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                        log.warning(f"inference finished by unexpected status {inference_finish_reason}")
-
-                except Exception as e:
-                    log_inference.error(f"inference error: {e}", exc_info=e)
-                    raise
-                finally:
-                    self.pipe.finish_chat()
-
-            unique_id = str(uuid.uuid4())
-            inference_task = self.executor.submit(run_inference)
             try:
-                start_stream_handling.get()
-                stop_inference = False
-                while not stop_inference:
-                    if is_disconnected():
-                        break
-                    try:
-                        chunk = chunk_queue.get(timeout=20)
-                        if chunk:
-                            chunk.id = unique_id
-                            chunk.model = self.model_name
-                            yield chunk
-                        else:
-                            stop_inference = True
-                    except queue.Empty:
-                        pass
-                    except TimeoutError:
-                        pass
+                if log_inference.isEnabledFor(logging.DEBUG):
+                    log_inference.debug(
+                        f"inference starting with parameters max_length={generation_config.max_length}, "
+                        f"max_new_tokens={generation_config.max_new_tokens}, "
+                        f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
+                        f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
+                        f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
+                        f"presence_penalty={generation_config.presence_penalty:.2f}, "
+                        f"frequency_penalty={generation_config.frequency_penalty:.2f}")
+                else:
+                    log_inference.info(f"inference starting")
 
+                before_generate_mem = get_current_memory()
+
+                start_thinking = self.parser.is_prompt_start_thinking(full_prompt)
+                streamer = (Streamer(tokenizer=tokenizer, parser=self.parser, is_stop=is_disconnected,
+                                     supported_functions=function_by_name,
+                                     start_thinking=start_thinking,
+                                     config=self.streamer_config))
+                generate_result = self.pipe.add_request(request_id=request_id, prompt=full_prompt,
+                                                        generation_config=generation_config, images=[], videos=[])
+                with self.active_handles_lock:
+                    self.active_handles[request_id] = generate_result
+
+                request_start = time.perf_counter()
+                while not generate_result.can_read():
+                    time.sleep(0.05)
+                    now_time = time.perf_counter()
+                    request_time = timedelta(seconds=(now_time - request_start))
+                    if request_time >= self.config.request_timeout:
+                        log.warning("inference request timeout")
+                        yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+
+                unique_id = str(uuid.uuid4())
+                final_stop_reason = GenerationFinishReason.NONE
+                while generate_result.can_read():
+                    read = generate_result.read()
+                    for k, generation_output in read.items():
+                        responses, stop_signal = streamer.write(generation_output.generated_ids)
+                        for response in responses:
+                            response.id = unique_id
+                            response.model = self.config.model_name
+                            yield response
+
+                        finish_reason = generation_output.finish_reason
+                        if finish_reason and finish_reason != GenerationFinishReason.NONE:
+                            final_stop_reason = finish_reason
+                            stop_signal = get_stop_signal_by_finish_reason(finish_reason)
+                            if not stop_signal:
+                                stop_signal = StopSignal.STOP
+                            yield new_response(stream=stream, finish_reason=stop_signal.value)
+                            break
+                        elif stop_signal:
+                            final_stop_reason = stop_signal.finish_reason
+                            generate_result.stop(final_stop_reason)
+                            yield new_response(stream=stream, finish_reason=stop_signal.value)
+                            break
+
+                after_generate_mem = get_current_memory()
+                delta = after_generate_mem - before_generate_mem
+                log.info(f"inference finished with reason {final_stop_reason}")
+                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, delta: {delta:.2f} MB")
             except Exception as e:
-                log.error(f"chunk processing error: {e}", exc_info=e)
+                log_inference.error(f"inference error: {e}", exc_info=e)
+                yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+                raise
             finally:
-                stop_stream_handling.put_nowait(True)
-                if not inference_task.done():
-                    log.info("waiting for inference to complete")
-                    try:
-                        r = inference_task.result(timeout=20)
-                    except Exception as e:
-                        log.error(f"waiting inference completion error: {e}", exc_info=e)
-                log.info("inference handling is done")
+                with self.active_handles_lock:
+                    del self.active_handles[request_id]
 
         if stream:
             return StreamingResponse(stream_generator(), media_type="text/event-stream")
@@ -293,4 +297,3 @@ class Controller:
         return new_response(chat_completion_message=
                             new_message(full_content, full_reasoning_content, full_tool_calls),
                             finish_reason=finish_reason, stream=False)
-
