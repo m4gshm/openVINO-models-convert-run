@@ -203,7 +203,8 @@ class Controller:
             try:
                 if log_inference.isEnabledFor(logging.DEBUG):
                     log_inference.debug(
-                        f"inference starting with parameters max_length={generation_config.max_length}, "
+                        f"inference starting with parameters: do_sample={generation_config.do_sample},"
+                        f" max_length={generation_config.max_length}, "
                         f"max_new_tokens={generation_config.max_new_tokens}, "
                         f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
                         f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
