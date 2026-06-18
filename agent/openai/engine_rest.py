@@ -6,7 +6,6 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from os import pipe
 from typing import Any, Generator
 
 import openvino_genai
@@ -62,22 +61,22 @@ class Controller:
         self.active_handles_lock = threading.Lock()
         self.active_handles: dict[int, GenerationHandle] = {}
 
-        self.stop_event = threading.Event()
+        # self.stop_event = threading.Event()
         # self.engine_thread = threading.Thread(target=self._engine_loop, daemon=True)
         # self.engine_thread.start()
 
     # def _engine_loop(self):
     #     pass
-        # while not self.stop_event.is_set():
-            # if self.pipe.has_non_finished_requests():
-            #     self.step()
-            # else:
-            #     time.sleep(0.5)
+    # while not self.stop_event.is_set():
+    # if self.pipe.has_non_finished_requests():
+    #     self.step()
+    # else:
+    #     time.sleep(0.5)
 
-            # metrics = self.pipe.get_metrics()
-            # log.info(f"metrics: requests={metrics.requests}, scheduled_requests={metrics.scheduled_requests}, "
-            #          f"cache_size_in_bytes={metrics.cache_size_in_bytes}, "
-            #          f"kv_cache_size_in_bytes={metrics.kv_cache_size_in_bytes}")
+    # metrics = self.pipe.get_metrics()
+    # log.info(f"metrics: requests={metrics.requests}, scheduled_requests={metrics.scheduled_requests}, "
+    #          f"cache_size_in_bytes={metrics.cache_size_in_bytes}, "
+    #          f"kv_cache_size_in_bytes={metrics.kv_cache_size_in_bytes}")
 
     def step(self):
         try:
@@ -98,8 +97,8 @@ class Controller:
                         # log
                         pass
 
-        self.stop_event.set()
-        self.engine_thread.join(timeout=2.0)
+        # self.stop_event.set()
+        # self.engine_thread.join(timeout=2.0)
 
     async def chat(self, body: OpenAIChatCompletionRequest, request: Request):
         def is_middleware_checkpoint(last_message: ChatCompletionMessageParam) -> str | None | bool:
@@ -237,7 +236,6 @@ class Controller:
                 with self.active_handles_lock:
                     self.active_handles[request_id] = generate_result
 
-
                 def is_response_timeout(start):
                     now_time = time.perf_counter()
                     duration = timedelta(seconds=(now_time - start))
@@ -246,7 +244,6 @@ class Controller:
                         generate_result.stop(GenerationFinishReason.NONE)
                         return True
                     return False
-
 
                 request_start = time.perf_counter()
                 response_timeout = False
@@ -261,6 +258,7 @@ class Controller:
                     yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
                 else:
                     unique_id = str(uuid.uuid4())
+
                     def read():
                         started = False
                         request_start = time.perf_counter()
@@ -281,7 +279,7 @@ class Controller:
                                 else:
                                     generation_handle = generate_result.read()
                                     items = generation_handle.items()
-                                    if len(items)  == 0:
+                                    if len(items) == 0:
                                         log.error("empty generation")
                                         yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
                                         return
@@ -311,8 +309,8 @@ class Controller:
 
                 metrics = self.pipe.get_metrics()
                 log.info(f"inference finished: "
-                         f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024:.2f}MB, "
-                         f"cache_size={metrics.cache_size_in_bytes / 1024:.2f}MB "
+                         f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024 / 1024:.2f}MB, "
+                         f"cache_size={metrics.cache_size_in_bytes / 1024 / 1024:.2f}MB "
                          f"cache_usage={metrics.cache_usage}, "
                          f"max_cache_usage={metrics.max_cache_usage}, "
                          f"requests={metrics.requests}, "
