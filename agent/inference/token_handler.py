@@ -15,7 +15,7 @@ from parser.base import Parser
 from veai.tool_call_fixer import fix_incorrect_arguments
 
 
-class StreamerConfig(BaseModel):
+class TokenHandlerConfig(BaseModel):
     tool_call_parting_duration_warning: timedelta = timedelta(minutes=2)
     tool_call_parting_duration_limit: timedelta = timedelta(minutes=10)
     prevent_no_assistant_inference_output: bool = True
@@ -59,7 +59,7 @@ def get_stop_signal_by_finish_reason(finish_reason: GenerationFinishReason) -> S
     return None
 
 
-class Streamer:
+class TokenHandler:
     def __clean_phrase(self):
         self.phrase = ""
         self.phrase_tick = None
@@ -76,7 +76,7 @@ class Streamer:
 
     def __init__(self, tokenizer: Tokenizer, parser: Parser, is_stop: Callable[[], bool],
                  supported_functions: dict[str, FunctionDefinition],
-                 config: StreamerConfig, start_thinking: bool = True):
+                 config: TokenHandlerConfig, start_thinking: bool = True):
         super().__init__()
         self.log = logging.getLogger("inference.stream")
         self.tokenizer = tokenizer
@@ -111,7 +111,7 @@ class Streamer:
             self.states.append(State.THINK)
             self.thinking_progress_counter += 1
 
-    def write(self, tokens: Sequence[SupportsInt]) -> tuple[list[OpenAICompletionResponse], StopSignal | None]:
+    def handle_token(self, tokens: Sequence[SupportsInt]) -> tuple[list[OpenAICompletionResponse], StopSignal | None]:
         log = self.log
 
         decoded_tokens: list[str] = self.tokenizer.decode(tokens=[tokens], skip_special_tokens=False)

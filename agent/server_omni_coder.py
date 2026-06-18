@@ -1,5 +1,6 @@
 import logging.config
 import os
+import sys
 from zipapp import shebang_encoding
 
 import uvicorn
@@ -8,7 +9,7 @@ from pydantic.json import pydantic_encoder
 
 import openai
 from agent.common.log import log_format_prefix, log_format_simple
-from inference.streamer import StreamerConfig
+from inference.token_handler import TokenHandler, TokenHandlerConfig
 from server import init_engine
 
 device = "GPU"
@@ -17,14 +18,15 @@ model = "OmniCoder-9B-int4-sym-g128"
 model_path = f"../models/{model}/1"
 model_cache_dir = f"../models_cache/{model}"
 
-streamer_config = StreamerConfig()
+handler_config = TokenHandlerConfig()
 scheduler_config = py_openvino_genai.SchedulerConfig()
 scheduler_config.max_num_batched_tokens = 256
+scheduler_config.enable_prefix_caching = True
 scheduler_config.cache_size = 8
 # scheduler_config.max_num_seqs = 1
 scheduler_config.dynamic_split_fuse = True
-# scheduler_config.use_cache_eviction = True
-
+scheduler_config.use_cache_eviction = True
+# scheduler_config.use_sparse_attention = True
 
 generate_config = openai.GenerateConfig(
     default_temperature=0.4,
@@ -34,8 +36,8 @@ generate_config = openai.GenerateConfig(
     default_repetition_penalty=1.1,
 )
 
-
 pipeline_properties = {
+    # "sampler_num_threads": "1",
     "CACHE_DIR": model_cache_dir,
     "PERFORMANCE_HINT": "LATENCY",
 }
@@ -61,7 +63,7 @@ if __name__ == "__main__":
 
     app = init_engine(model=model, model_path=model_path, device=device,
                       generate_config=generate_config,
-                      streamer_config=streamer_config,
+                      handler_config=handler_config,
                       scheduler_config=scheduler_config,
                       pipeline_properties=pipeline_properties,
                       tokenizer_properties=tokenizer_properties)

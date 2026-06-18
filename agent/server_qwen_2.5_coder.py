@@ -61,6 +61,6 @@ if __name__ == "__main__":
     )
 
     app = init_engine(model=model, model_path=model_path, device=device, generate_config=generate_config,
-                      streamer_config=streamer_config, pipe_config=pipe_config)
+                      handler_config=streamer_config, pipe_config=pipe_config)
 
     uvicorn.run(app, host="127.0.0.1", port=8888)

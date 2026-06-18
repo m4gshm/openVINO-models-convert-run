@@ -8,15 +8,16 @@ from fastapi import FastAPI
 from openvino_genai import py_openvino_genai
 
 from common.metric_mem import get_current_memory
-from inference.streamer import StreamerConfig
+from inference.token_handler import TokenHandlerConfig
 from openai import GenerateConfig
 from openai.engine_rest import Controller, ControllerConfig
+from openai.engine_rest_vlm import VlmController
 from openai.logger_rest import LoggingRoute
 from parser.qwen3 import Qwen3Parser
 
 
 def init_engine(model: str, model_path: str, device: str, scheduler_config=py_openvino_genai.SchedulerConfig(),
-                generate_config=GenerateConfig(), streamer_config=StreamerConfig(),
+                generate_config=GenerateConfig(), handler_config=TokenHandlerConfig(),
                 pipeline_properties: dict[str, Any] | None = None,
                 tokenizer_properties: dict[str, Any] | None = None,
                 vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
@@ -41,6 +42,8 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
                                                          tokenizer_properties=tokenizer_properties,
                                                          vision_encoder_properties=vision_encoder_properties)
 
+        # pipe = openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties)
+
         log.info(f"model loaded successfully")
 
         loaded_pipe_mem = get_current_memory()
@@ -61,5 +64,8 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
     app_router = app.router
     app_router.route_class = LoggingRoute
     controller = Controller(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe, router=app_router,
-                            generate_config=generate_config, streamer_config=streamer_config)
+                            generate_config=generate_config, handler_config=handler_config)
+
+    # controller = VlmController(model_name=model, parser=parser, pipe=pipe, router=app_router,
+    #                            generate_config=generate_config, streamer_config=streamer_config)
     return app
