@@ -1,15 +1,14 @@
 import logging.config
 import os
-import sys
 from zipapp import shebang_encoding
 
 import uvicorn
-from openvino_genai import py_openvino_genai
+from openvino_genai import CacheEvictionConfig, AggregationMode, SchedulerConfig
 from pydantic.json import pydantic_encoder
 
 import openai
 from agent.common.log import log_format_prefix, log_format_simple
-from inference.token_handler import TokenHandler, TokenHandlerConfig
+from inference.token_handler import TokenHandlerConfig
 from server import init_engine
 
 device = "GPU"
@@ -19,14 +18,22 @@ model_path = f"../models/{model}/1"
 model_cache_dir = f"../models_cache/{model}"
 
 handler_config = TokenHandlerConfig()
-scheduler_config = py_openvino_genai.SchedulerConfig()
-scheduler_config.max_num_batched_tokens = 256
-scheduler_config.enable_prefix_caching = True
-scheduler_config.cache_size = 8
-# scheduler_config.max_num_seqs = 1
+
+scheduler_config = SchedulerConfig()
+scheduler_config.max_num_batched_tokens = 4096
+scheduler_config.cache_size = 0
+scheduler_config.max_num_seqs = 1
 scheduler_config.dynamic_split_fuse = True
-scheduler_config.use_cache_eviction = True
-# scheduler_config.use_sparse_attention = True
+scheduler_config.enable_prefix_caching = True
+scheduler_config.use_cache_eviction = False
+# scheduler_config.cache_eviction_config = CacheEvictionConfig(
+#     start_size=1024,
+#     recent_size=1024,
+#     max_cache_size=4096,
+#     aggregation_mode=AggregationMode.NORM_SUM,
+#     apply_rotation=False,
+#     snapkv_window_size=32
+# )
 
 generate_config = openai.GenerateConfig(
     default_temperature=0.4,
@@ -37,16 +44,13 @@ generate_config = openai.GenerateConfig(
 )
 
 pipeline_properties = {
-    # "sampler_num_threads": "1",
     "CACHE_DIR": model_cache_dir,
     "PERFORMANCE_HINT": "LATENCY",
 }
 
 tokenizer_properties = {
-    "LOG_LEVEL": "LOG_TRACE",
 }
 
-# os.environ["LOG_LEVEL"] = "4"
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"

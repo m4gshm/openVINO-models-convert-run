@@ -23,7 +23,7 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
                 vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
     log = logging.getLogger(__name__)
 
-    log.info(f"model loading {model_path}, device: {device}")
+    log.info(f"model loading {model_path}, device: {device}, scheduler_config {scheduler_config.to_string()}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")

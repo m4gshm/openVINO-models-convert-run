@@ -6,6 +6,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from os import pipe
 from typing import Any, Generator
 
 import openvino_genai
@@ -44,7 +45,7 @@ request_counter = itertools.count(start=0)
 
 class ControllerConfig(BaseModel):
     model_name: str
-    request_timeout: timedelta = timedelta(minutes=5)
+    response_timeout: timedelta = timedelta(minutes=5)
 
 
 class Controller:
@@ -62,21 +63,27 @@ class Controller:
         self.active_handles: dict[int, GenerationHandle] = {}
 
         self.stop_event = threading.Event()
-        self.engine_thread = threading.Thread(target=self._engine_loop, daemon=True)
-        self.engine_thread.start()
+        # self.engine_thread = threading.Thread(target=self._engine_loop, daemon=True)
+        # self.engine_thread.start()
 
-    def _engine_loop(self):
-        pass
+    # def _engine_loop(self):
+    #     pass
         # while not self.stop_event.is_set():
-        #     if self.pipe.has_non_finished_requests():
-        #         self.pipe.step()
-        #     else:
-        #         time.sleep(0.5)
-        #
-        #     metrics = self.pipe.get_metrics()
-        #     log.info(f"metrics: requests={metrics.requests}, scheduled_requests={metrics.scheduled_requests}, "
-        #              f"cache_size_in_bytes={metrics.cache_size_in_bytes}, "
-        #              f"kv_cache_size_in_bytes={metrics.kv_cache_size_in_bytes}")
+            # if self.pipe.has_non_finished_requests():
+            #     self.step()
+            # else:
+            #     time.sleep(0.5)
+
+            # metrics = self.pipe.get_metrics()
+            # log.info(f"metrics: requests={metrics.requests}, scheduled_requests={metrics.scheduled_requests}, "
+            #          f"cache_size_in_bytes={metrics.cache_size_in_bytes}, "
+            #          f"kv_cache_size_in_bytes={metrics.kv_cache_size_in_bytes}")
+
+    def step(self):
+        try:
+            self.pipe.step()
+        except Exception as e:
+            log.error(f"pipe step error {e}")
 
     def shutdown(self):
         with self.active_handles_lock:
@@ -230,54 +237,87 @@ class Controller:
                 with self.active_handles_lock:
                     self.active_handles[request_id] = generate_result
 
-                request_start = time.perf_counter()
 
-                def stop_if_request_timeout():
+                def is_response_timeout(start):
                     now_time = time.perf_counter()
-                    request_time = timedelta(seconds=(now_time - request_start))
-                    if request_time >= self.config.request_timeout:
-                        log.warning("inference request timeout")
+                    duration = timedelta(seconds=(now_time - start))
+                    if duration >= self.config.response_timeout:
+                        log.warning("inference timeout")
                         generate_result.stop(GenerationFinishReason.NONE)
-                        yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+                        return True
+                    return False
 
+
+                request_start = time.perf_counter()
+                response_timeout = False
                 while not self.pipe.has_non_finished_requests():
-                    time.sleep(0.05)
-                    yield from stop_if_request_timeout()
+                    self.step()
+                    time.sleep(0.2)
+                    response_timeout = is_response_timeout(request_start)
+                    if response_timeout:
+                        break
 
-                self.pipe.step()
+                if response_timeout:
+                    yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+                else:
+                    unique_id = str(uuid.uuid4())
+                    def read():
+                        started = False
+                        request_start = time.perf_counter()
+                        while True:
+                            has_requests = self.pipe.has_non_finished_requests()
+                            if not has_requests:
+                                yield new_response(stream=stream, finish_reason=StopSignal.STOP.value)
+                                return
+                            self.step()
+                            can_read = generate_result.can_read()
+                            if can_read:
+                                started = True
+                                read_timeout = is_response_timeout(request_start)
+                                if read_timeout:
+                                    log.warning("read timeout")
+                                    yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+                                    return
+                                else:
+                                    generation_handle = generate_result.read()
+                                    items = generation_handle.items()
+                                    if len(items)  == 0:
+                                        log.error("empty generation")
+                                        yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
+                                        return
+                                    for k, generation_output in items:
+                                        responses, stop_signal = streamer.handle_token(generation_output.generated_ids)
+                                        for response in responses:
+                                            response.id = unique_id
+                                            response.model = self.config.model_name
+                                            yield response
 
-                while not generate_result.can_read():
-                    time.sleep(0.05)
-                    yield from stop_if_request_timeout()
+                                        finish_reason = generation_output.finish_reason
+                                        if finish_reason and finish_reason != GenerationFinishReason.NONE:
+                                            stop_signal = get_stop_signal_by_finish_reason(finish_reason)
+                                            if not stop_signal:
+                                                stop_signal = StopSignal.STOP
+                                            yield new_response(stream=stream, finish_reason=stop_signal.value)
+                                            return
+                                        elif stop_signal:
+                                            generate_result.stop(stop_signal.finish_reason)
+                                            yield new_response(stream=stream, finish_reason=stop_signal.value)
+                                            return
+                            elif started:
+                                yield new_response(stream=stream, finish_reason=StopSignal.STOP.value)
+                                return
 
-                unique_id = str(uuid.uuid4())
-                final_stop_reason = GenerationFinishReason.NONE
-                while generate_result.can_read():
-                    read = generate_result.read()
-                    for k, generation_output in read.items():
-                        responses, stop_signal = streamer.handle_token(generation_output.generated_ids)
-                        for response in responses:
-                            response.id = unique_id
-                            response.model = self.config.model_name
-                            yield response
+                    yield from read()
 
-                        finish_reason = generation_output.finish_reason
-                        if finish_reason and finish_reason != GenerationFinishReason.NONE:
-                            final_stop_reason = finish_reason
-                            stop_signal = get_stop_signal_by_finish_reason(finish_reason)
-                            if not stop_signal:
-                                stop_signal = StopSignal.STOP
-                            yield new_response(stream=stream, finish_reason=stop_signal.value)
-                            break
-                        elif stop_signal:
-                            final_stop_reason = stop_signal.finish_reason
-                            generate_result.stop(final_stop_reason)
-                            yield new_response(stream=stream, finish_reason=stop_signal.value)
-                            break
-
-                    self.pipe.step()
-
-                log.info(f"inference finished with reason {final_stop_reason}")
+                metrics = self.pipe.get_metrics()
+                log.info(f"inference finished: "
+                         f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024:.2f}MB, "
+                         f"cache_size={metrics.cache_size_in_bytes / 1024:.2f}MB "
+                         f"cache_usage={metrics.cache_usage}, "
+                         f"max_cache_usage={metrics.max_cache_usage}, "
+                         f"requests={metrics.requests}, "
+                         f"scheduled_requests={metrics.scheduled_requests}"
+                         )
             except Exception as e:
                 log_inference.error(f"inference error: {e}", exc_info=e)
                 yield new_response(stream=stream, finish_reason=StopSignal.CANCEL.value)
