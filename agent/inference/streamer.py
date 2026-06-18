@@ -98,12 +98,10 @@ class Streamer:
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
         self.phrase = ""
-        self.full_generated = ""
         self.empty_conversation_counter = 0
         self.no_conversation_counter = 0
         self.stop_inference = False
         self.token_counter = 0
-        self.started = False
 
         # by default conversation is opened by assistant in chat template
         self.states: list[State] = [State.CONVERSATION]
@@ -116,9 +114,6 @@ class Streamer:
     def write(self, tokens: Sequence[SupportsInt]) -> tuple[list[OpenAICompletionResponse], StopSignal | None]:
         log = self.log
 
-        if not self.started:
-            self.started = True
-
         decoded_tokens: list[str] = self.tokenizer.decode(tokens=[tokens], skip_special_tokens=False)
 
         if self.is_stop():
@@ -130,7 +125,6 @@ class Streamer:
             for t in decoded_tokens:
                 self.token_counter += 1
                 log.debug(f"token '{t}', num {self.token_counter}")
-                self.full_generated += t
                 token_result, stop_signal = self.process_token(t, self.token_counter)
                 result += token_result
                 if stop_signal:
