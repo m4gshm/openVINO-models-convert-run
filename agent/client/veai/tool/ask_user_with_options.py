@@ -1,9 +1,9 @@
 import json
 from typing import Any
 
-from client.tool_select_options import ToolSelectOptions
-from common.openai_model import FunctionCall, ToolDefinition
-from veai.tool import Tool
+from agent.client.tool_select_options import ToolSelectOptions
+from agent.openai.chat_completions_api import FunctionCall, ToolDefinition
+from . import Tool
 
 function_name = "ask_user_with_options"
 

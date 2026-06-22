@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union, Dict, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,8 +42,7 @@ class StreamOptions(BaseModel):
 
 # --- Main Request Schema ---
 
-class OpenAIChatCompletionRequest(BaseModel):
-    """Official OpenAI Chat Completion Request Schema with extra property tolerance."""
+class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str
@@ -120,14 +119,11 @@ class ChatCompletionChoice(BaseModel):
     index: int = 0
     delta: ChatCompletionMessage | None = None
     message: ChatCompletionMessage | None = None
-    finish_reason: Optional[str] = Field(
-        default=None,
-        description="Can be 'stop', 'length', 'tool_calls', or None during streaming."
-    )
+    finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None
     logprobs: Optional[ChoiceLogprobs] = None
 
 
-class OpenAICompletionResponse(BaseModel):
+class CompletionResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
     object: str = CHAT_COMPLETION_CHUNK
     id: str | None = None

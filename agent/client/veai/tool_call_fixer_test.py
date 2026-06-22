@@ -1,8 +1,8 @@
 import unittest
 from importlib.resources import files
 
-from client.veai.tool_call_fixer import fix_incorrect_arguments
-from common.openai_model import ToolCall
+from agent.client.veai.tool_call_fixer import fix_incorrect_arguments
+from agent.openai.chat_completions_api import ToolCall
 
 TEST_RESOURCES = "test_resources"
 
@@ -14,7 +14,7 @@ class MyTestCase(unittest.TestCase):
         tool_call = ToolCall.model_validate_json(tool_call_json)
         fixed = fix_incorrect_arguments(tool_call)
         self.assertIsNotNone(fixed)
-        self.assertEqual("""{"target_file": "/opt/test.txt", "start_line": 0, "end_line": 1000}""",
+        self.assertEqual("""{"target_file": "/opt/test.txt", "start_line": 1, "end_line": 1000}""",
                          fixed.function.arguments)
 
     def test_write_file_bad_options(self):

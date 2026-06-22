@@ -7,7 +7,7 @@
       "type": "object",
       "properties": {
         "question": {
-          "type": "string",
+          "type": "string"
         },
         "options": {
           "type": "array",
@@ -16,7 +16,7 @@
           }
         },
         "is_multiple_choice": {
-          "type": "boolean",
+          "type": "boolean"
         }
       },
       "required": [

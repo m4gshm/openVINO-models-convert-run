@@ -6,6 +6,8 @@ venv
 venvp
 .venv
 .veai
+__pycache__
+!*.pbtxt
 src_models/Qwen
 src_models/microsoft
 src_models/allenai
@@ -18,7 +20,7 @@ src_models/ministralai
 src_models/ricdomolm
 src_models/codellama
 models_cache
-models/Qwen*/1
+models/Qwen*/*
 models/gpt-oss-20b*/1
 models/starcoder*/1
 models/SERA*/1
@@ -26,6 +28,7 @@ models/microsoft*/1
 models/Phi-*
 models/gemma-*/1
 models/gemma-4-E4B-it-int8-ov/
-models/OmniCoder*/1
+models/OmniCoder*
 models/Mellum*/1
 models/*/1
+models/VibeThinker*

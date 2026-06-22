@@ -1,4 +1,4 @@
-from agent.common.openai_model import ChatCompletionMessageParam
+from agent.openai.chat_completions_api import ChatCompletionMessageParam
 from agent.common.roles import ROLE_TOOL
 
 

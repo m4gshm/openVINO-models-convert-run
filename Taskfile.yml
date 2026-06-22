@@ -1,0 +1,35 @@
+version: '3'
+
+vars:
+  PROJECT_DIR: agent
+  VENV_DIR: .venv
+  SYS_PYTHON: '{{if eq OS "windows"}}python{{else}}python3{{end}}'
+  VENV_BIN: '{{if eq OS "windows"}}{{.VENV_DIR}}/Scripts{{else}}./{{.VENV_DIR}}/bin{{end}}'
+  REQ_TXT: './{{.PROJECT_DIR}}/requirements.txt'
+
+tasks:
+  init:
+    cmds:
+      - "{{.SYS_PYTHON}} -m venv {{.VENV_DIR}}"
+      - '{{.VENV_BIN}}/python -m pip install --upgrade pip'
+      - '{{.VENV_BIN}}/pip install  -v -r ./{{.PROJECT_DIR}}/requirements.txt'
+    sources:
+      - "{{.PROJECT_DIR}}/requirements.txt"
+    generates:
+      - "{{.VENV_DIR}}/**/*"
+
+  test:
+    deps:
+      - init
+    cmds:
+      - '{{.VENV_BIN}}/pytest {{.PROJECT_DIR}}/ -v'
+
+  freeze:
+    cmds:
+      - '{{.VENV_BIN}}/pip freeze > {{.REQ_TXT}}'
+
+  clean:
+    cmds:
+      - '{{if eq OS "windows"}}rmdir /s /q {{.VENV_DIR}}{{else}}rm -rf {{.VENV_DIR}}{{end}}'
+      - '{{if eq OS "windows"}}rmdir /s /q .pytest_cache{{else}}rm -rf .pytest_cache{{end}}'
+    silent: true

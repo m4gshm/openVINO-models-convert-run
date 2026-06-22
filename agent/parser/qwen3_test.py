@@ -1,10 +1,13 @@
 import unittest
 from importlib.resources import files
 
-from common.openai_model import ToolCall, FunctionDefinition
-from parser.qwen3 import parse_tool_calls, EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE
+from agent.openai.chat_completions_api import ToolCall, FunctionDefinition
+from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3Parser
 
 TEST_RESOURCES = "test_resources"
+
+parser = Qwen3Parser()
+state = parser.new_state()
 
 
 class TestAddFunction(unittest.TestCase):
@@ -40,7 +43,7 @@ Target.py
 </tool_call>"""
 
     def test_without_close_tag(self):
-        calls, partial = parse_tool_calls(self.first_function_no_close_tag)
+        calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag)
         self.assertEqual(len(calls), 1)
         function_call: ToolCall = calls[0]
         self.assertEqual("function", function_call.type)
@@ -49,7 +52,7 @@ Target.py
                          function_call.function.arguments)
 
     def test_two_functions(self):
-        calls, partial = parse_tool_calls(self.first_function + self.second_function)
+        calls, partial = parser.parse_tool_calls(state, self.first_function + self.second_function)
         self.assertFalse(partial)
         self.assertEqual(len(calls), 2)
 
@@ -65,7 +68,7 @@ Target.py
         self.assertEqual("""{"directory": "/tmp"}""", second.function.arguments)
 
     def test_two_functions_where_first_without_close_tag(self):
-        calls, partial = parse_tool_calls(self.first_function_no_close_tag + self.second_function)
+        calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag + self.second_function)
         self.assertEqual(len(calls), 2)
 
         first: ToolCall = calls[0]
@@ -81,11 +84,13 @@ Target.py
 
     def test_functions_with_invalid_json_parameter(self):
         function_name = "select"
-        calls, partial = parse_tool_calls(self.function_with_invalid_json_parameter, {
+        state = parser.new_state()
+        state.supported_functions = {
             function_name: FunctionDefinition(name=function_name, parameters={
                 EXPECTED_PARAMETERS_PROPERTIES: {"options": {EXPECTED_PROPERTY_TYPE: "array"}}
             })
-        })
+        }
+        calls, partial = parser.parse_tool_calls(state, self.function_with_invalid_json_parameter)
 
         first: ToolCall = calls[0]
         self.assertFalse(partial)
@@ -97,7 +102,7 @@ Target.py
         pass
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
         tool_call_text = tool_cal_file.read_text(encoding="utf-8")
-        calls, partial = parse_tool_calls(tool_call_text)
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
         self.assertTrue(partial)
         first: ToolCall = calls[0]
         self.assertTrue(partial)

@@ -7,21 +7,23 @@ import openvino_genai
 from fastapi import FastAPI
 from openvino_genai import py_openvino_genai
 
-from common.metric_mem import get_current_memory
+from agent.common.metric_mem import get_current_memory
+from agent.parser import Parser
 from inference.token_handler import TokenHandlerConfig
 from openai import GenerateConfig
-from openai.engine_rest import Controller, ControllerConfig
+from openai.engine_rest import ContinuousBatchingController, ControllerConfig
 from openai.engine_rest_vlm import VlmController
 from openai.logger_rest import LoggingRoute
-from parser.qwen3 import Qwen3Parser
+
+log = logging.getLogger(__name__)
 
 
-def init_engine(model: str, model_path: str, device: str, scheduler_config=py_openvino_genai.SchedulerConfig(),
-                generate_config=GenerateConfig(), handler_config=TokenHandlerConfig(),
-                pipeline_properties: dict[str, Any] | None = None,
-                tokenizer_properties: dict[str, Any] | None = None,
-                vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
-    log = logging.getLogger(__name__)
+def init_continuous_batching_engine(model: str, model_path: str, device: str, parser: Parser,
+                                    scheduler_config=py_openvino_genai.SchedulerConfig(),
+                                    generate_config=GenerateConfig(), handler_config=TokenHandlerConfig(),
+                                    pipeline_properties: dict[str, Any] | None = None,
+                                    tokenizer_properties: dict[str, Any] | None = None,
+                                    vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
 
     log.info(f"model loading {model_path}, device: {device}, scheduler_config {scheduler_config.to_string()}")
 
@@ -42,8 +44,6 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
                                                          tokenizer_properties=tokenizer_properties,
                                                          vision_encoder_properties=vision_encoder_properties)
 
-        # pipe = openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties)
-
         log.info(f"model loaded successfully")
 
         loaded_pipe_mem = get_current_memory()
@@ -54,7 +54,26 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
         log.error(f"instantiate pipeline error: {e}", exc_info=e)
         sys.exit(1)
 
-    parser = Qwen3Parser()
+    async def lifespan(app: FastAPI):
+        yield
+        controller.shutdown()
+
+    app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
+    app_router = app.router
+    app_router.route_class = LoggingRoute
+    controller = ContinuousBatchingController(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe,
+                                              router=app_router,
+                                              generate_config=generate_config, handler_config=handler_config)
+
+    return app
+
+
+def init_sequential_engine(model: str, model_path: str, device: str, vlm: bool, parser: Parser,
+                           generate_config=GenerateConfig(),
+                           handler_config=TokenHandlerConfig(),
+                           pipeline_properties: dict[str, Any] | None = None) -> FastAPI:
+    if not pipeline_properties:
+        pipeline_properties = {}
 
     async def lifespan(app: FastAPI):
         yield
@@ -63,9 +82,23 @@ def init_engine(model: str, model_path: str, device: str, scheduler_config=py_op
     app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
     app_router = app.router
     app_router.route_class = LoggingRoute
-    controller = Controller(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe, router=app_router,
-                            generate_config=generate_config, handler_config=handler_config)
 
-    # controller = VlmController(model_name=model, parser=parser, pipe=pipe, router=app_router,
-    #                            generate_config=generate_config, streamer_config=streamer_config)
+    log.info(f"model loading {model}, device: {device}")
+
+    start_mem = get_current_memory()
+    log.debug(f"consumed memory: {start_mem:.2f} MB")
+
+    if vlm:
+        pipe = openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties)
+    else:
+        pipe = openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
+
+    log.info(f"model loaded successfully")
+    loaded_pipe_mem = get_current_memory()
+    delta = loaded_pipe_mem - start_mem
+
+    log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
+
+    controller = VlmController(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe, router=app_router,
+                               generate_config=generate_config, handler_config=handler_config)
     return app

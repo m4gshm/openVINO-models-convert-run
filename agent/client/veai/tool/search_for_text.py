@@ -1,8 +1,8 @@
 import json
 from typing import Any
 
-from common.openai_model import FunctionCall
-from veai.tool import Tool
+from agent.client.veai.tool import Tool
+from agent.openai.chat_completions_api import FunctionCall
 
 function_name = "search_for_text"
 

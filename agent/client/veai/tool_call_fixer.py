@@ -4,74 +4,97 @@ from typing import Any
 
 import json_repair
 
-from common.openai_model import ToolCall, ToolDefinition, FunctionCall
-from veai.tool import edit_file, read_file, write_file, search_for_text
-from veai.tool.edit_file import EditFile
-from veai.tool.read_file import ReadFile
-from veai.tool.search_for_text import SearchForText
-from veai.tool.write_file import WriteFile
+from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options
+from agent.client.veai.tool.edit_file import EditFile
+from agent.client.veai.tool.read_file import ReadFile
+from agent.client.veai.tool.search_for_text import SearchForText
+from agent.client.veai.tool.write_file import WriteFile
+from agent.openai.chat_completions_api import ToolCall, ToolDefinition, FunctionCall
 
 log = logging.getLogger(__name__)
 
 
 def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
-    if edit_file.function_name == tool_call.function.name:
+    function = tool_call.function
+    if "run_command" == function.name:
+        pass
+    elif edit_file.function_name == function.name:
         return fix_edit_file(tool_call)
-    elif write_file.function_name == tool_call.function.name:
+    elif write_file.function_name == function.name:
         return fix_write_file(tool_call)
-    elif read_file.function_name == tool_call.function.name:
+    elif read_file.function_name == function.name:
         return fix_read_file(tool_call)
-    elif search_for_text.function_name == tool_call.function.name:
+    elif search_for_text.function_name == function.name:
         return fix_search_for_text(tool_call)
-    # if "ask_user_with_options" == function.name:
-    #     args_raw = function.arguments
-    #     try:
-    #         args = json.loads(args_raw)
-    #     except json.decoder.JSONDecodeError as e:
-    #         log.error(f"bad arguments of function '{function.name}', args '{args_raw}': {e}")
-    #         args = json_repair.loads(args_raw)
-    #         log.info(f"repaired arguments '{args}'")
-    #
-    #     if args:
-    #         options_raw = args.get("options")
-    #         options: list[Any] | None = None
-    #         if options_raw:
-    #             if isinstance(options_raw, str):
-    #                 try:
-    #                     options = json.loads(options_raw)
-    #                 except json.decoder.JSONDecodeError as e:
-    #                     log.error(f"bad options of function '{function.name}', options: '{options_raw}': {e}")
-    #                     options = json_repair.loads(options_raw)
-    #                     log.info(f"repaired options '{options}'")
-    #             elif isinstance(options_raw, list):
-    #                 options = options_raw
-    #             else:
-    #                 log.error(f"unexpected options type, function '{function.name}', args '{args_raw}', "
-    #                           f"options type {type(options_raw)}")
-    #         else:
-    #             log.error(f"missing options in args, function '{function.name}', args '{args_raw}'")
-    #
-    #         if options:
-    #             args["options"] = options # json.dumps(options, ensure_ascii=False)
-    #
-    #         function.arguments = json.dumps(args, ensure_ascii=False)
-    #         log.info(f"function after repairing, function {function.name}, arguments '{args}'")
+    if ask_user_with_options.function_name == function.name:
+        return fix_ask_user_with_options(tool_call)
 
     return tool_call
 
 
+def fix_ask_user_with_options(tool_call: ToolCall) -> ToolCall:
+    function = tool_call.function
+    args_raw = function.arguments
+    args = read_args_as_json(args_raw, function)
+    if args:
+        options_raw = args.get("options")
+        is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
+        if not is_multiple_choice:
+            is_multiple_choice = False
+            args["is_multiple_choice"] = is_multiple_choice
+        question = args.get("question")
+        if not question:
+            args["question"] = "[*]" if is_multiple_choice else "(*)"
+        options: Any = None
+        if options_raw:
+            if isinstance(options_raw, str):
+                try:
+                    options = json.loads(options_raw)
+                except json.decoder.JSONDecodeError as e:
+                    log.error(f"bad options of function '{function.name}', options: '{options_raw}': {e}")
+                    options = json_repair.loads(options_raw)
+                    log.info(f"repaired options '{options}'")
+            elif isinstance(options_raw, list):
+                options = options_raw
+            else:
+                log.error(f"unexpected options type, function '{function.name}', args '{args_raw}', "
+                          f"options type {type(options_raw)}")
+        else:
+            log.error(f"missing options in args, function '{function.name}', args '{args_raw}'")
+
+        if options:
+            args["options"] = options  # json.dumps(options, ensure_ascii=False)
+
+        function.arguments = json.dumps(args, ensure_ascii=False)
+        log.info(f"function after repairing, function {function.name}, arguments '{args}'")
+    return tool_call
+
+
 def fix_edit_file(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = rea_args_as_json(args_raw, tool_call.function)
+    function = tool_call.function
+    args_raw = function.arguments
+    args = read_args_as_json(args_raw, function)
     if args:
         target_file = args.get("target_file")
-        edits = args.get("edits")
-        if target_file and edits:
-            allow_multiple_matches: bool = args.get("allow_multiple_matches")
+        if not target_file:
+            log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
+        edits_str = args.get("edits")
+        if target_file and edits_str:
+            allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
+            invalid = False
             if not allow_multiple_matches:
-                # invalid
-                # log
-                new_function = EditFile().new_call(target_file, edits)
+                invalid = True
+                allow_multiple_matches = True
+            try:
+                edits = json.loads(edits_str)
+            except json.decoder.JSONDecodeError as e:
+                invalid = True
+                log.info(f"bad edits of function '{function.name}', options: '{edits_str}': {e}")
+                edits = json_repair.loads(edits_str)
+                edits_str = json.dumps(edits)
+                log.info(f"repaired edits '{edits_str}'")
+            if invalid:
+                new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
                 tool_call.function = new_function
 
     return tool_call
@@ -79,7 +102,7 @@ def fix_edit_file(tool_call: ToolCall) -> ToolCall:
 
 def fix_write_file(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
-    args = rea_args_as_json(args_raw, tool_call.function)
+    args = read_args_as_json(args_raw, tool_call.function)
     if args:
         target_file = args.get("target_file")
         content = args.get("content")
@@ -89,22 +112,23 @@ def fix_write_file(tool_call: ToolCall) -> ToolCall:
             if not allow_overwrite:
                 # invalid
                 # log
-                new_function = WriteFile().new_call(target_file, content)
+                new_function = WriteFile().new_call(target_file, content, allow_overwrite = True)
                 tool_call.function = new_function
 
     return tool_call
 
+
 def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
-    args = rea_args_as_json(args_raw, tool_call.function)
+    args = read_args_as_json(args_raw, tool_call.function)
     if args:
         target_path_or_url = args.get("target_path_or_url")
         text_snippet = args.get("text_snippet")
         if target_path_or_url and text_snippet:
-            is_case_sensitive = args.get("is_case_sensitive")
-            if  is_case_sensitive is None:
+            is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive")
+            if is_case_sensitive is None:
                 # log
-                new_function = SearchForText().new_call(target_path_or_url, text_snippet, is_case_sensitive)
+                new_function = SearchForText().new_call(target_path_or_url, text_snippet, True)
                 tool_call.function = new_function
 
     return tool_call
@@ -112,24 +136,57 @@ def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
 
 def fix_read_file(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
-    args = rea_args_as_json(args_raw, tool_call.function)
+    args = read_args_as_json(args_raw, tool_call.function)
     if args:
         target_file = args.get("target_file")
-        if target_file:
-            start_line = args.get("start_line")
-            end_line = args.get("end_line")
-            line_offset = args.get("line_offset")
 
-            valid = isinstance(line_offset, int) or (isinstance(start_line, int) and isinstance(end_line, int))
-            if not valid:
-                # log
-                new_function = ReadFile().new_call(target_file)
+        invalid = not target_file
+        if invalid:
+            # gemma4 case
+            target_file = args.get("file_path")
+
+        if target_file:
+            start_line = as_int_or_none(args.get("start_line"), "start_line")
+            end_line = as_int_or_none(args.get("end_line"), "end_line")
+            line_offset = as_int_or_none(args.get("line_offset"), "line_offset")
+
+            if line_offset:
+                pass
+            else:
+                if not start_line:
+                    invalid = True
+                    start_line = 1
+                if not end_line:
+                    invalid = True
+                    end_line = 500
+            if invalid:
+                log.info(
+                    f"fix invalid read_file: target_file={target_file}, start_line={start_line}, end_line={end_line}")
+                new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
+                                                   line_offset=line_offset)
                 tool_call.function = new_function
 
     return tool_call
 
 
-def rea_args_as_json(args_raw: str, function: FunctionCall) -> Any:
+def as_int_or_none(val, name: str) -> int | None:
+    return as_type_or_none(int, val, name)
+
+
+def as_bool_or_none(val, name: str) -> bool | None:
+    return as_type_or_none(bool, val, name)
+
+
+def as_type_or_none[T](t: type[T], val, name: str) -> T | None:
+    if val and not isinstance(val, t):
+        try:
+            return t(val)
+        except ValueError:
+            log.info(f"{name} is not an {t}: '{val}', '{t(val)}'")
+    return None
+
+
+def read_args_as_json(args_raw: str, function: FunctionCall) -> Any:
     try:
         args = json.loads(args_raw)
     except json.decoder.JSONDecodeError as e:

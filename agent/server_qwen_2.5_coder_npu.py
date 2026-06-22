@@ -10,17 +10,18 @@ import openai
 from agent.common.log import log_format_prefix, log_format_simple
 from agent.parser.qwen3 import Qwen3Parser
 from inference.token_handler import TokenHandlerConfig
-from server import init_continuous_batching_engine
+from server import init_sequential_engine, init_continuous_batching_engine
 
-device = "GPU"
+device = "NPU"
+continuous_batching_support = False
 
-model = "OmniCoder-9B-int4-sym-g128"
-model_path = f"../models/{model}/1"
+model = "Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq"
+model_path = f"../models/{model}"
 model_cache_dir = f"../models_cache/{model}"
 
 handler_config = TokenHandlerConfig()
 
-max_prompt_len = 16384 if device == "NPU" else 65536
+max_prompt_len = 16384 if device == "NPU" else 32768
 
 scheduler_config = SchedulerConfig()
 scheduler_config.max_num_batched_tokens = 1024
@@ -31,12 +32,12 @@ scheduler_config.enable_prefix_caching = True
 scheduler_config.use_cache_eviction = False
 
 generate_config = openai.GenerateConfig(
-    default_temperature=0.4,
+    default_max_tokens=max_prompt_len,
+    default_temperature=0.8,
     default_top_p=0.95,
     default_top_k=40,
     default_min_p=0.05,
     default_repetition_penalty=1.1,
-    default_max_tokens=max_prompt_len,
 )
 
 tokenizer_properties = {
@@ -44,7 +45,20 @@ tokenizer_properties = {
 
 gpu_pipeline_properties = {
     "CACHE_DIR": model_cache_dir,
+    "PERFORMANCE_HINT": "LATENCY"
+}
+
+npu_pipeline_properties = {
+    "CACHE_DIR": model_cache_dir,
     "PERFORMANCE_HINT": "LATENCY",
+
+    "NPU_COMPILER_TYPE": "PLUGIN",
+    "NPUW_LLM_GENERATE_HINT": "BEST_PERF",
+    "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
+    "LOG_LEVEL": "LOG_WARNING",
+    "MAX_PROMPT_LEN": max_prompt_len,
+    "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128,
+    "ATTENTION_BACKEND": "SDPA",
 }
 
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
@@ -61,12 +75,20 @@ if __name__ == "__main__":
             log_format_prefix + " - %(client_addr)s - '%(request_line)s' %(status_code)s"
     )
 
-    app = init_continuous_batching_engine(model=model, model_path=model_path, device=device, parser=Qwen3Parser(),
-                                          generate_config=generate_config,
-                                          handler_config=handler_config,
-                                          scheduler_config=scheduler_config,
-                                          pipeline_properties=gpu_pipeline_properties,
-                                          tokenizer_properties=tokenizer_properties)
+    parser = Qwen3Parser()
+
+    if device == "GPU" and continuous_batching_support:
+        app = init_continuous_batching_engine(model=model, model_path=model_path, device=device, parser=parser,
+                                              generate_config=generate_config,
+                                              handler_config=handler_config,
+                                              scheduler_config=scheduler_config,
+                                              pipeline_properties=gpu_pipeline_properties,
+                                              tokenizer_properties=tokenizer_properties)
+    else:
+        app = init_sequential_engine(model=model, model_path=model_path, device=device, vlm=False, parser=parser,
+                                     generate_config=generate_config,
+                                     handler_config=handler_config,
+                                     pipeline_properties=npu_pipeline_properties if device == "NPU" else gpu_pipeline_properties)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1", help="%(default)s)")

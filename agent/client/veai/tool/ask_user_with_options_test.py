@@ -1,8 +1,8 @@
 import unittest
 from importlib.resources import files
 
-from common.openai_model import ToolDefinition
-from veai.tool.ask_user_with_options import detect
+from agent.openai.chat_completions_api import ToolDefinition
+from agent.client.veai.tool.ask_user_with_options import detect
 
 TEST_RESOURCES = "test_resources"
 
