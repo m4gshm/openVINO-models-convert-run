@@ -85,7 +85,7 @@ class ContinuousBatchingController(BaseController):
                     f"do_sample={generation_config.do_sample}, "
                     f"max_length={max_length}, "
                     f"max_new_tokens={generation_config.max_new_tokens}, "
-                    f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
+                    f"temperature={generation_config.temperature:.2f}, "
                     f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
                     f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
                     f"presence_penalty={generation_config.presence_penalty:.2f}, "

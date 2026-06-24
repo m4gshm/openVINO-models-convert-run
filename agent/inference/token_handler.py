@@ -17,6 +17,7 @@ from agent.parser import Parser, StateEvent, ParserState
 
 log = logging.getLogger(__name__)
 
+
 class TokenHandlerConfig(BaseModel):
     tool_call_parting_duration_warning: timedelta = timedelta(minutes=3)
     tool_call_parting_duration_limit: timedelta = timedelta(minutes=10)
@@ -111,7 +112,7 @@ class TokenHandler:
                  supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()
         self.is_veai = is_veai
- 
+
         self.tokenizer = tokenizer
         self.parser = parser
         state = parser.new_state(init_chat_events)
@@ -229,68 +230,88 @@ class TokenHandler:
                     log.info(f"tool call part: {self.tool_call_phrase}")
             else:
                 self.phrase = self.phrase + token
-                self.generated = self.generated + token
+                generated = self.generated
+                is_loop = False
+                if generated:
+                    prev_token = generated[-1]
+                    if prev_token == token:
+                        i = 1
+                        for t in reversed(generated[:-1]):
+                            if t != token:
+                                break
+                            if i >= 100:
+                                log.error("looks like model is looping")
+                                is_loop = True
+                                break
+                            i += 1
 
-                if self.phrase_tick is None:
-                    self.phrase_tick = now_time
-
-                phrase_time = now_time - self.phrase_tick
-                if phrase_time >= 10:
-                    self.phrase_tick = now_time
-                    log.debug(f"phrase part: '{self.phrase.rstrip()}'")
-
-                phrase_end = self.phrase.endswith("\n")
-                if phrase_end:
-                    phrase = self.phrase.rstrip()
-                    if len(phrase) > 0:
-                        self.__clean_phrase()
-                        log.info(
-                            f"{state.role} phrase: '{phrase}', last token num: {token_number}")
-
-                if not self.is_chat_mode:
-                    result.append(new_chunk_response(role=state.role, content=token))
-                if not last_state and stop_no_conversations:
-                    if parser.is_erase(state, token):
-                        self.no_conversation_counter_erased += 1
-                    elif not token.rstrip():
-                        # empty or new line
-                        self.no_conversation_counter_erased += 1
-                    else:
-                        log.debug("no more conversations")
-                        self.no_conversation_counter += 1
-                    if self.no_conversation_counter_erased > self.config.no_conversation_counter_erased_max:
-                        log.debug(
-                            f"empty conversations (erased) limits exceed ({self.no_conversation_counter_erased}), abort inference")
-                        stop_signal = StopSignal.STOP
-                    elif self.no_conversation_counter > self.config.no_conversation_counter_max:
-                        log.debug(
-                            f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
-                        stop_signal = StopSignal.STOP
+                if is_loop:
+                    chunk = new_chunk_response(role=state.role, content="looks like model is looping")
+                    result.append(chunk)
+                    stop_signal = StopSignal.STOP
                 else:
-                    event = state.get_current_event()
-                    if event == StateEvent.TOOL_CALL:
-                        phrase_rstrip = self.phrase.rstrip()
-                        log_msg = f"trying to out tool call as generated text: '{phrase_rstrip}'"
-                        if len(phrase_rstrip) > 0:
-                            log.warning(log_msg)
+                    self.generated = generated + token
+
+                    if self.phrase_tick is None:
+                        self.phrase_tick = now_time
+
+                    phrase_time = now_time - self.phrase_tick
+                    if phrase_time >= 10:
+                        self.phrase_tick = now_time
+                        log.debug(f"phrase part: '{self.phrase.rstrip()}'")
+
+                    phrase_end = self.phrase.endswith("\n")
+                    if phrase_end:
+                        phrase = self.phrase.rstrip()
+                        if len(phrase) > 0:
+                            self.__clean_phrase()
+                            log.info(
+                                f"{state.role} phrase: '{phrase}', last token num: {token_number}")
+
+                    if not self.is_chat_mode:
+                        result.append(new_chunk_response(role=state.role, content=token))
+                    if not last_state and stop_no_conversations:
+                        if parser.is_erase(state, token):
+                            self.no_conversation_counter_erased += 1
+                        elif not token.rstrip():
+                            # empty or new line
+                            self.no_conversation_counter_erased += 1
                         else:
-                            log.debug(log_msg)
+                            log.debug("no more conversations")
+                            self.no_conversation_counter += 1
+                        if self.no_conversation_counter_erased > self.config.no_conversation_counter_erased_max:
+                            log.debug(
+                                f"empty conversations (erased) limits exceed ({self.no_conversation_counter_erased}), abort inference")
+                            stop_signal = StopSignal.STOP
+                        elif self.no_conversation_counter > self.config.no_conversation_counter_max:
+                            log.debug(
+                                f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
+                            stop_signal = StopSignal.STOP
                     else:
-                        erase = event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
-                        is_assistant = ROLE_ASSISTANT == self.state.role
-                        if not is_assistant:
-                            log.warning(f"unexpected role {state.role}")
-                        if is_assistant or not self.config.prevent_no_assistant_inference_output:
-                            if not erase:
-                                chunk = new_chunk_response(role=state.role, content=token,
-                                                           thinking=state.has_event(StateEvent.THINK))
-                                result.append(chunk)
+                        event = state.get_current_event()
+                        if event == StateEvent.TOOL_CALL:
+                            phrase_rstrip = self.phrase.rstrip()
+                            log_msg = f"trying to out tool call as generated text: '{phrase_rstrip}'"
+                            if len(phrase_rstrip) > 0:
+                                log.warning(log_msg)
                             else:
-                                log.debug(f"erase token: {token}")
-                                pass
+                                log.debug(log_msg)
                         else:
-                            log.warning(
-                                f"prevent generating by unexpected role {state.role}, token '{token}'")
+                            erase = event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
+                            is_assistant = ROLE_ASSISTANT == self.state.role
+                            if not is_assistant:
+                                log.warning(f"unexpected role {state.role}")
+                            if is_assistant or not self.config.prevent_no_assistant_inference_output:
+                                if not erase:
+                                    chunk = new_chunk_response(role=state.role, content=token,
+                                                               thinking=state.has_event(StateEvent.THINK))
+                                    result.append(chunk)
+                                else:
+                                    log.debug(f"erase token: {token}")
+                                    pass
+                            else:
+                                log.warning(
+                                    f"prevent generating by unexpected role {state.role}, token '{token}'")
         state.finalize(token)
         return result, stop_signal
 

@@ -27,20 +27,6 @@ os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 
 def main():
-    log = logging.getLogger(__name__)
-    log.info("server starting")
-
-    base_log_config = logging_config("./logs")
-
-    # uvcorn_logs = uvicorn.config.LOGGING_CONFIG
-    # uvcorn_logs["formatters"]["default"]["format"] = log_format_simple
-    # uvcorn_logs["formatters"]["access"]["format"] = (
-    #         log_format_prefix + " - %(client_addr)s - '%(request_line)s' %(status_code)s"
-    # )
-
-    logging.config.dictConfig(base_log_config)
-
-
     model_parser = argparse.ArgumentParser()
     model_parser.add_argument("--host", default="127.0.0.1", help="%(default)s)")
     model_parser.add_argument("--port", type=int, default=8888, help="%(default)s)")
@@ -57,6 +43,21 @@ def main():
                               default=".config/generate_config.json",
                               help="%(default)s)")
     args = model_parser.parse_args()
+
+    model = args.model
+    base_log_config = logging_config(f"./logs/{model}")
+
+    # uvcorn_logs = uvicorn.config.LOGGING_CONFIG
+    # uvcorn_logs["formatters"]["default"]["format"] = log_format_simple
+    # uvcorn_logs["formatters"]["access"]["format"] = (
+    #         log_format_prefix + " - %(client_addr)s - '%(request_line)s' %(status_code)s"
+    # )
+
+    logging.config.dictConfig(base_log_config)
+
+    log = logging.getLogger(__name__)
+    log.info("server starting")
+
 
     handler_config = TokenHandlerConfig()
 
@@ -95,7 +96,7 @@ def main():
 
     args_parser = args.parser
     if not args_parser:
-        model_lower = args.model.lower()
+        model_lower = model.lower()
         qwen3_models = ["omnicoder", "qwen"]
         is_qwen = any(model in model_lower for model in qwen3_models)
         if is_qwen:
@@ -106,9 +107,8 @@ def main():
 
     model_parser = Qwen3Parser() if args_parser == "qwen3" else Gemma4ChannelParser() if args_parser == "gemma4" else Parser()
 
-    args_model = args.model
-    model_path = f"{args.models_dir}/{args_model}"
-    model_cache_dir = f"{args.models_cache_dir}/{args_model}"
+    model_path = f"{args.models_dir}/{model}"
+    model_cache_dir = f"{args.models_cache_dir}/{model}"
 
     log.info(f"loading model from {model_path}, cache dir {model_cache_dir}")
 
@@ -151,13 +151,13 @@ def main():
     if args.device == "NPU" or no_vlm or args.no_continuous_batching:
         if no_vlm is None:
             no_vlm = False
-        app = init_sequential_engine(model=args_model, model_path=model_path, device=args.device, vlm=not no_vlm,
+        app = init_sequential_engine(model=(model), model_path=model_path, device=args.device, vlm=not no_vlm,
                                      parser=model_parser,
                                      generate_config=generate_config,
                                      handler_config=handler_config,
                                      pipeline_properties=npu_pipeline_properties if args.device == "NPU" else gpu_pipeline_properties)
     else:
-        app = init_continuous_batching_engine(model=args_model,
+        app = init_continuous_batching_engine(model=(model),
                                               model_path=model_path,
                                               device=args.device,
                                               parser=model_parser,
