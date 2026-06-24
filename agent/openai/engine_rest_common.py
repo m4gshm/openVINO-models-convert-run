@@ -103,7 +103,10 @@ class BaseController(ABC):
             if logprobs:
                 generation_config.logprobs = 1
 
-        generation_config.repetition_penalty = self.generate_config.repetition_penalty
+        repetition_penalty = self.generate_config.repetition_penalty
+        if repetition_penalty:
+            generation_config.repetition_penalty = repetition_penalty
+
         stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
         generation_config.stop_strings = stop_set
         return generation_config
