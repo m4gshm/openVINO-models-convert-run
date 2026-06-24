@@ -73,30 +73,6 @@ def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
     return [tokenizer.decode(tokens=[token], skip_special_tokens=False) for token in tokens]
 
 
-# class StubLogger(logging.Logger):
-#
-#     def __init__(self):
-#         super().__init__("stub", 0)
-#
-#     def info(self, msg, *args, exc_info=None, stack_info=False, stacklevel=1, extra=None):
-#         pass
-#
-#     def warning(self, msg, *args, exc_info=None, stack_info=False, stacklevel=1, extra=None):
-#         pass
-#
-#     def warn(self, msg, *args, exc_info=None, stack_info=False, stacklevel=1, extra=None):
-#         pass
-#
-#     def error(self, msg, *args, exc_info=None, stack_info=False, stacklevel=1, extra=None):
-#         pass
-#
-#     def exception(self, msg, *args, exc_info=True, stack_info=False, stacklevel=1, extra=None):
-#         pass
-#
-#     def debug(self, msg, *args, exc_info=None, stack_info=False, stacklevel=1, extra=None):
-#         pass
-
-
 class TokenHandler:
     def __clean_phrase(self):
         self.phrase = ""
@@ -127,7 +103,7 @@ class TokenHandler:
         self.expect_role = False
         self.phrase_tick: float | None = None
         self.phrase = ""
-        self.generated = ""
+        self.generated = list[str]()
         self.tool_call_count = 0
         self.tool_call_phrase = ""
         self.tool_call_parsing_tick: float | None = None
@@ -250,7 +226,7 @@ class TokenHandler:
                     result.append(chunk)
                     stop_signal = StopSignal.STOP
                 else:
-                    self.generated = generated + token
+                    self.generated.append(token)
 
                     if self.phrase_tick is None:
                         self.phrase_tick = now_time
@@ -339,7 +315,7 @@ class TokenHandler:
         if state.get_current_event() == StateEvent.THINK:
             # The generated text is returned as a normal response because it was already sent as a thought,
             # but the model did not end it with a thought end marker.
-            result = [new_chunk_response(role=self.state.role, content=self.generated)]
+            result = [new_chunk_response(role=self.state.role, content="".join(self.generated))]
             self.generated = ""
             state.finish_current_event(StateEvent.THINK)
         else:
