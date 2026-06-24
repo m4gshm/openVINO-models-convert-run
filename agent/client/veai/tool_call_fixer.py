@@ -150,6 +150,11 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
             if invalid:
                 target_file = args.get("file")
 
+            invalid = not target_file
+            # gemma4 case 3
+            if invalid:
+                target_file = args.get("path")
+
         if target_file:
             start_line = as_int_or_none(args.get("start_line"), "start_line")
             end_line = as_int_or_none(args.get("end_line"), "end_line")
