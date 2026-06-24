@@ -9,11 +9,11 @@ from openvino_genai import py_openvino_genai
 
 from agent.common.metric_mem import get_current_memory
 from agent.parser import Parser
-from inference.token_handler import TokenHandlerConfig
-from openai import GenerateConfig
-from openai.engine_rest import ContinuousBatchingController, ControllerConfig
-from openai.engine_rest_vlm import VlmController
-from openai.logger_rest import LoggingRoute
+from agent.inference.token_handler import TokenHandlerConfig
+from agent.openai import GenerateConfig
+from agent.openai.engine_rest import ContinuousBatchingController, ControllerConfig
+from agent.openai.engine_rest_vlm import VlmController
+from agent.openai.logger_rest import LoggingRoute
 
 log = logging.getLogger(__name__)
 

@@ -61,7 +61,7 @@ class ContinuousBatchingController(BaseController):
                         pass
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
-                        init_chat_events: bool, is_stop: Callable[[], bool],
+                        init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None
                         ) -> Generator[CompletionResponse, None, None]:
         before_generate_mem = get_current_memory()
@@ -98,8 +98,10 @@ class ContinuousBatchingController(BaseController):
                                     parser=self.parser,
                                     init_chat_events=init_chat_events,
                                     is_stop=is_stop,
+                                    is_veai=is_veai,
+                                    config=self.handler_config,
                                     supported_functions=function_by_name,
-                                    config=self.handler_config)
+                                    )
 
             generate_result = self.pipe.add_request(request_id=request_id, prompt=prompt,
                                                     generation_config=generation_config, images=[], videos=[])
@@ -180,7 +182,7 @@ class ContinuousBatchingController(BaseController):
                 yield from read()
 
             metrics = self.pipe.get_metrics()
-            log.info(f"inference finished: "
+            self.log_inference.info(f"inference finished: "
                      f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024 / 1024:.2f}MB, "
                      f"cache_size={metrics.cache_size_in_bytes / 1024 / 1024:.2f}MB "
                      f"cache_usage={metrics.cache_usage}, "

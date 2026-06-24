@@ -1,32 +1,48 @@
-version: '3'
+version: "3"
 
 vars:
   PROJECT_DIR: agent
   VENV_DIR: .venv
   SYS_PYTHON: '{{if eq OS "windows"}}python{{else}}python3{{end}}'
-  VENV_BIN: '{{if eq OS "windows"}}{{.VENV_DIR}}/Scripts{{else}}./{{.VENV_DIR}}/bin{{end}}'
-  REQ_TXT: './{{.PROJECT_DIR}}/requirements.txt'
+  VENV_BIN: '{{if eq OS "windows"}}{{.VENV_DIR}}\\Scripts\\{{else}}./{{.VENV_DIR}}/bin/{{end}}'
+  REQ_TXT: "./{{.PROJECT_DIR}}/requirements.txt"
 
 tasks:
   init:
     cmds:
       - "{{.SYS_PYTHON}} -m venv {{.VENV_DIR}}"
-      - '{{.VENV_BIN}}/python -m pip install --upgrade pip'
-      - '{{.VENV_BIN}}/pip install  -v -r ./{{.PROJECT_DIR}}/requirements.txt'
+      - "{{.VENV_BIN}}python -m pip install --upgrade pip"
+      - "{{.VENV_BIN}}pip install  -v -r {{.REQ_TXT}}"
     sources:
       - "{{.PROJECT_DIR}}/requirements.txt"
     generates:
       - "{{.VENV_DIR}}/**/*"
 
+  activate:
+    cmds:
+      - '{{if eq OS "windows"}}{{.VENV_BIN}}activate{{else}}source {{.VENV_BIN}}activate{{end}}'
+
   test:
     deps:
       - init
+      - activate
     cmds:
-      - '{{.VENV_BIN}}/pytest {{.PROJECT_DIR}}/ -v'
+      - "pytest {{.PROJECT_DIR}} -v"
 
   freeze:
+    deps:
+      - activate
     cmds:
-      - '{{.VENV_BIN}}/pip freeze > {{.REQ_TXT}}'
+      - "pip freeze > {{.REQ_TXT}}"
+
+  dist:
+    deps:
+      - activate
+      - freeze
+    cmds:
+      - '{{if eq OS "windows"}}{{.VENV_BIN}}activate{{else}}source {{.VENV_BIN}}activate{{end}}'
+      - "pip install pyinstaller"
+      - "pyinstaller --onefile agent.py"
 
   clean:
     cmds:

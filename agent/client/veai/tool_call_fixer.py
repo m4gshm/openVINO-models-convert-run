@@ -14,7 +14,7 @@ from agent.openai.chat_completions_api import ToolCall, ToolDefinition, Function
 log = logging.getLogger(__name__)
 
 
-def fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
+def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
     function = tool_call.function
     if "run_command" == function.name:
         pass
@@ -144,6 +144,11 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
         if invalid:
             # gemma4 case
             target_file = args.get("file_path")
+
+            invalid = not target_file
+            # gemma4 case 2
+            if invalid:
+                target_file = args.get("file")
 
         if target_file:
             start_line = as_int_or_none(args.get("start_line"), "start_line")

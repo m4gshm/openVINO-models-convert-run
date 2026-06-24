@@ -8,13 +8,16 @@ from datetime import timedelta
 from typing import Generator, Any, Callable, Literal
 
 from fastapi import APIRouter
-from openvino_genai import ChatHistory, GenerationConfig
-from openvino_genai.py_openvino_genai import Tokenizer
+from openvino_genai import ChatHistory
+from openvino_genai import Tokenizer
+from openvino_genai.py_openvino_genai import GenerationConfig
 from pydantic import BaseModel
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
+from agent import inference
 from agent.client.tool_select_options import detect_select_options
+from agent.client.veai import is_veai_agent
 from agent.client.veai.tool_call_fixer import fix_tool_definition_optional_property_as_null_type
 from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.openai import GenerateConfig, completions_api
@@ -51,8 +54,8 @@ class BaseController(ABC):
         self.generate_config = generate_config
         self.config = config
         self.tokenizer = tokenizer
-        self.log_inference_prompt = logging.getLogger("inference.prompt")
-        self.log_inference = logging.getLogger("inference")
+        self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
+        self.log_inference = inference.log
 
     def shutdown(self):
         pass
@@ -75,20 +78,24 @@ class BaseController(ABC):
                               stop: list[str] | str | None = None,
                               ) -> GenerationConfig:
         generation_config = GenerationConfig()
-        generation_config.max_new_tokens = max_completion_tokens or self.generate_config.default_max_new_tokens
-        generation_config.max_length = max_tokens or self.generate_config.default_max_tokens
+        max_new_tokens = max_completion_tokens or self.generate_config.max_new_tokens
+        if max_new_tokens:
+            generation_config.max_new_tokens = max_new_tokens
+        max_length = max_tokens or self.generate_config.max_tokens
+        if max_length:
+            generation_config.max_length = max_length
         generation_config.apply_chat_template = False if prompt else True
 
-        temp = temperature or self.generate_config.default_temperature
-        if temp <= 0.0:
+        temp = temperature or self.generate_config.temperature
+        if not temp or temp <= 0.0:
             # Greedy Search
             generation_config.do_sample = False
         else:
             generation_config.do_sample = True
             generation_config.temperature = temp
-            generation_config.top_p = top_p or self.generate_config.default_top_p
-            generation_config.top_k = self.generate_config.default_top_k
-            generation_config.min_p = self.generate_config.default_min_p
+            generation_config.top_p = top_p or self.generate_config.top_p
+            generation_config.top_k = self.generate_config.top_k
+            generation_config.min_p = self.generate_config.min_p
 
             if frequency_penalty:
                 generation_config.frequency_penalty = frequency_penalty
@@ -96,7 +103,7 @@ class BaseController(ABC):
             if logprobs:
                 generation_config.logprobs = 1
 
-        generation_config.repetition_penalty = self.generate_config.default_repetition_penalty
+        generation_config.repetition_penalty = self.generate_config.repetition_penalty
         stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
         generation_config.stop_strings = stop_set
         return generation_config
@@ -108,6 +115,8 @@ class BaseController(ABC):
                 body.model_config.get("reasoning") or True)
 
         messages = body.messages
+
+        is_veai = is_veai_agent(messages)
 
         last_message = messages[-1] if messages else None
         stream = body.stream == True
@@ -148,7 +157,8 @@ class BaseController(ABC):
                                                        logprobs=body.logprobs, stop=body.stop)
         chunk_generator = self.chunk_generator(
             prompt=full_prompt, generation_config=generation_config, tokenizer=tokenizer,
-            init_chat_events=True, function_by_name=function_by_name, is_stop=lambda: is_disconnected(loop, request))
+            init_chat_events=True, is_stop=lambda: is_disconnected(loop, request),
+            is_veai=is_veai, function_by_name=function_by_name)
         if stream:
             return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
         else:
@@ -159,7 +169,7 @@ class BaseController(ABC):
 
     @abstractmethod
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
-                        init_chat_events: bool, is_stop: Callable[[], bool],
+                        init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None
                         ) -> Generator[CompletionResponse, None, None]:
         pass
@@ -208,7 +218,7 @@ class BaseController(ABC):
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                                init_chat_events=False, tokenizer=self.tokenizer,
-                                               is_stop=lambda: is_disconnected(loop, request))
+                                               is_veai=False, is_stop=lambda: is_disconnected(loop, request))
 
         def chunk_converter(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[
             completions_api.CompletionResponse, None, None]:

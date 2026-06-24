@@ -1,6 +1,7 @@
 import logging
 from enum import Enum
 
+import fastapi
 from pygments.styles import nord
 
 from agent.common.roles import ROLE_ASSISTANT
@@ -62,6 +63,7 @@ class Parser[State: ParserState]():
     def new_state(self, init_chat_events=True) -> State:
         state = self._new_state()
         if init_chat_events:
+            state.start_event(StateEvent.CONVERSATION)
             state.role = ROLE_ASSISTANT
         return state
 
@@ -69,46 +71,46 @@ class Parser[State: ParserState]():
         return ParserState()
 
     def is_end(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_fim_middle(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_think_end(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_think_start(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_conversation_start(self, state: State, token: str) -> tuple[bool, str]:
-        pass
+        return False, token
 
     def is_conversation_end(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_tool_call_start(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_tool_call_end(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_tool_response_start(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_tool_response_end(self, state: State, token: str) -> bool:
-        pass
+        return False
 
     def is_prompt_start_thinking(self, prompt: str) -> bool:
         pass
 
     def parse_tool_calls(self, state: State, tool_call_expression: str | None) -> tuple[list[ToolCall], bool]:
-        pass
+        return [], False
 
     def is_assistant(self, role):
         return self.get_assistant_role_name() == role
 
     def get_assistant_role_name(self) -> str:
-        pass
+        return ROLE_ASSISTANT
 
     def is_erase(self, state: State, token: str) -> bool:
-        pass
+        return False

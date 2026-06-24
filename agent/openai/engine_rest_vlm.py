@@ -1,5 +1,4 @@
 import logging
-import logging
 import queue
 import threading
 import typing
@@ -10,9 +9,9 @@ from typing import Callable
 from typing import Generator
 
 from fastapi.routing import APIRouter
-from openvino_genai import VLMPipeline, GenerationFinishReason, GenerationConfig, py_openvino_genai, StreamingStatus
+from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
-    Tokenizer, VLMDecodedResults
+    Tokenizer, VLMDecodedResults, GenerationConfig
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
@@ -37,7 +36,7 @@ class VlmController(BaseController):
         self.request_lock = threading.Lock()
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
-                        init_chat_events: bool, is_stop: Callable[[], bool],
+                        init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None
                         ) -> Generator[CompletionResponse, None, None]:
         with self.request_lock:
@@ -46,14 +45,17 @@ class VlmController(BaseController):
             start_stream_handling: queue.Queue[bool] = queue.Queue()
             before_generate_mem = get_current_memory()
 
+            encode_size = self.get_tokens_size(prompt)
+            max_length = generation_config.max_length
+
             def run_inference():
                 try:
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         self.log_inference.debug(
                             f"inference starting with parameters: "
-                            f"prompt len={len(prompt)}, "
+                            f"prompt_tokens={encode_size}, "
                             f"do_sample={generation_config.do_sample}, "
-                            f"max_length={generation_config.max_length}, "
+                            f"max_length={max_length}, "
                             f"max_new_tokens={generation_config.max_new_tokens}, "
                             f"do_sample={generation_config.do_sample}, temperature={generation_config.temperature:.2f}, "
                             f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
@@ -68,8 +70,10 @@ class VlmController(BaseController):
                                                             parser=self.parser,
                                                             init_chat_events=init_chat_events,
                                                             is_stop=is_stop,
+                                                            is_veai=is_veai,
+                                                            config=self.handler_config,
                                                             supported_functions=function_by_name,
-                                                            config=self.handler_config),
+                                                            ),
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
                                                chunk_queue=chunk_queue)
@@ -93,12 +97,12 @@ class VlmController(BaseController):
                         inference_finish_reasons = None
 
                     if metrics:
-                        log_msg += f"num_input_tokens:{metrics.get_num_input_tokens()}\n"
-                        f"generated_tokens:{metrics.get_num_generated_tokens()}\n"
-                        f"generate_duration: {to_str(metrics.get_generate_duration())}\n"
-                        f"inference_duration: {to_str(metrics.get_inference_duration())}\n"
-                        f"ttft: {to_str(metrics.get_ttft())}\n"
-                        f"throughput: {to_str(metrics.get_throughput())}\n"
+                        log_msg += (f"num_input_tokens: {metrics.get_num_input_tokens()}\n"
+                                    f"generated_tokens: {metrics.get_num_generated_tokens()}\n"
+                                    f"generate_duration: {to_str(metrics.get_generate_duration())}\n"
+                                    f"inference_duration: {to_str(metrics.get_inference_duration())}\n"
+                                    f"ttft: {to_str(metrics.get_ttft())}\n"
+                                    f"throughput: {to_str(metrics.get_throughput())}\n")
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         texts = generate_result.texts if isinstance(generate_result,
                                                                     DecodedResults) else generate_result
@@ -108,7 +112,7 @@ class VlmController(BaseController):
 
                     inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                     if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                        log.warning(f"inference finished by unexpected status {inference_finish_reason}")
+                        self.log_inference.warning(f"inference finished by unexpected status {inference_finish_reason}")
 
                 except Exception as e:
                     self.log_inference.error(f"inference error: {e}", exc_info=e)
