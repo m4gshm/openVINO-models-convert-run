@@ -18,7 +18,7 @@ from starlette.responses import StreamingResponse
 from agent import inference
 from agent.client.tool_select_options import detect_select_options
 from agent.client.veai import is_veai_agent
-from agent.client.veai.tool_call_fixer import fix_tool_definition_optional_property_as_null_type
+from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
 from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.openai import GenerateConfig, completions_api
 from agent.openai.chat_api import new_response, new_message, new_tool_call, new_stop_response
@@ -137,7 +137,7 @@ class BaseController(ABC):
         if invalid_reponse:
             return invalid_reponse
 
-        tools_raw, function_by_name = group_function_by_name(tools)
+        tools_raw, function_by_name = group_function_by_name(tools, is_veai)
 
         chat_history = new_chat_history(messages, tools_raw)
 
@@ -305,13 +305,14 @@ def new_chat_history(messages: list[BaseModel], tools_raw: list[dict[str, Any]] 
     return chat_history
 
 
-def group_function_by_name(tools: list[ToolDefinition] | None) -> tuple[
+def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool) -> tuple[
     list[dict[str, Any]], dict[str, FunctionDefinition]]:
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
     for tool in (tools or []):
-        fixed_tool = fix_tool_definition_optional_property_as_null_type(tool)
-        tools_raw.append(fixed_tool.model_dump())
+        if is_veai:
+            fixed_tool = veai_fix_tool_definition_optional_property_as_null_type(tool)
+            tools_raw.append(fixed_tool.model_dump())
         function = tool.function
         function_by_name[function.name] = function
     return tools_raw, function_by_name

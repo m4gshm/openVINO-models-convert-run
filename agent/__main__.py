@@ -1,14 +1,17 @@
 import argparse
 import logging.config
 import os
+from enum import Enum
 
 import uvicorn
-from openvino_genai import SchedulerConfig
+from openvino_genai.py_openvino_genai import SchedulerConfig, CacheEvictionConfig, AggregationMode, KVCrushConfig, \
+    KVCrushAnchorPointMode
 from pydantic.json import pydantic_encoder
 
-from agent.openai import default_generate_config, GenerateConfig
+from agent.openai import GenerateConfig
+from agent.parser import Parser
 from agent.server import init_continuous_batching_engine, init_sequential_engine
-from .common.log import log_format_prefix, log_format_simple, logging_config
+from .common.log import logging_config
 from .inference.token_handler import TokenHandlerConfig
 from .parser.gemma4 import Gemma4ChannelParser
 from .parser.qwen3 import Qwen3Parser
@@ -26,6 +29,17 @@ os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 
+class Pipe(Enum):
+    CB = 'CB'
+    VLM = 'VLM'
+    LLM = 'LLM'
+
+
+class ParserType(Enum):
+    qwen3 = 'qwen3'
+    gemma4 = 'gemma4'
+
+
 def main():
     model_parser = argparse.ArgumentParser()
     model_parser.add_argument("--host", default="127.0.0.1", help="%(default)s)")
@@ -34,9 +48,11 @@ def main():
     model_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s)")
     model_parser.add_argument("--model", type=str, default=default_model, help="%(default)s)")
     model_parser.add_argument("--device", type=str, default=default_device, help="%(default)s)")
-    model_parser.add_argument("--parser", type=str, required=False, default=None, help="%(default)s)")
-    model_parser.add_argument("--no_continuous_batching", type=bool, required=False, default=False, help="%(default)s)")
-    model_parser.add_argument("--no_vlm", type=bool, required=False, default=None, help="%(default)s)")
+    model_parser.add_argument("--parser", type=lambda c: ParserType[c.upper()], required=False,
+                              default=None, choices=list(ParserType), help="%(default)s)")
+    model_parser.add_argument("--pipe", type=lambda c: Pipe[c.upper()], required=False,
+                              default=Pipe.VLM, choices=list(Pipe), help="%(default)s)")
+    model_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s)")
     model_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s)")
     model_parser.add_argument("--cache_size", type=int, required=False, default=None, help="%(default)s)")
     model_parser.add_argument("--generate_config_file", type=str, required=False,
@@ -58,16 +74,7 @@ def main():
     log = logging.getLogger(__name__)
     log.info("server starting")
 
-
     handler_config = TokenHandlerConfig()
-
-    scheduler_config = SchedulerConfig()
-    scheduler_config.max_num_batched_tokens = default_batch_size
-    scheduler_config.cache_size = args.cache_size if args.cache_size else 0
-    scheduler_config.max_num_seqs = 2
-    scheduler_config.dynamic_split_fuse = True
-    scheduler_config.enable_prefix_caching = True
-    scheduler_config.use_cache_eviction = False
 
     generate_config_file = args.generate_config_file
     generate_config: GenerateConfig | None = None
@@ -86,26 +93,60 @@ def main():
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
         max_prompt_len = generate_config.max_tokens
+    device = args.device
+    is_decive_npu = device == "NPU"
     if not max_prompt_len:
-        max_prompt_len = 16384 if args.device == "NPU" else 65536
+        max_prompt_len = 16384 if is_decive_npu else 65536
 
     generate_config.max_tokens = max_prompt_len
+
+    dynamic_split_fuse = True
+
+    scheduler_config = SchedulerConfig()
+    scheduler_config.max_num_batched_tokens = default_batch_size if dynamic_split_fuse else max_prompt_len
+    # scheduler_config.num_kv_blocks = 2048
+    scheduler_config.cache_size = args.cache_size if args.cache_size else 0
+    # scheduler_config.cache_interval_multiplier = 1
+    # scheduler_config.num_linear_attention_blocks = 256
+    scheduler_config.max_num_seqs = 1
+    scheduler_config.dynamic_split_fuse = dynamic_split_fuse
+    # scheduler_config.use_sparse_attention = True
+    # scheduler_config.sparse_attention_config
+    scheduler_config.enable_prefix_caching = False if args.no_prefix_caching else True
+    scheduler_config.use_cache_eviction = False
+    max_cache_size = 4096 * 4
+    kv_crush_config = KVCrushConfig(budget=max_cache_size, anchor_point_mode=KVCrushAnchorPointMode.MEAN)
+    eviction_config = CacheEvictionConfig(start_size=1024 * 4, recent_size=512, max_cache_size=max_cache_size,
+                                          aggregation_mode=AggregationMode.NORM_SUM,
+                                          apply_rotation=False, snapkv_window_size=8,
+                                          kvcrush_config=kv_crush_config)
+    # eviction_config.adaptive_rkv_config = AdaptiveRKVConfig()
+    # scheduler_config.cache_eviction_config = eviction_config
+
 
     tokenizer_properties = {
     }
 
-    args_parser = args.parser
-    if not args_parser:
+    pipe: Pipe = args.pipe
+    parser_type: ParserType = args.parser
+    if not parser_type:
         model_lower = model.lower()
-        qwen3_models = ["omnicoder", "qwen"]
-        is_qwen = any(model in model_lower for model in qwen3_models)
-        if is_qwen:
-            args_parser = "qwen3"
-        elif "gemma" in model_lower:
-            args_parser = "gemma4"
-        log.info(f"model parser '{args_parser}'")
+        qwen3_models = ["omnicoder", "qwen3"]
+        qwen2_models = ["qwen2"]
+        gemma4_models = ["gemma4"]
+        is_qwen3 = any(model in model_lower for model in qwen3_models)
+        is_qwen2 = any(model in model_lower for model in qwen2_models)
+        is_gemma4 = any(model in model_lower for model in gemma4_models)
+        if is_qwen3:
+            parser_type = ParserType.qwen3
+        elif is_qwen2:
+            pipe = Pipe.LLM
+        elif is_gemma4:
+            pipe = Pipe.VLM
+            parser_type = ParserType.gemma4
+        log.info(f"model parser '{parser_type}'")
 
-    model_parser = Qwen3Parser() if args_parser == "qwen3" else Gemma4ChannelParser() if args_parser == "gemma4" else Parser()
+    model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else Gemma4ChannelParser() if parser_type == ParserType.gemma4 else Parser()
 
     model_path = f"{args.models_dir}/{model}"
     model_cache_dir = f"{args.models_cache_dir}/{model}"
@@ -116,11 +157,15 @@ def main():
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
-        # "PERF_COUNT": "YES"
+        "PERF_COUNT": "YES",
 
-        "KV_CACHE_PRECISION": "u8",
-        # "KEY_CACHE_GROUP_SIZE": 128,
-        # "VALUE_CACHE_GROUP_SIZE": 128,
+        "KV_CACHE_PRECISION": "u4",
+        # "KEY_CACHE_PRECISION": "u4",
+        # "VALUE_CACHE_PRECISION": "u4",
+        # "KEY_CACHE_GROUP_SIZE": "128",
+        # "VALUE_CACHE_GROUP_SIZE": "128",
+        "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
+        "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
     }
 
     npu_pipeline_properties = {
@@ -129,9 +174,10 @@ def main():
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
 
-        # "KV_CACHE_PRECISION": "u8",
-        "KEY_CACHE_GROUP_SIZE": 128,
-        "VALUE_CACHE_GROUP_SIZE": 128,
+        "KV_CACHE_PRECISION": "u4",
+        "KEY_CACHE_GROUP_SIZE": "128",
+        "VALUE_CACHE_GROUP_SIZE": "128",
+        "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": "PLUGIN",
         "NPU_USE_NPUW": "YES",
@@ -142,24 +188,22 @@ def main():
         "MAX_PROMPT_LEN": max_prompt_len,
 
         "LOG_LEVEL": "LOG_WARNING",
-
-        "DYNAMIC_QUANTIZATION_GROUP_SIZE": 128,
-        "ATTENTION_BACKEND": "PA",
+        # "ATTENTION_BACKEND": "PA",
     }
 
-    no_vlm = args.no_vlm
-    if args.device == "NPU" or no_vlm or args.no_continuous_batching:
-        if no_vlm is None:
-            no_vlm = False
-        app = init_sequential_engine(model=(model), model_path=model_path, device=args.device, vlm=not no_vlm,
+    if is_decive_npu or pipe != Pipe.CB:
+        app = init_sequential_engine(model=model,
+                                     model_path=model_path,
+                                     device=device,
+                                     vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
                                      generate_config=generate_config,
                                      handler_config=handler_config,
-                                     pipeline_properties=npu_pipeline_properties if args.device == "NPU" else gpu_pipeline_properties)
+                                     pipeline_properties=npu_pipeline_properties if is_decive_npu else gpu_pipeline_properties)
     else:
-        app = init_continuous_batching_engine(model=(model),
+        app = init_continuous_batching_engine(model=model,
                                               model_path=model_path,
-                                              device=args.device,
+                                              device=device,
                                               parser=model_parser,
                                               generate_config=generate_config,
                                               handler_config=handler_config,
@@ -168,9 +212,7 @@ def main():
                                               tokenizer_properties=tokenizer_properties)
 
     log.info(f"listening {args.host}:{args.port}")
-
     uvicorn.run(app, host=args.host, port=args.port)
-
 
 if __name__ == "__main__":
     main()

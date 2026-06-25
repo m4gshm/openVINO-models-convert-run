@@ -300,7 +300,7 @@ class TokenHandler:
         log.debug(f"set conversation role {state.role}, prev {self.prev_role}")
 
     def conversation_end(self, state: ParserState, token_number: int) -> tuple[
-        list[CompletionResponse], StopSignal | None]:
+        list[CompletionResponse], Literal[StopSignal.CANCEL] | None]:
         result: list[CompletionResponse] = []
         stop_signal: Literal[StopSignal.CANCEL] | None = None
         if state.get_current_event() == StateEvent.TOOL_CALL:

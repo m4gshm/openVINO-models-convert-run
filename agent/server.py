@@ -43,7 +43,6 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
                                                          properties=pipeline_properties,
                                                          tokenizer_properties=tokenizer_properties,
                                                          vision_encoder_properties=vision_encoder_properties)
-
         log.info(f"model loaded successfully")
 
         loaded_pipe_mem = get_current_memory()

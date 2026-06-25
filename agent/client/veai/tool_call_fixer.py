@@ -206,7 +206,7 @@ def read_args_as_json(args_raw: str, function: FunctionCall) -> Any:
     return args
 
 
-def fix_tool_definition_optional_property_as_null_type(tool: ToolDefinition) -> ToolDefinition:
+def veai_fix_tool_definition_optional_property_as_null_type(tool: ToolDefinition) -> ToolDefinition:
     function = tool.function
     function.parameters = _fix_tool_definition_optional_property_as_null_type(function.parameters, function.name)
     return tool

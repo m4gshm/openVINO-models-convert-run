@@ -52,7 +52,8 @@ class VlmController(BaseController):
                 try:
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         self.log_inference.debug(
-                            f"inference starting with parameters: "
+                            f"request starting with parameters: "
+                            f"pipe_type={type(self.pipe)}, "
                             f"prompt_tokens={encode_size}, "
                             f"do_sample={generation_config.do_sample}, "
                             f"max_length={max_length}, "
@@ -64,7 +65,7 @@ class VlmController(BaseController):
                             f"frequency_penalty={generation_config.frequency_penalty:.2f}"
                         )
                     else:
-                        self.log_inference.info(f"inference starting")
+                        self.log_inference.info(f"request starting")
 
                     streamer = StreamerWrapper(TokenHandler(tokenizer=tokenizer,
                                                             parser=self.parser,
