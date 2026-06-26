@@ -4,8 +4,7 @@ import os
 from enum import Enum
 
 import uvicorn
-from openvino_genai.py_openvino_genai import SchedulerConfig, CacheEvictionConfig, AggregationMode, KVCrushConfig, \
-    KVCrushAnchorPointMode
+from openvino_genai.py_openvino_genai import SchedulerConfig
 from pydantic.json import pydantic_encoder
 
 from agent.openai import GenerateConfig
@@ -41,24 +40,25 @@ class ParserType(Enum):
 
 
 def main():
-    model_parser = argparse.ArgumentParser()
-    model_parser.add_argument("--host", default="127.0.0.1", help="%(default)s)")
-    model_parser.add_argument("--port", type=int, default=8888, help="%(default)s)")
-    model_parser.add_argument("--models_dir", type=str, default=default_models_dir, help="%(default)s)")
-    model_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s)")
-    model_parser.add_argument("--model", type=str, default=default_model, help="%(default)s)")
-    model_parser.add_argument("--device", type=str, default=default_device, help="%(default)s)")
-    model_parser.add_argument("--parser", type=lambda c: ParserType[c.upper()], required=False,
-                              default=None, choices=list(ParserType), help="%(default)s)")
-    model_parser.add_argument("--pipe", type=lambda c: Pipe[c.upper()], required=False,
-                              default=Pipe.VLM, choices=list(Pipe), help="%(default)s)")
-    model_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s)")
-    model_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s)")
-    model_parser.add_argument("--cache_size", type=int, required=False, default=None, help="%(default)s)")
-    model_parser.add_argument("--generate_config_file", type=str, required=False,
-                              default=".config/generate_config.json",
-                              help="%(default)s)")
-    args = model_parser.parse_args()
+    args_parser = argparse.ArgumentParser()
+    args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
+    args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
+    args_parser.add_argument("--models_dir", type=str, default=default_models_dir, help="%(default)s")
+    args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
+    args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
+    args_parser.add_argument("--device", type=str, default=default_device, help="%(default)s")
+    args_parser.add_argument("--parser", type=lambda c: ParserType[c.upper()], required=False,
+                             default=None, choices=list(ParserType), help="%(default)s")
+    args_parser.add_argument("--pipe", type=lambda c: Pipe[c.upper()], required=False,
+                             default=Pipe.VLM, choices=list(Pipe), help="%(default)s")
+    args_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s")
+    args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--cache_size", type=int, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--generate_config_file", type=str, required=False,
+                             default=".config/generate_config.json",
+                             help="%(default)s")
+    args = args_parser.parse_args()
 
     model = args.model
     base_log_config = logging_config(f"./logs/{model}")
@@ -82,10 +82,21 @@ def main():
         log.info(f"load {generate_config_file}")
         try:
             with open(generate_config_file, "r", encoding="utf-8") as file:
-                # Read the file as a raw string directly into the validator
                 generate_config: GenerateConfig = GenerateConfig.model_validate_json(file.read())
         except FileNotFoundError as e:
-            log.debug(f"{e}")
+            log.error(f"{e}")
+            raise e
+
+    chat_template = ''
+    chat_template_file = args.chat_template_file
+    if chat_template_file:
+        log.info(f"load {chat_template_file}")
+        try:
+            with open(chat_template_file, "r", encoding="utf-8") as file:
+                chat_template = file.read()
+        except FileNotFoundError as e:
+            log.error(f"{e}")
+            raise e
 
     if not generate_config:
         generate_config = GenerateConfig()
@@ -114,15 +125,14 @@ def main():
     # scheduler_config.sparse_attention_config
     scheduler_config.enable_prefix_caching = False if args.no_prefix_caching else True
     scheduler_config.use_cache_eviction = False
-    max_cache_size = 4096 * 4
-    kv_crush_config = KVCrushConfig(budget=max_cache_size, anchor_point_mode=KVCrushAnchorPointMode.MEAN)
-    eviction_config = CacheEvictionConfig(start_size=1024 * 4, recent_size=512, max_cache_size=max_cache_size,
-                                          aggregation_mode=AggregationMode.NORM_SUM,
-                                          apply_rotation=False, snapkv_window_size=8,
-                                          kvcrush_config=kv_crush_config)
+    # max_cache_size = 4096 * 4
+    # kv_crush_config = KVCrushConfig(budget=max_cache_size, anchor_point_mode=KVCrushAnchorPointMode.MEAN)
+    # eviction_config = CacheEvictionConfig(start_size=1024 * 4, recent_size=512, max_cache_size=max_cache_size,
+    #                                       aggregation_mode=AggregationMode.NORM_SUM,
+    #                                       apply_rotation=False, snapkv_window_size=8,
+    #                                       kvcrush_config=kv_crush_config)
     # eviction_config.adaptive_rkv_config = AdaptiveRKVConfig()
     # scheduler_config.cache_eviction_config = eviction_config
-
 
     tokenizer_properties = {
     }
@@ -133,7 +143,7 @@ def main():
         model_lower = model.lower()
         qwen3_models = ["omnicoder", "qwen3"]
         qwen2_models = ["qwen2"]
-        gemma4_models = ["gemma4"]
+        gemma4_models = ["gemma-4", "gemma4", "gemma"]
         is_qwen3 = any(model in model_lower for model in qwen3_models)
         is_qwen2 = any(model in model_lower for model in qwen2_models)
         is_gemma4 = any(model in model_lower for model in gemma4_models)
@@ -144,7 +154,7 @@ def main():
         elif is_gemma4:
             pipe = Pipe.VLM
             parser_type = ParserType.gemma4
-        log.info(f"model parser '{parser_type}'")
+        log.info(f"model parser='{parser_type}', parser_type='{type(parser_type)}'")
 
     model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else Gemma4ChannelParser() if parser_type == ParserType.gemma4 else Parser()
 
@@ -157,7 +167,7 @@ def main():
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
-        "PERF_COUNT": "YES",
+        "PERF_COUNT": "NO",
 
         "KV_CACHE_PRECISION": "u4",
         # "KEY_CACHE_PRECISION": "u4",
@@ -199,6 +209,7 @@ def main():
                                      parser=model_parser,
                                      generate_config=generate_config,
                                      handler_config=handler_config,
+                                     chat_template=chat_template,
                                      pipeline_properties=npu_pipeline_properties if is_decive_npu else gpu_pipeline_properties)
     else:
         app = init_continuous_batching_engine(model=model,
@@ -209,10 +220,12 @@ def main():
                                               handler_config=handler_config,
                                               scheduler_config=scheduler_config,
                                               pipeline_properties=gpu_pipeline_properties,
+                                              chat_template=chat_template,
                                               tokenizer_properties=tokenizer_properties)
 
     log.info(f"listening {args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
+
 
 if __name__ == "__main__":
     main()

@@ -15,7 +15,7 @@
     <option name="DEBUG_JUST_MY_CODE" value="false" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model Qwen3-Coder-30B-A3B-Instruct-int4-asym-g128-r1 --no_vlm True" />
+    <option name="PARAMETERS" value="--model Qwen3-Coder-30B-A3B-Instruct-int4-asym-g128-r1 --pipe LLM" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

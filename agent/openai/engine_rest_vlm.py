@@ -26,8 +26,8 @@ log = logging.getLogger(__name__)
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig,
-                 generate_config: GenerateConfig, router: APIRouter):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router)
+                 generate_config: GenerateConfig, router: APIRouter, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config

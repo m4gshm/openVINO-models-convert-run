@@ -44,8 +44,8 @@ class ControllerConfig(BaseModel):
 
 
 class BaseController(ABC):
-    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer, generate_config: GenerateConfig,
-                 router: APIRouter):
+    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
+                 generate_config: GenerateConfig, router: APIRouter, chat_template: str = ''):
         router.post("/v1/completions")(self.completions)
         router.post("/v1/chat/completions")(self.chat)
         router.get(path="/v1/models", response_model_exclude_none=True)(self.models)
@@ -54,6 +54,7 @@ class BaseController(ABC):
         self.generate_config = generate_config
         self.config = config
         self.tokenizer = tokenizer
+        self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         self.log_inference = inference.log
 
@@ -149,7 +150,8 @@ class BaseController(ABC):
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     tools=tools_raw,
-                                                    extra_context=extra_context)
+                                                    extra_context=extra_context,
+                                                    chat_template=self.chat_template)
 
         self.log_inference_prompt.debug(full_prompt)
 
@@ -158,6 +160,7 @@ class BaseController(ABC):
                                                        max_completion_tokens=body.max_completion_tokens,
                                                        top_p=body.top_p, frequency_penalty=body.frequency_penalty,
                                                        logprobs=body.logprobs, stop=body.stop)
+
         chunk_generator = self.chunk_generator(
             prompt=full_prompt, generation_config=generation_config, tokenizer=tokenizer,
             init_chat_events=True, is_stop=lambda: is_disconnected(loop, request),
