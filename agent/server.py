@@ -55,6 +55,7 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
 
     async def lifespan(app: FastAPI):
         yield
+        log.info("controller is shutdown")
         controller.shutdown()
 
     app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
