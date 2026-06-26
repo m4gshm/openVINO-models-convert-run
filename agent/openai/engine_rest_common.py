@@ -56,6 +56,7 @@ class BaseController(ABC):
         self.tokenizer = tokenizer
         self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
+        self.log_inference_token_metrics  = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
 
     def shutdown(self):

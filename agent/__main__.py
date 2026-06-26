@@ -1,6 +1,8 @@
 import argparse
 import logging.config
 import os
+import signal
+import sys
 from enum import Enum
 
 import uvicorn
@@ -27,6 +29,12 @@ os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
+
+def handle_ctrl_c(signum, frame):
+    print("\nShutdown signal received. Exiting application...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, handle_ctrl_c)
 
 class Pipe(Enum):
     CB = 'CB'

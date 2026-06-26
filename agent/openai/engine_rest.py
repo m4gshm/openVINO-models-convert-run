@@ -165,7 +165,7 @@ class ContinuousBatchingController(BaseController):
                                 generation_outputs = generation_handle.read()
                                 items = generation_outputs.items()
                                 if len(items) == 0:
-                                    self.log_inference.debug("empty generation")
+                                    self.log_inference_token_metrics.debug("empty generation")
                                     empty_out_counter += 1
                                     if empty_out_counter >= empty_tokens_limit:
                                         self.log_inference.error("empty generation limits exceed")
@@ -173,9 +173,9 @@ class ContinuousBatchingController(BaseController):
                                         return
                                 for k, generation_output in items:
                                     generated_ids = generation_output.generated_ids
-                                    self.log_inference.debug(f"generation_output: ids={generated_ids}, "
-                                                             f"score={generation_output.score}, "
-                                                             f"log_probs={generation_output.generated_log_probs}")
+                                    self.log_inference_token_metrics.debug(f"generation_output: ids={generated_ids}, "
+                                                                           f"score={generation_output.score}, "
+                                                                           f"log_probs={generation_output.generated_log_probs}")
                                     responses, stop_signal = streamer.handle_token(generated_ids)
                                     for response in responses:
                                         response.id = unique_id
