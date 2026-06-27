@@ -78,21 +78,30 @@ def fix_edit_file(tool_call: ToolCall) -> ToolCall:
         target_file = args.get("target_file")
         if not target_file:
             log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
-        edits_str = args.get("edits")
-        if target_file and edits_str:
+        edits_raw = args.get("edits")
+        if target_file and edits_raw:
             allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
             invalid = False
             if not allow_multiple_matches:
                 invalid = True
                 allow_multiple_matches = True
+            # qwen2 case
+            if isinstance(edits_raw, list):
+                edits_list = edits_raw
+                edits_raw = edits_list[0] if edits_list else ""
+                log.debug(f"convert 'edits' list to str: list={edits_list}, str={edits_raw}")
+
+            if not isinstance(edits_raw, str):
+                log.error(
+                    f"unexpected edits type, function '{function.name}', args '{edits_raw}', type {type(edits_raw)}")
             try:
-                edits = json.loads(edits_str)
+                edits = json.loads(edits_raw)
             except json.decoder.JSONDecodeError as e:
                 invalid = True
-                log.info(f"bad edits of function '{function.name}', options: '{edits_str}': {e}")
-                edits = json_repair.loads(edits_str)
-                edits_str = json.dumps(edits)
-                log.info(f"repaired edits '{edits_str}'")
+                log.info(f"bad edits of function '{function.name}', options: '{edits_raw}': {e}")
+                edits = json_repair.loads(edits_raw)
+                edits_raw = json.dumps(edits)
+                log.info(f"repaired edits '{edits_raw}'")
             if invalid:
                 new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
                 tool_call.function = new_function
@@ -112,7 +121,7 @@ def fix_write_file(tool_call: ToolCall) -> ToolCall:
             if not allow_overwrite:
                 # invalid
                 # log
-                new_function = WriteFile().new_call(target_file, content, allow_overwrite = True)
+                new_function = WriteFile().new_call(target_file, content, allow_overwrite=True)
                 tool_call.function = new_function
 
     return tool_call

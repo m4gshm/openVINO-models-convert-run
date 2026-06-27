@@ -15,7 +15,7 @@
     <option name="DEBUG_JUST_MY_CODE" value="false" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model Vibe-Coding-Claude-Fable-5-int4-sym-g128-r1-se-awq --no_vlm True" />
+    <option name="PARAMETERS" value="--model Vibe-Coding-Claude-Fable-5-int4-sym-g128-r1-se-awq --pipe LLM --parser qwen2" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

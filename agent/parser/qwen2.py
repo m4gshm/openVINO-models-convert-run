@@ -7,7 +7,7 @@ import json_repair
 
 from agent.openai.chat_api import new_tool_call
 from agent.openai.chat_completions_api import ToolCall, FunctionCall
-from agent.parser import ParserState, StateEvent
+from agent.parser import ParserState
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
 log = logging.getLogger(__name__)
@@ -84,12 +84,7 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
     return arguments_str, partial
 
 
-class Qwen3Parser(QwenBaseParser):
-    def new_state(self, init_chat_events=True) -> ParserState:
-        state = super().new_state(init_chat_events=init_chat_events)
-        if init_chat_events:
-            state.start_event(StateEvent.THINK)
-        return state
+class Qwen2Parser(QwenBaseParser):
 
     def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ToolCall], bool]:
         tool_call_expression = tool_call_expression.lstrip()
@@ -111,10 +106,14 @@ class Qwen3Parser(QwenBaseParser):
                 if len(function_block) == 0:
                     continue
                 function_block_rstrip = function_block.rstrip()
-                if function_block_rstrip.endswith(FUNCTION_END):
-                    function_block = function_block_rstrip[:-len(FUNCTION_END)]
 
-                func_name, tail = parse_name(function_block)
+                try:
+                    parsed_function = json.loads(function_block_rstrip)
+                except json.decoder.JSONDecodeError as e:
+                    # log
+                    parsed_function = json_repair.loads(function_block_rstrip)
+
+                func_name = parsed_function.get("name") if isinstance(parsed_function, dict) else None
                 if func_name is None:
                     # log
                     continue
@@ -122,10 +121,8 @@ class Qwen3Parser(QwenBaseParser):
                 supported_functions = state.supported_functions
                 function = supported_functions.get(func_name) if supported_functions else None
 
-                parameters = function.parameters if function is not None else {}
-                arguments, partial_param = get_arguments(tail or "", parameters)
-                if partial_param:
-                    partial = True
+                arguments = parsed_function.get("arguments") if function is not None else {}
+                arguments_str = json.dumps(arguments, ensure_ascii=False)
 
-                parsed_calls.append(new_tool_call(FunctionCall(name=func_name, arguments=arguments)))
+                parsed_calls.append(new_tool_call(FunctionCall(name=func_name, arguments=arguments_str)))
         return parsed_calls, partial

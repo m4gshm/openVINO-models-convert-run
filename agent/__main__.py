@@ -9,6 +9,7 @@ from pydantic.json import pydantic_encoder
 
 from agent.openai import GenerateConfig
 from agent.parser import Parser
+from agent.parser.qwen2 import Qwen2Parser
 from agent.server import init_continuous_batching_engine, init_sequential_engine
 from .common.log import logging_config
 from .inference.token_handler import TokenHandlerConfig
@@ -35,6 +36,7 @@ class Pipe(Enum):
 
 
 class ParserType(Enum):
+    qwen2 = 'qwen2'
     qwen3 = 'qwen3'
     gemma4 = 'gemma4'
 
@@ -47,9 +49,9 @@ def main():
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--device", type=str, default=default_device, help="%(default)s")
-    args_parser.add_argument("--parser", type=lambda c: ParserType[c.upper()], required=False,
+    args_parser.add_argument("--parser", type=lambda c: ParserType[c], required=False,
                              default=None, choices=list(ParserType), help="%(default)s")
-    args_parser.add_argument("--pipe", type=lambda c: Pipe[c.upper()], required=False,
+    args_parser.add_argument("--pipe", type=lambda c: Pipe[c], required=False,
                              default=Pipe.VLM, choices=list(Pipe), help="%(default)s")
     args_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
@@ -150,13 +152,17 @@ def main():
         if is_qwen3:
             parser_type = ParserType.qwen3
         elif is_qwen2:
+            parser_type = ParserType.qwen2
             pipe = Pipe.LLM
         elif is_gemma4:
             pipe = Pipe.VLM
             parser_type = ParserType.gemma4
         log.info(f"model parser='{parser_type}', parser_type='{type(parser_type)}'")
 
-    model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else Gemma4ChannelParser() if parser_type == ParserType.gemma4 else Parser()
+    model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else \
+        Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
+            Qwen2Parser() if parser_type == ParserType.qwen2 else \
+                Parser()
 
     model_path = f"{args.models_dir}/{model}"
     model_cache_dir = f"{args.models_cache_dir}/{model}"
