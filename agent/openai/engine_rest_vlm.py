@@ -52,7 +52,7 @@ class VlmController(BaseController):
                 try:
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         self.log_inference.debug(
-                            f"request starting with parameters: "
+                            f"inference start: "
                             f"pipe_type={type(self.pipe)}, "
                             f"prompt_tokens={encode_size}, "
                             f"do_sample={generation_config.do_sample}, "
@@ -65,51 +65,51 @@ class VlmController(BaseController):
                             f"frequency_penalty={generation_config.frequency_penalty:.2f}"
                         )
                     else:
-                        self.log_inference.info(f"request starting")
+                        self.log_inference.info(f"inference start")
 
-                    streamer = StreamerWrapper(TokenHandler(tokenizer=tokenizer,
-                                                            parser=self.parser,
-                                                            init_chat_events=init_chat_events,
-                                                            is_stop=is_stop,
-                                                            is_veai=is_veai,
-                                                            config=self.handler_config,
-                                                            supported_functions=function_by_name,
-                                                            ),
+                    token_handler = TokenHandler(tokenizer=tokenizer, parser=self.parser,
+                                                 init_chat_events=init_chat_events,
+                                                 is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
+                                                 supported_functions=function_by_name, )
+                    streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
                                                chunk_queue=chunk_queue)
 
                     generate_result = start_generate_result(streamer)
                     chunk_queue.put_nowait(None)
-                    after_generate_mem = get_current_memory()
-                    generate_cost = after_generate_mem - before_generate_mem
-                    log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
 
                     metrics = generate_result.perf_metrics if isinstance(generate_result, DecodedResults) else None
 
                     def to_str(d: MeanStdPair) -> str:
                         return f"std {d.std} , mean {d.mean}"
 
-                    log_msg = f"inference finished\n"
+                    log_msg = f"inference finished: "
                     if isinstance(generate_result, DecodedResults):
                         inference_finish_reasons = generate_result.finish_reasons
-                        log_msg += f" with reason '{inference_finish_reasons}'\n"
+                        log_msg += f"reason '{inference_finish_reasons}'"
                     else:
                         inference_finish_reasons = None
 
                     if metrics:
-                        log_msg += (f"num_input_tokens: {metrics.get_num_input_tokens()}\n"
-                                    f"generated_tokens: {metrics.get_num_generated_tokens()}\n"
-                                    f"generate_duration: {to_str(metrics.get_generate_duration())}\n"
-                                    f"inference_duration: {to_str(metrics.get_inference_duration())}\n"
-                                    f"ttft: {to_str(metrics.get_ttft())}\n"
-                                    f"throughput: {to_str(metrics.get_throughput())}\n")
+                        log_msg += (f"num_input_tokens={metrics.get_num_input_tokens()}, "
+                                    f"generated_tokens={metrics.get_num_generated_tokens()}, "
+                                    f"generate_duration={to_str(metrics.get_generate_duration())}, "
+                                    f"inference_duration={to_str(metrics.get_inference_duration())}, "
+                                    f"ttft={to_str(metrics.get_ttft())}, "
+                                    f"throughput={to_str(metrics.get_throughput())}")
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         texts = generate_result.texts if isinstance(generate_result,
                                                                     DecodedResults) else generate_result
                         self.log_inference.debug(f"{log_msg}\nresult: {texts}")
                     else:
                         self.log_inference.info(log_msg)
+
+                    after_generate_mem = get_current_memory()
+                    generate_cost = after_generate_mem - before_generate_mem
+                    log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
+
+                    self.log_inference_generated.debug("".join(token_handler.generated))
 
                     inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                     if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
@@ -126,14 +126,12 @@ class VlmController(BaseController):
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
                     vlm_pipe: VLMPipeline = pipe
-                    generate_result = vlm_pipe.generate(prompt=prompt,
-                                                        generation_config=generation_config,
+                    generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 elif isinstance(pipe, LLMPipeline):
                     llm_pipe: LLMPipeline = pipe
-                    generate_result = llm_pipe.generate(
-                        inputs=prompt, generation_config=generation_config,
-                        streamer=streamer)
+                    generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
+                                                        streamer=streamer)
                 else:
                     raise NotImplementedError(f"unexpected pipe type {type(pipe)}")
                 return generate_result
@@ -161,15 +159,15 @@ class VlmController(BaseController):
 
             except Exception as e:
                 log.error(f"chunk processing error: {e}", exc_info=e)
-            finally:
-                stop_stream_handling.put_nowait(True)
-                if not inference_task.done():
-                    log.info("waiting for inference to complete")
-                    try:
-                        r = inference_task.result(timeout=20)
-                    except Exception as e:
-                        log.error(f"waiting inference completion error: {e}", exc_info=e)
-                log.info("inference handling is done")
+
+            stop_stream_handling.put_nowait(True)
+            if not inference_task.done():
+                log.info("waiting for inference to complete")
+                try:
+                    r = inference_task.result(timeout=20)
+                except Exception as e:
+                    log.error(f"waiting inference completion error: {e}", exc_info=e)
+            log.info("inference handling is done")
 
 
 class StreamerWrapper(py_openvino_genai.StreamerBase):

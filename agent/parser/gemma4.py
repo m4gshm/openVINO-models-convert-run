@@ -6,7 +6,7 @@ from typing import Any
 import agent
 from agent.openai.chat_api import new_tool_call
 from agent.openai.chat_completions_api import ToolCall, FunctionCall, FunctionDefinition
-from agent.parser import Parser, _is_conversation_start, StateEvent
+from agent.parser import Parser, _is_conversation_start
 
 ROLE = "model"
 
@@ -28,9 +28,6 @@ FUNCTION_START_PREF = "call:"
 
 TURN_START = "<|turn>"
 TURN_END = "<turn|>"
-
-# REASONING_START = "<|turn>model"
-# REASONING_END = "</thinking>"
 
 spec = {CHANNEL_START, CHANNEL_END, TOOL_CALL_START, TOOL_CALL_END, TOOL_RESPONSE_START, TOOL_RESPONSE_END, TURN_START,
         TURN_END}
@@ -89,9 +86,14 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
 class Gemma4ChannelParser(Parser[ParserState]):
     def new_state(self, init_chat_events=True) -> ParserState:
         state = super().new_state()
-        if init_chat_events:
-            state.start_event(StateEvent.CONVERSATION)
         return state
+
+    def process_chat_prompt(self, prompt: str) -> str:
+        expected = f"{TURN_START}{self.get_assistant_role_name()}\n"
+        if not prompt.endswith(expected):
+            log.debug(f"parser appends prompt by {expected}")
+            prompt += expected
+        return prompt
 
     def _new_state(self) -> ParserState:
         return ParserState()

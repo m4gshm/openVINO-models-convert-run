@@ -67,6 +67,9 @@ class Parser[State: ParserState]():
             state.role = ROLE_ASSISTANT
         return state
 
+    def process_chat_prompt(self, prompt: str) -> str:
+        return prompt
+
     def _new_state(self) -> ParserState:
         return ParserState()
 

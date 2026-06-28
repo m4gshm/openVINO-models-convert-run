@@ -28,7 +28,7 @@ def logging_config(logs_dir: str):
             },
             "file": {
                 "class": "logging.handlers.RotatingFileHandler",
-                "level": "INFO",
+                "level": "DEBUG",
                 "formatter": "detailed",
                 "filename": f"{logs_dir}/app.log",
                 "maxBytes": 10485760,  # 10MB
@@ -40,6 +40,15 @@ def logging_config(logs_dir: str):
                 "level": "DEBUG",
                 "formatter": "detailed",
                 "filename": f"{logs_dir}/prompt.log",
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5,
+                "encoding": "utf8"
+            },
+            "file_generated": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "DEBUG",
+                "formatter": "detailed",
+                "filename": f"{logs_dir}/generated.log",
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
                 "encoding": "utf8"
@@ -72,6 +81,11 @@ def logging_config(logs_dir: str):
                 "level": "DEBUG",
                 "propagate": False,
                 "handlers": ["file_prompt"],
+            },
+            "agent.inference.generated": {
+                "level": "DEBUG",
+                "propagate": False,
+                "handlers": ["file_generated"],
             }
         },
         "root": {

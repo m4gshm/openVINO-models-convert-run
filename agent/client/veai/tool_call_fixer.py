@@ -4,9 +4,12 @@ from typing import Any
 
 import json_repair
 
-from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options
+from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
+    search_file_by_name
 from agent.client.veai.tool.edit_file import EditFile
+from agent.client.veai.tool.list_dir import ListDir
 from agent.client.veai.tool.read_file import ReadFile
+from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
 from agent.openai.chat_completions_api import ToolCall, ToolDefinition, FunctionCall
@@ -18,6 +21,8 @@ def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
     function = tool_call.function
     if "run_command" == function.name:
         pass
+    elif list_dir.function_name == function.name:
+        return fix_list_dir(tool_call)
     elif edit_file.function_name == function.name:
         return fix_edit_file(tool_call)
     elif write_file.function_name == function.name:
@@ -26,7 +31,9 @@ def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
         return fix_read_file(tool_call)
     elif search_for_text.function_name == function.name:
         return fix_search_for_text(tool_call)
-    if ask_user_with_options.function_name == function.name:
+    elif search_file_by_name.function_name == function.name:
+        return fix_search_file_by_name(tool_call)
+    elif ask_user_with_options.function_name == function.name:
         return fix_ask_user_with_options(tool_call)
 
     return tool_call
@@ -143,6 +150,29 @@ def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
     return tool_call
 
 
+def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
+    args_raw = tool_call.function.arguments
+    args = read_args_as_json(args_raw, tool_call.function)
+    if args:
+        glob_pattern = args.get("glob_pattern")
+        invalid = not glob_pattern
+        if invalid:
+            # gemma 4
+            glob_pattern = args.get("glob")
+
+        search_directory = args.get("search_directory")
+        if not search_directory:
+            invalid = True
+            search_directory = "."
+
+        if invalid:
+            log.info(
+                f"fix invalid {tool_call.function.name}: glob_pattern={glob_pattern}, search_directory={search_directory}")
+            new_function = SearchFileByName().new_call(glob_pattern, search_directory)
+            tool_call.function = new_function
+    return tool_call
+
+
 def fix_read_file(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
     args = read_args_as_json(args_raw, tool_call.function)
@@ -180,9 +210,36 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
                     end_line = 500
             if invalid:
                 log.info(
-                    f"fix invalid read_file: target_file={target_file}, start_line={start_line}, end_line={end_line}")
+                    f"fix invalid {tool_call.function.name}: target_file={target_file}, start_line={start_line}, "
+                    f"end_line={end_line}")
                 new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
                                                    line_offset=line_offset)
+                tool_call.function = new_function
+
+    return tool_call
+
+
+def fix_list_dir(tool_call: ToolCall) -> ToolCall:
+    args_raw = tool_call.function.arguments
+    args = read_args_as_json(args_raw, tool_call.function)
+    if args:
+        directory_path = args.get("directory_path")
+
+        invalid = not directory_path
+        if invalid:
+            # gemma4 case
+            directory_path = args.get("dir")
+
+        if directory_path:
+            depth = args.get("depth")
+            if not depth:
+                invalid = True
+                depth = 1
+
+            if invalid:
+                log.info(
+                    f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
+                new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
                 tool_call.function = new_function
 
     return tool_call

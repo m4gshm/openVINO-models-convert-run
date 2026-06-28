@@ -79,7 +79,7 @@ class ContinuousBatchingController(BaseController):
             return
         if self.log_inference.isEnabledFor(logging.DEBUG):
             self.log_inference.debug(
-                f"request {request_id} is starting with parameters: "
+                f"inference start: request={request_id}, "
                 f"pipe_type={type(self.pipe)}, "
                 f"prompt_tokens={encode_size}, "
                 f"do_sample={generation_config.do_sample}, "
@@ -92,16 +92,16 @@ class ContinuousBatchingController(BaseController):
                 f"frequency_penalty={generation_config.frequency_penalty:.2f}"
             )
         else:
-            self.log_inference.info(f"request {request_id} is starting")
+            self.log_inference.info(f"inference start: request={request_id}")
 
-        streamer = TokenHandler(tokenizer=tokenizer,
-                                parser=self.parser,
-                                init_chat_events=init_chat_events,
-                                is_stop=is_stop,
-                                is_veai=is_veai,
-                                config=self.handler_config,
-                                supported_functions=function_by_name,
-                                )
+        token_handler = TokenHandler(tokenizer=tokenizer,
+                                     parser=self.parser,
+                                     init_chat_events=init_chat_events,
+                                     is_stop=is_stop,
+                                     is_veai=is_veai,
+                                     config=self.handler_config,
+                                     supported_functions=function_by_name,
+                                     )
 
         generation_handle: GenerationHandle
         try:
@@ -176,7 +176,7 @@ class ContinuousBatchingController(BaseController):
                                     self.log_inference_token_metrics.debug(f"generation_output: ids={generated_ids}, "
                                                                            f"score={generation_output.score}, "
                                                                            f"log_probs={generation_output.generated_log_probs}")
-                                    responses, stop_signal = streamer.handle_token(generated_ids)
+                                    responses, stop_signal = token_handler.handle_token(generated_ids)
                                     for response in responses:
                                         response.id = unique_id
                                         response.model = model_name
@@ -197,9 +197,9 @@ class ContinuousBatchingController(BaseController):
                                         return
                         elif started:
                             self.log_inference.debug("no more reads")
-                            if streamer.state.has_event(StateEvent.CONVERSATION):
+                            if token_handler.state.has_event(StateEvent.CONVERSATION):
                                 self.log_inference.debug("force end conversation")
-                                responses, signal = streamer.conversation_end(streamer.state, -1)
+                                responses, signal = token_handler.conversation_end(token_handler.state, -1)
                                 for response in responses:
                                     response.id = unique_id
                                     response.model = model_name
@@ -210,7 +210,9 @@ class ContinuousBatchingController(BaseController):
                 yield from read()
 
             metrics = self.pipe.get_metrics()
+
             self.log_inference.info(f"inference finished: "
+                                    f"reason={generation_handle.get_status()}, "
                                     f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024 / 1024:.2f}MB, "
                                     f"cache_size={metrics.cache_size_in_bytes / 1024 / 1024:.2f}MB "
                                     f"cache_usage={metrics.cache_usage}, "
@@ -218,6 +220,7 @@ class ContinuousBatchingController(BaseController):
                                     f"requests={metrics.requests}, "
                                     f"scheduled_requests={metrics.scheduled_requests}"
                                     )
+            self.log_inference_generated.debug("".join(token_handler.generated))
         except Exception as e:
             self.log_inference.error(f"inference error: {e}", exc_info=e)
             msg = f"{e.args}"

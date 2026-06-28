@@ -56,6 +56,7 @@ class BaseController(ABC):
         self.tokenizer = tokenizer
         self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
+        self.log_inference_generated = logging.getLogger(inference.log.name + ".generated")
         self.log_inference_token_metrics  = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
 
@@ -116,8 +117,8 @@ class BaseController(ABC):
     async def chat(self, body: ChatCompletionRequest, request: Request):
         loop = asyncio.get_event_loop()
 
-        is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
-                body.model_config.get("reasoning") or True)
+        # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
+        #         body.model_config.get("reasoning") or True)
 
         messages = body.messages
 
@@ -145,14 +146,17 @@ class BaseController(ABC):
 
         tokenizer = self.tokenizer
         extra_context = {}
-        if self.generate_config.reasoning_supported:
-            extra_context["enable_thinking"] = is_reasoning_enabled
+        # if self.generate_config.reasoning_supported:
+        #     extra_context["enable_thinking"] = is_reasoning_enabled
 
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     tools=tools_raw,
                                                     extra_context=extra_context,
                                                     chat_template=self.chat_template)
+
+        if self.generate_config.preprocess_prompt_by_parser:
+            full_prompt = self.parser.process_chat_prompt(full_prompt)
 
         self.log_inference_prompt.debug(full_prompt)
 

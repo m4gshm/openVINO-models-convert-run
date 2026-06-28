@@ -68,7 +68,7 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
     return app
 
 
-def init_sequential_engine(model: str, model_path: str, device: str, vlm: bool, parser: Parser,
+def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: bool, parser: Parser,
                            generate_config=GenerateConfig(),
                            handler_config=TokenHandlerConfig(),
                            pipeline_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
@@ -83,7 +83,7 @@ def init_sequential_engine(model: str, model_path: str, device: str, vlm: bool, 
     app_router = app.router
     app_router.route_class = LoggingRoute
 
-    log.info(f"model loading {model}, device: {device}")
+    log.info(f"model loading {model_name}, device: {device}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
@@ -99,6 +99,6 @@ def init_sequential_engine(model: str, model_path: str, device: str, vlm: bool, 
 
     log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
 
-    controller = VlmController(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe, router=app_router,
+    controller = VlmController(config=ControllerConfig(model_name=model_name), parser=parser, pipe=pipe, router=app_router,
                                generate_config=generate_config, chat_template=chat_template, handler_config=handler_config)
     return app

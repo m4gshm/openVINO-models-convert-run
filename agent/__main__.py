@@ -2,12 +2,13 @@ import argparse
 import logging.config
 import os
 from enum import Enum
+from pathlib import Path
 
 import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig
 from pydantic.json import pydantic_encoder
 
-from agent.openai import GenerateConfig
+from agent.openai import GenerateConfig, default_generate_config
 from agent.parser import Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.server import init_continuous_batching_engine, init_sequential_engine
@@ -45,7 +46,7 @@ def main():
     args_parser = argparse.ArgumentParser()
     args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
     args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
-    args_parser.add_argument("--models_dir", type=str, default=default_models_dir, help="%(default)s")
+    args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--device", type=str, default=default_device, help="%(default)s")
@@ -63,7 +64,20 @@ def main():
     args = args_parser.parse_args()
 
     model = args.model
-    base_log_config = logging_config(f"./logs/{model}")
+
+    model_path = Path(model)
+    if model_path.is_absolute():
+        if model_path.is_file():
+            # remove gguf ext
+            model_name = model_path.with_suffix("").name
+        else:
+            model_name = model_path.name
+    else:
+        model_name = model
+        model_path = Path(f"{args.models_dir}/{model}")
+
+    model_cache_dir = f"{args.models_cache_dir}/{model_name}"
+    base_log_config = logging_config(f"./logs/{model_name}")
 
     # uvcorn_logs = uvicorn.config.LOGGING_CONFIG
     # uvcorn_logs["formatters"]["default"]["format"] = log_format_simple
@@ -101,7 +115,7 @@ def main():
             raise e
 
     if not generate_config:
-        generate_config = GenerateConfig()
+        generate_config = default_generate_config()
 
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
@@ -142,7 +156,7 @@ def main():
     pipe: Pipe = args.pipe
     parser_type: ParserType = args.parser
     if not parser_type:
-        model_lower = model.lower()
+        model_lower = model_name.lower()
         qwen3_models = ["omnicoder", "qwen3"]
         qwen2_models = ["qwen2"]
         gemma4_models = ["gemma-4", "gemma4", "gemma"]
@@ -164,24 +178,19 @@ def main():
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
                 Parser()
 
-    model_path = f"{args.models_dir}/{model}"
-    model_cache_dir = f"{args.models_cache_dir}/{model}"
-
     log.info(f"loading model from {model_path}, cache dir {model_cache_dir}")
 
     gpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
-        "PERF_COUNT": "NO",
+        "PERF_COUNT": "YES",
 
-        "KV_CACHE_PRECISION": "u4",
-        # "KEY_CACHE_PRECISION": "u4",
-        # "VALUE_CACHE_PRECISION": "u4",
-        # "KEY_CACHE_GROUP_SIZE": "128",
-        # "VALUE_CACHE_GROUP_SIZE": "128",
-        "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
-        "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
+        # "LOG_LEVEL": "LOG_WARNING",
+
+        # "KV_CACHE_PRECISION": "u4",
+        # "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
+        # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
     }
 
     npu_pipeline_properties = {
@@ -190,10 +199,10 @@ def main():
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
 
-        "KV_CACHE_PRECISION": "u4",
-        "KEY_CACHE_GROUP_SIZE": "128",
-        "VALUE_CACHE_GROUP_SIZE": "128",
-        "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
+        "KV_CACHE_PRECISION": "u8",
+        # "KEY_CACHE_GROUP_SIZE": "128",
+        # "VALUE_CACHE_GROUP_SIZE": "128",
+        # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": "PLUGIN",
         "NPU_USE_NPUW": "YES",
@@ -204,12 +213,15 @@ def main():
         "MAX_PROMPT_LEN": max_prompt_len,
 
         "LOG_LEVEL": "LOG_WARNING",
-        # "ATTENTION_BACKEND": "PA",
+        "ATTENTION_BACKEND": "SDPA",
     }
 
+    if not model_path.exists():
+        log.error(f"model path is not existed: {model_path}")
+
     if is_decive_npu or pipe != Pipe.CB:
-        app = init_sequential_engine(model=model,
-                                     model_path=model_path,
+        app = init_sequential_engine(model_name=model_name,
+                                     model_path=str(model_path),
                                      device=device,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
@@ -218,8 +230,8 @@ def main():
                                      chat_template=chat_template,
                                      pipeline_properties=npu_pipeline_properties if is_decive_npu else gpu_pipeline_properties)
     else:
-        app = init_continuous_batching_engine(model=model,
-                                              model_path=model_path,
+        app = init_continuous_batching_engine(model=model_name,
+                                              model_path=str(model_path),
                                               device=device,
                                               parser=model_parser,
                                               generate_config=generate_config,

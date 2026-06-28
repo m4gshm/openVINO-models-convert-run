@@ -15,7 +15,7 @@
     <option name="DEBUG_JUST_MY_CODE" value="false" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model gemma-4-E4B-it-int4-sym-g128-awq --device NPU --generate_config_file .config/generate_config_gemma4_npu.json" />
+    <option name="PARAMETERS" value="--model gemma-4-E4B-it-int8-sym-g128 --device NPU --generate_config_file .config/generate_config_gemma4_npu.json" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />
