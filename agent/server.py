@@ -43,7 +43,7 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
                                                          properties=pipeline_properties,
                                                          tokenizer_properties=tokenizer_properties,
                                                          vision_encoder_properties=vision_encoder_properties)
-        log.info(f"model loaded successfully")
+        log.info(f"model loaded successfully, pipe {type(pipe)}")
 
         loaded_pipe_mem = get_current_memory()
         delta = loaded_pipe_mem - start_mem
@@ -93,7 +93,7 @@ def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: b
     else:
         pipe = openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
 
-    log.info(f"model loaded successfully")
+    log.info(f"model loaded successfully, pipe {type(pipe)}")
     loaded_pipe_mem = get_current_memory()
     delta = loaded_pipe_mem - start_mem
 

@@ -17,6 +17,6 @@ optimum-cli export openvino ^
   --sym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
 
 pause

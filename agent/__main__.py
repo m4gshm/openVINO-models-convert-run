@@ -1,6 +1,8 @@
 import argparse
+import json
 import logging.config
 import os
+import sys
 from enum import Enum
 from pathlib import Path
 
@@ -42,6 +44,17 @@ class ParserType(Enum):
     gemma4 = 'gemma4'
 
 
+class CachePrecision(Enum):
+    u8 = 'u8'
+    u4 = 'u4'
+    f16 = 'f16'
+
+
+class AttentionBackend(Enum):
+    PA = 'PA'
+    SPDA = 'SPDA'
+
+
 def main():
     args_parser = argparse.ArgumentParser()
     args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
@@ -53,10 +66,14 @@ def main():
     args_parser.add_argument("--parser", type=lambda c: ParserType[c], required=False,
                              default=None, choices=list(ParserType), help="%(default)s")
     args_parser.add_argument("--pipe", type=lambda c: Pipe[c], required=False,
-                             default=Pipe.VLM, choices=list(Pipe), help="%(default)s")
+                             default=None, choices=list(Pipe), help="%(default)s")
+    args_parser.add_argument("--attention_backend", type=lambda c: AttentionBackend[c], required=False,
+                             default=None, choices=list(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--cache_size", type=int, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--cache_precision", type=lambda c: CachePrecision[c], required=False,
+                             default=None, choices=list(CachePrecision), help="%(default)s")
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
@@ -90,6 +107,18 @@ def main():
     log = logging.getLogger(__name__)
     log.info("server starting")
 
+    model_architectures: set[str] = set()
+    if model_path.is_dir():
+        openvino_model_config_json = model_path / "config.json"
+        if openvino_model_config_json.is_file():
+            try:
+                config = json.loads(openvino_model_config_json.read_text(encoding="utf-8"))
+                arch = config.get("architectures")
+                if isinstance(arch, list):
+                    model_architectures = set(arch)
+            except Exception as e:
+                log.error(f"error on read {openvino_model_config_json}: {e}")
+
     handler_config = TokenHandlerConfig()
 
     generate_config_file = args.generate_config_file
@@ -121,9 +150,9 @@ def main():
     if not max_prompt_len:
         max_prompt_len = generate_config.max_tokens
     device = args.device
-    is_decive_npu = device == "NPU"
+    is_device_npu = device == "NPU"
     if not max_prompt_len:
-        max_prompt_len = 16384 if is_decive_npu else 65536
+        max_prompt_len = 16384 if is_device_npu else 65536
 
     generate_config.max_tokens = max_prompt_len
 
@@ -156,39 +185,44 @@ def main():
     pipe: Pipe = args.pipe
     parser_type: ParserType = args.parser
     if not parser_type:
-        model_lower = model_name.lower()
-        qwen3_models = ["omnicoder", "qwen3"]
-        qwen2_models = ["qwen2"]
-        gemma4_models = ["gemma-4", "gemma4", "gemma"]
-        is_qwen3 = any(model in model_lower for model in qwen3_models)
-        is_qwen2 = any(model in model_lower for model in qwen2_models)
-        is_gemma4 = any(model in model_lower for model in gemma4_models)
-        if is_qwen3:
+        is_qwen3_5 = any("qwen3_5" in model_arch.lower() for model_arch in model_architectures)
+        is_qwen3 = any("qwen3moe" in model_arch.lower() for model_arch in model_architectures)
+        is_qwen2 = any("qwen2" in model_arch.lower() for model_arch in model_architectures)
+        is_gemma4 = any("gemma4" in model_arch.lower() for model_arch in model_architectures)
+        if is_qwen3 or is_qwen3_5:
             parser_type = ParserType.qwen3
+            if not pipe:
+                if is_qwen3_5:
+                    pipe = Pipe.CB
+                else:
+                    pipe = Pipe.LLM
         elif is_qwen2:
             parser_type = ParserType.qwen2
             pipe = Pipe.LLM
         elif is_gemma4:
             pipe = Pipe.VLM
             parser_type = ParserType.gemma4
-        log.info(f"model parser='{parser_type}', parser_type='{type(parser_type)}'")
+
+    if not pipe:
+        log.error("need define --pipe")
+        sys.exit(1)
 
     model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
                 Parser()
 
-    log.info(f"loading model from {model_path}, cache dir {model_cache_dir}")
+    log.info(
+        f"model: path='{model_path}', architectures={model_architectures}, parser='{parser_type}', parser_type='{type(model_parser)}'")
+    log.debug(f"cache dir {model_cache_dir}")
 
     gpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
-        "PERF_COUNT": "YES",
+        # "PERF_COUNT": "YES",
 
         # "LOG_LEVEL": "LOG_WARNING",
-
-        # "KV_CACHE_PRECISION": "u4",
         # "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
     }
@@ -199,9 +233,6 @@ def main():
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
 
-        "KV_CACHE_PRECISION": "u8",
-        # "KEY_CACHE_GROUP_SIZE": "128",
-        # "VALUE_CACHE_GROUP_SIZE": "128",
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": "PLUGIN",
@@ -213,13 +244,21 @@ def main():
         "MAX_PROMPT_LEN": max_prompt_len,
 
         "LOG_LEVEL": "LOG_WARNING",
-        "ATTENTION_BACKEND": "SDPA",
     }
 
     if not model_path.exists():
         log.error(f"model path is not existed: {model_path}")
 
-    if is_decive_npu or pipe != Pipe.CB:
+    pipeline_properties = npu_pipeline_properties if is_device_npu else gpu_pipeline_properties
+    cache_precision: CachePrecision = args.cache_precision
+    if cache_precision:
+        pipeline_properties["KV_CACHE_PRECISION"] = cache_precision.value
+
+    attention_backend: AttentionBackend = args.attention_backend
+    if attention_backend:
+        pipeline_properties["ATTENTION_BACKEND"] = attention_backend.value
+
+    if is_device_npu or pipe != Pipe.CB:
         app = init_sequential_engine(model_name=model_name,
                                      model_path=str(model_path),
                                      device=device,
@@ -228,7 +267,7 @@ def main():
                                      generate_config=generate_config,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
-                                     pipeline_properties=npu_pipeline_properties if is_decive_npu else gpu_pipeline_properties)
+                                     pipeline_properties=pipeline_properties)
     else:
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
@@ -237,7 +276,7 @@ def main():
                                               generate_config=generate_config,
                                               handler_config=handler_config,
                                               scheduler_config=scheduler_config,
-                                              pipeline_properties=gpu_pipeline_properties,
+                                              pipeline_properties=pipeline_properties,
                                               chat_template=chat_template,
                                               tokenizer_properties=tokenizer_properties)
 

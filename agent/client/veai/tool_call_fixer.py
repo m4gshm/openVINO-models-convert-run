@@ -5,8 +5,9 @@ from typing import Any
 import json_repair
 
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
-    search_file_by_name
+    search_file_by_name, file_structure
 from agent.client.veai.tool.edit_file import EditFile
+from agent.client.veai.tool.file_structure import FileStructure
 from agent.client.veai.tool.list_dir import ListDir
 from agent.client.veai.tool.read_file import ReadFile
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
@@ -23,6 +24,8 @@ def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
         pass
     elif list_dir.function_name == function.name:
         return fix_list_dir(tool_call)
+    elif file_structure.function_name == function.name:
+        return fix_file_structure(tool_call)
     elif edit_file.function_name == function.name:
         return fix_edit_file(tool_call)
     elif write_file.function_name == function.name:
@@ -77,12 +80,23 @@ def fix_ask_user_with_options(tool_call: ToolCall) -> ToolCall:
     return tool_call
 
 
+def fix_file_structure(tool_call: ToolCall) -> ToolCall:
+    args_raw = tool_call.function.arguments
+    args = read_args_as_json(args_raw, tool_call.function)
+    if args:
+        target_file, invalid = get_target_file(args)
+        if invalid:
+            new_function = FileStructure().new_call(target_file)
+            tool_call.function = new_function
+    return tool_call
+
+
 def fix_edit_file(tool_call: ToolCall) -> ToolCall:
     function = tool_call.function
     args_raw = function.arguments
     args = read_args_as_json(args_raw, function)
     if args:
-        target_file = args.get("target_file")
+        target_file, invalid = get_target_file(args)
         if not target_file:
             log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
         edits_raw = args.get("edits")
@@ -120,16 +134,21 @@ def fix_write_file(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
     args = read_args_as_json(args_raw, tool_call.function)
     if args:
-        target_file = args.get("target_file")
+        target_file, invalid = get_target_file(args)
         content = args.get("content")
         if target_file and content:
             allow_overwrite: bool = args.get("allow_overwrite")
 
             if not allow_overwrite:
-                # invalid
-                # log
-                new_function = WriteFile().new_call(target_file, content, allow_overwrite=True)
+                invalid = True
+                allow_overwrite = True
+
+            if invalid:
+                new_function = WriteFile().new_call(target_file, content, allow_overwrite=allow_overwrite)
                 tool_call.function = new_function
+        else:
+            log.error(f"no required args for function {tool_call.function.name}, args={args}, "
+                      f"required args = ['target_file', 'content']")
 
     return tool_call
 
@@ -160,6 +179,16 @@ def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
             # gemma 4
             glob_pattern = args.get("glob")
 
+        invalid = not glob_pattern
+        if invalid:
+            # gemma 4
+            glob_pattern = args.get("pattern")
+
+        invalid = not glob_pattern
+        if invalid:
+            # gemma 4
+            glob_pattern = args.get("query")
+
         search_directory = args.get("search_directory")
         if not search_directory:
             invalid = True
@@ -177,22 +206,7 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
     args = read_args_as_json(args_raw, tool_call.function)
     if args:
-        target_file = args.get("target_file")
-
-        invalid = not target_file
-        if invalid:
-            # gemma4 case
-            target_file = args.get("file_path")
-
-            invalid = not target_file
-            # gemma4 case 2
-            if invalid:
-                target_file = args.get("file")
-
-            invalid = not target_file
-            # gemma4 case 3
-            if invalid:
-                target_file = args.get("path")
+        target_file, invalid = get_target_file(args)
 
         if target_file:
             start_line = as_int_or_none(args.get("start_line"), "start_line")
@@ -217,6 +231,26 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
                 tool_call.function = new_function
 
     return tool_call
+
+
+def get_target_file(args) -> tuple[str, bool]:
+    target_file = args.get("target_file")
+
+    invalid = not target_file
+    if invalid:
+        # gemma4 case
+        target_file = args.get("file_path")
+
+        # gemma4 case 2
+        if not target_file:
+            invalid = True
+            target_file = args.get("file")
+
+        # gemma4 case 3
+        if not target_file:
+            invalid = True
+            target_file = args.get("path")
+    return target_file, invalid
 
 
 def fix_list_dir(tool_call: ToolCall) -> ToolCall:
