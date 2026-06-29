@@ -3,6 +3,8 @@ import logging
 import re
 from typing import Any
 
+import json_repair
+
 import agent
 from agent.openai.chat_api import new_tool_call
 from agent.openai.chat_completions_api import ToolCall, FunctionCall, FunctionDefinition
@@ -74,12 +76,38 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
     if arguments_block.endswith("}"):
         arguments_block = arguments_block[:-1]
 
+    delim = "<|\"|>"
     partial = is_block_partial
+    if delim in arguments_block:
+        pattern = r'(\w+):(?:<\|"\|>(.*?)<\|"\|>|([^,}]*))'
+        kv_pairs = re.findall(pattern, arguments_block)
+        log.debug(f"delimited parameters parsing: result={kv_pairs}")
+        structured_parameter = {k1: v1 or v2 for k1, v1, v2 in kv_pairs}
+    else:
+        pattern = r'(?:"(\w+)"|(\w+)):(?:\s*"(.*?)"|([^,}]*))'
+        kv_pairs = re.findall(pattern, arguments_block)
+        log.debug(f"parameters parsing: result={kv_pairs}")
+        structured_parameter = {k1 or k2: v1 or v2 for k1, k2, v1, v2 in kv_pairs}
 
-    pattern = r"(\w+):(?:<\|\"\|>)?(.*?)(?:<\|\"\|>)?(?=,|\s|$)"
-    kv_pairs = re.findall(pattern, arguments_block)
-    structured_parameter = {key: value for key, value in kv_pairs}
+    if len(arguments_block) > 0 and len(structured_parameter) == 0:
+        log.debug(f"trying to parse as json: {arguments_block}")
+        possible_json_args = arguments_block.replace(delim, "\"")
+        try:
+            arguments = json.loads(possible_json_args)
+        except json.decoder.JSONDecodeError as e:
+            try:
+                arguments = json_repair.loads(possible_json_args)
+            except Exception as e:
+                arguments = None
+        if not arguments:
+            structured_parameter = {}
+            log.error(f"unrepairable json arguments: {arguments_block}")
+        else:
+            structured_parameter = arguments
+            partial = True
+
     arguments_str = json.dumps(structured_parameter, ensure_ascii=False)
+    log.debug(f"tool call parsed: src={arguments_block}, result={arguments_str}")
     return arguments_str, partial
 
 

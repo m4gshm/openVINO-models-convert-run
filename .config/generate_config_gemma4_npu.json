@@ -4,5 +4,6 @@
   "top_k": 64,
   "min_p": 0.05,
   "repetition_penalty": 1.1,
-  "max_new_tokens": 4096
+  "max_new_tokens": 4096,
+  "max_tokens": 65536
 }

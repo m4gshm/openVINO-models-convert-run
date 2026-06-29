@@ -108,6 +108,7 @@ def main():
     log.info("server starting")
 
     model_architectures: set[str] = set()
+    max_position_embeddings: int | None = None
     if model_path.is_dir():
         openvino_model_config_json = model_path / "config.json"
         if openvino_model_config_json.is_file():
@@ -116,6 +117,10 @@ def main():
                 arch = config.get("architectures")
                 if isinstance(arch, list):
                     model_architectures = set(arch)
+
+                text_config = config.get("text_config")
+                if isinstance(text_config, dict):
+                    max_position_embeddings = text_config.get("max_position_embeddings")
             except Exception as e:
                 log.error(f"error on read {openvino_model_config_json}: {e}")
 
@@ -152,7 +157,7 @@ def main():
     device = args.device
     is_device_npu = device == "NPU"
     if not max_prompt_len:
-        max_prompt_len = 16384 if is_device_npu else 65536
+        max_prompt_len = max_position_embeddings
 
     generate_config.max_tokens = max_prompt_len
 
@@ -193,7 +198,8 @@ def main():
             parser_type = ParserType.qwen3
             if not pipe:
                 if is_qwen3_5:
-                    pipe = Pipe.CB
+                    # pipe = Pipe.CB
+                    pipe = Pipe.VLM
                 else:
                     pipe = Pipe.LLM
         elif is_qwen2:

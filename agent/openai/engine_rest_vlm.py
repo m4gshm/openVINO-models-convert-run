@@ -1,12 +1,12 @@
 import logging
 import queue
 import threading
-import typing
 import uuid
 from collections import abc
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 from typing import Generator
+from typing import SupportsInt, Literal
 
 from fastapi.routing import APIRouter
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
@@ -16,6 +16,7 @@ from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanSt
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
 from agent.openai import GenerateConfig
+from agent.openai.chat_api import new_stop_response
 from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser
@@ -39,6 +40,15 @@ class VlmController(BaseController):
                         init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None
                         ) -> Generator[CompletionResponse, None, None]:
+
+        response_id = str(uuid.uuid4())
+        encode_size = self.get_tokens_size(prompt)
+        max_length = generation_config.max_length
+        over_limit_response = self.check_prompt_limit(max_length, encode_size, response_id)
+        if over_limit_response:
+            yield over_limit_response
+            return
+
         with self.request_lock:
             chunk_queue: queue.Queue[CompletionResponse | None] = queue.Queue()
             stop_stream_handling: queue.Queue[bool] = queue.Queue()
@@ -116,11 +126,14 @@ class VlmController(BaseController):
                         self.log_inference.warning(f"inference finished by unexpected status {inference_finish_reason}")
 
                 except Exception as e:
+                    start_stream_handling.put_nowait(True)
                     self.log_inference.error(f"inference error: {e}", exc_info=e)
+                    err_str = str(e)
+                    finish_reason: Literal[
+                        "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
+                    chunk_queue.put_nowait(new_stop_response(content=err_str, finish_reason=finish_reason))
                     chunk_queue.put_nowait(None)
-                    raise
-                finally:
-                    pass
+
 
             def start_generate_result(streamer: StreamerWrapper) -> VLMDecodedResults:
                 pipe = self.pipe
@@ -136,9 +149,8 @@ class VlmController(BaseController):
                     raise NotImplementedError(f"unexpected pipe type {type(pipe)}")
                 return generate_result
 
-            unique_id = str(uuid.uuid4())
-            inference_task = self.executor.submit(run_inference)
             try:
+                inference_task = self.executor.submit(run_inference)
                 start_stream_handling.get()
                 stop_inference = False
                 while not stop_inference:
@@ -147,7 +159,7 @@ class VlmController(BaseController):
                     try:
                         chunk = chunk_queue.get(timeout=20)
                         if chunk:
-                            chunk.id = unique_id
+                            chunk.id = response_id
                             chunk.model = self.config.model_name
                             yield chunk
                         else:
@@ -183,7 +195,7 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
     def end(self) -> None:
         pass
 
-    def write(self, tokens: abc.Sequence[typing.SupportsInt]) -> StreamingStatus:
+    def write(self, tokens: abc.Sequence[SupportsInt]) -> StreamingStatus:
         if not self.started:
             self.start_stream_handling.put(True)
             self.started = True

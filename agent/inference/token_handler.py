@@ -203,7 +203,7 @@ class TokenHandler:
                 tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
                 if tool_call_snapshot_time >= 10:
                     self.tool_call_parsing_tick = now_time
-                    log.info(f"tool call part: {self.tool_call_phrase}")
+                    log.debug(f"tool call part: {self.tool_call_phrase}")
             else:
                 self.phrase = self.phrase + token
                 generated = self.generated
@@ -387,8 +387,8 @@ class TokenHandler:
         list[CompletionResponse], Literal[StopSignal.TOOL_CALL]]:
         self.tool_call_parsing_start_time = None
         state.finish_current_event(expected_state=StateEvent.TOOL_CALL)
-        log.debug(f"tool call end: {token}")
         self.tool_call_phrase += token
+        log.debug(f"tool call end: {self.tool_call_phrase}")
 
         result = [self.handle_tool_call(state)]
         stop_signal = StopSignal.TOOL_CALL

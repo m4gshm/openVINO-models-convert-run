@@ -15,6 +15,8 @@ from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
 from agent.openai.chat_completions_api import ToolCall, ToolDefinition, FunctionCall
 
+ROOT = "."
+
 log = logging.getLogger(__name__)
 
 
@@ -192,7 +194,7 @@ def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
         search_directory = args.get("search_directory")
         if not search_directory:
             invalid = True
-            search_directory = "."
+            search_directory = ROOT
 
         if invalid:
             log.info(
@@ -258,23 +260,29 @@ def fix_list_dir(tool_call: ToolCall) -> ToolCall:
     args = read_args_as_json(args_raw, tool_call.function)
     if args:
         directory_path = args.get("directory_path")
-
-        invalid = not directory_path
-        if invalid:
+        invalid = False
+        if not directory_path:
+            invalid = True
             # gemma4 case
             directory_path = args.get("dir")
 
-        if directory_path:
-            depth = args.get("depth")
-            if not depth:
-                invalid = True
-                depth = 1
+        if not directory_path:
+            invalid = True
+            root = True
+            directory_path = ROOT
+        else:
+            root = False
 
-            if invalid:
-                log.info(
-                    f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
-                new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
-                tool_call.function = new_function
+        depth = args.get("depth")
+        if not depth:
+            invalid = True
+            depth = 5 if root else 2
+
+        if invalid:
+            log.info(
+                f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
+            new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
+            tool_call.function = new_function
 
     return tool_call
 

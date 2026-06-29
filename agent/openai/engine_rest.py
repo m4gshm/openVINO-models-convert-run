@@ -1,5 +1,4 @@
 import itertools
-import itertools
 import logging
 import threading
 import time
@@ -137,7 +136,6 @@ class ContinuousBatchingController(BaseController):
                 yield stop_response
             else:
                 unique_id = str(uuid.uuid4())
-
                 def read():
                     empty_tokens_limit = 100
                     empty_out_counter = 0

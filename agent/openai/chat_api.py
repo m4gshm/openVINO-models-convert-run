@@ -3,8 +3,6 @@ import time
 import uuid
 from typing import Optional, List, Literal
 
-from pygments.styles import nord
-
 from agent.common.roles import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import ChatCompletionMessage, ToolCall, CHAT_COMPLETION_CHUNK, \
     CompletionResponse, CHAT_COMPLETION, FunctionCall, ChatCompletionChoice
@@ -36,7 +34,7 @@ def new_delta(role: str | None, content: str | None = None, thinking: bool = Fal
     return delta
 
 
-def new_stop_response(response_id: str, model: str | None = None,
+def new_stop_response(response_id: str | None = None, model: str | None = None,
                       finish_reason: Literal["stop", "length", "tool_calls"] = "stop",
                       content: str | None = None) -> CompletionResponse:
     return new_response(response_id=response_id, model=model, finish_reason=finish_reason,

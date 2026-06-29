@@ -1,0 +1,1 @@
+<|tool_call>call:file_function{{"file_path": "dir/dir2/Foo.txt", start_at:1}}<tool_call|>

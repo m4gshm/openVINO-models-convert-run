@@ -73,6 +73,10 @@ def logging_config(logs_dir: str):
                 "level": "DEBUG",
                 "propagate": True,
             },
+            "agent.inference.token_handler": {
+                "level": "DEBUG",
+                "propagate": True,
+            },
             "agent.inference.token_metrics": {
                 "level": "INFO",
                 "propagate": True,
