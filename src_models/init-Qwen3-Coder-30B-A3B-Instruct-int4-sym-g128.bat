@@ -1,3 +1,5 @@
+@REM pip install --upgrade "transformers==5.0.0"
+
 set MODEL_NAME=Qwen3-Coder-30B-A3B-Instruct
 set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%
@@ -15,6 +17,6 @@ optimum-cli export openvino ^
   --sym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
 
 pause

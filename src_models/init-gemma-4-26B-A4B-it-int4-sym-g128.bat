@@ -1,6 +1,6 @@
-set MODEL_NAME=Qwen3-1.7B-Instruct
+set MODEL_NAME=gemma-4-26B-A4B-it
+set MODEL_DEVELOPER=google
 set MODEL_NAME_OUT=%MODEL_NAME%
-set MODEL_DEVELOPER=Qwen
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
 
@@ -9,13 +9,12 @@ set WEIGHT_FORMAT=int4
 
 optimum-cli export openvino ^
   --model %MODEL_PATH% ^
-  --task text-generation-with-past ^
+  --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
-  --backup-precision int8_sym ^
-  --sym ^
+  --backup-precision int8_asym ^
   --group-size %GROUP_SIZE% ^
-  --ratio 1.0 ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1/1
+  --sym ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
 
 pause
