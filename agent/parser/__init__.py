@@ -1,3 +1,4 @@
+import json
 import logging
 from enum import Enum
 from typing import Any
@@ -5,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from agent.common.roles import ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition
+from agent.openai.chat_completions_api import FunctionDefinition, FunctionCall
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,9 @@ class ParsedFunctionCall(BaseModel):
     name: str
     arguments: dict[str, Any]
     anonymous_arguments: list[str] = []
+
+    def to_openai_function_call(self) -> FunctionCall:
+        return FunctionCall(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
 
 
 class Parser[State: ParserState]():

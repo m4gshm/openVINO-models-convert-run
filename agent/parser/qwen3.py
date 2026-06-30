@@ -31,11 +31,12 @@ def parse_name(parameters_block) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | None = None) -> tuple[str, bool]:
+def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | None = None) -> tuple[
+    dict[str, Any], bool]:
     expected_properties: dict[str, Any] = expected_parameters.get(EXPECTED_PARAMETERS_PROPERTIES,
                                                                   {}) if expected_parameters else {}
 
-    arguments: dict[str, str | dict[str, Any] | list[Any]] = {}
+    arguments: dict[str, Any] = {}
 
     partial = False
     parameter_blocks = arguments_block.split(PARAMETER_START_PREF)
@@ -74,12 +75,7 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
                 arguments[param_name_norm] = structured_parameter
             else:
                 arguments[param_name_norm] = param_value_norm
-
-    if isinstance(arguments, dict):
-        arguments_str = json.dumps(arguments, ensure_ascii=False)
-    else:
-        arguments_str = str(arguments)
-    return arguments_str, partial
+    return arguments, partial
 
 
 class Qwen3Parser(QwenBaseParser):

@@ -1,8 +1,4 @@
-import json
-from typing import Any
-
 from agent.client.veai.tool import Tool
-from agent.openai.chat_completions_api import FunctionCall
 from agent.parser import ParsedFunctionCall
 
 function_name = "file_structure"

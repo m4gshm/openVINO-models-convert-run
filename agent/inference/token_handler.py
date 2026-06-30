@@ -1,5 +1,4 @@
 import collections
-import json
 import logging
 import time
 from datetime import timedelta
@@ -13,7 +12,7 @@ from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.common.roles import ROLE_ASSISTANT
 from agent.common.time import format_time
 from agent.openai.chat_api import new_chunk_response, new_tool_call
-from agent.openai.chat_completions_api import FunctionDefinition, CompletionResponse, ToolCall, FunctionCall
+from agent.openai.chat_completions_api import FunctionDefinition, CompletionResponse, ToolCall
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
@@ -75,7 +74,7 @@ def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
 
 
 def to_openai_tool_call(function: ParsedFunctionCall) -> ToolCall:
-    return new_tool_call(FunctionCall(name=function.name, arguments=json.dumps(function.arguments, ensure_ascii=False)))
+    return new_tool_call(function.to_openai_function_call())
 
 
 class TokenHandler:

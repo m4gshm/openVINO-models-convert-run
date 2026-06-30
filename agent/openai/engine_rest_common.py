@@ -197,7 +197,8 @@ class BaseController(ABC):
                 # log
                 question = request_user_select.new_call(msg + "What to do next?",
                                                         [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
-                tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()), function=question)
+                tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
+                                          function=question.to_openai_function_call())
                 completion_message = new_message(tool_calls=[tool_call])
             else:
                 completion_message = new_message(content=(msg + WARN_GENERATION_IS_INTERRUPTED_))
