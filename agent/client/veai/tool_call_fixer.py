@@ -47,190 +47,178 @@ def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
 def fix_ask_user_with_options(tool_call: ToolCall) -> ToolCall:
     function = tool_call.function
     args_raw = function.arguments
-    args = read_args_as_json(args_raw, function)
-    if args:
-        options_raw = args.get("options")
-        is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
-        if not is_multiple_choice:
-            is_multiple_choice = False
-            args["is_multiple_choice"] = is_multiple_choice
-        question = args.get("question")
-        if not question:
-            args["question"] = "[*]" if is_multiple_choice else "(*)"
-        options: Any = None
-        if options_raw:
-            if isinstance(options_raw, str):
-                try:
-                    options = json.loads(options_raw)
-                except json.decoder.JSONDecodeError as e:
-                    log.error(f"bad options of function '{function.name}', options: '{options_raw}': {e}")
-                    options = json_repair.loads(options_raw)
-                    log.info(f"repaired options '{options}'")
-            elif isinstance(options_raw, list):
-                options = options_raw
-            else:
-                log.error(f"unexpected options type, function '{function.name}', args '{args_raw}', "
-                          f"options type {type(options_raw)}")
+    args = get_args(tool_call)
+    options_raw = args.get("options")
+    is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
+    if not is_multiple_choice:
+        is_multiple_choice = False
+        args["is_multiple_choice"] = is_multiple_choice
+    question = args.get("question")
+    if not question:
+        args["question"] = "[*]" if is_multiple_choice else "(*)"
+    options: Any = None
+    if options_raw:
+        if isinstance(options_raw, str):
+            try:
+                options = json.loads(options_raw)
+            except json.decoder.JSONDecodeError as e:
+                log.error(f"bad options of function '{function.name}', options: '{options_raw}': {e}")
+                options = json_repair.loads(options_raw)
+                log.info(f"repaired options '{options}'")
+        elif isinstance(options_raw, list):
+            options = options_raw
         else:
-            log.error(f"missing options in args, function '{function.name}', args '{args_raw}'")
+            log.error(f"unexpected options type, function '{function.name}', args '{args_raw}', "
+                      f"options type {type(options_raw)}")
+    else:
+        log.error(f"missing options in args, function '{function.name}', args '{args_raw}'")
 
-        if options:
-            args["options"] = options  # json.dumps(options, ensure_ascii=False)
+    if options:
+        args["options"] = options  # json.dumps(options, ensure_ascii=False)
 
-        function.arguments = json.dumps(args, ensure_ascii=False)
-        log.info(f"function after repairing, function {function.name}, arguments '{args}'")
+    function.arguments = json.dumps(args, ensure_ascii=False)
+    log.info(f"function after repairing, function {function.name}, arguments '{args}'")
     return tool_call
 
 
 def fix_file_structure(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        target_file, invalid = get_target_file(args)
-        if invalid:
-            new_function = FileStructure().new_call(target_file)
-            tool_call.function = new_function
+    args = get_args(tool_call)
+    target_file, invalid = get_target_file(args)
+    if invalid:
+        new_function = FileStructure().new_call(target_file)
+        tool_call.function = new_function
     return tool_call
 
 
 def fix_edit_file(tool_call: ToolCall) -> ToolCall:
     function = tool_call.function
-    args_raw = function.arguments
-    args = read_args_as_json(args_raw, function)
-    if args:
-        target_file, invalid = get_target_file(args)
-        if not target_file:
-            log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
-        edits_raw = args.get("edits")
-        if target_file and edits_raw:
-            allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
-            invalid = False
-            if not allow_multiple_matches:
-                invalid = True
-                allow_multiple_matches = True
-            # qwen2 case
-            if isinstance(edits_raw, list):
-                edits_list = edits_raw
-                edits_raw = edits_list[0] if edits_list else ""
-                log.debug(f"convert 'edits' list to str: list={edits_list}, str={edits_raw}")
+    args = get_args(tool_call)
+    target_file, invalid = get_target_file(args)
+    if not target_file:
+        log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
+    edits_raw = args.get("edits")
+    if target_file and edits_raw:
+        allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
+        invalid = False
+        if not allow_multiple_matches:
+            invalid = True
+            allow_multiple_matches = True
+        # qwen2 case
+        if isinstance(edits_raw, list):
+            edits_list = edits_raw
+            edits_raw = edits_list[0] if edits_list else ""
+            log.debug(f"convert 'edits' list to str: list={edits_list}, str={edits_raw}")
 
-            if not isinstance(edits_raw, str):
-                log.error(
-                    f"unexpected edits type, function '{function.name}', args '{edits_raw}', type {type(edits_raw)}")
-            try:
-                edits = json.loads(edits_raw)
-            except json.decoder.JSONDecodeError as e:
-                invalid = True
-                log.info(f"bad edits of function '{function.name}', options: '{edits_raw}': {e}")
-                edits = json_repair.loads(edits_raw)
-                edits_raw = json.dumps(edits)
-                log.info(f"repaired edits '{edits_raw}'")
-            if invalid:
-                new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
-                tool_call.function = new_function
+        if not isinstance(edits_raw, str):
+            log.error(
+                f"unexpected edits type, function '{function.name}', args '{edits_raw}', type {type(edits_raw)}")
+        try:
+            edits = json.loads(edits_raw)
+        except json.decoder.JSONDecodeError as e:
+            invalid = True
+            log.info(f"bad edits of function '{function.name}', options: '{edits_raw}': {e}")
+            edits = json_repair.loads(edits_raw)
+            edits_raw = json.dumps(edits)
+            log.info(f"repaired edits '{edits_raw}'")
+        if invalid:
+            new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
+            tool_call.function = new_function
 
     return tool_call
 
 
 def fix_write_file(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        target_file, invalid = get_target_file(args)
-        content = args.get("content")
-        if target_file and content:
-            allow_overwrite: bool = args.get("allow_overwrite")
+    args = get_args(tool_call)
+    target_file, invalid = get_target_file(args)
+    content = args.get("content")
+    if target_file and content:
+        allow_overwrite: bool = args.get("allow_overwrite")
 
-            if not allow_overwrite:
-                invalid = True
-                allow_overwrite = True
+        if not allow_overwrite:
+            invalid = True
+            allow_overwrite = True
 
-            if invalid:
-                new_function = WriteFile().new_call(target_file, content, allow_overwrite=allow_overwrite)
-                tool_call.function = new_function
-        else:
-            log.error(f"no required args for function {tool_call.function.name}, args={args}, "
-                      f"required args = ['target_file', 'content']")
+        if invalid:
+            new_function = WriteFile().new_call(target_file, content, allow_overwrite=allow_overwrite)
+            tool_call.function = new_function
+    else:
+        log.error(f"no required args for function {tool_call.function.name}, args={args}, "
+                  f"required args = ['target_file', 'content']")
 
     return tool_call
 
 
 def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
     args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        target_path_or_url = args.get("target_path_or_url")
-        text_snippet = args.get("text_snippet")
-        if target_path_or_url and text_snippet:
-            is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive")
-            if is_case_sensitive is None:
-                # log
-                new_function = SearchForText().new_call(target_path_or_url, text_snippet, True)
-                tool_call.function = new_function
+    args = get_args(tool_call)
+    target_path_or_url = args.get("target_path_or_url")
+    text_snippet = args.get("text_snippet")
+    if target_path_or_url and text_snippet:
+        is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive")
+        if is_case_sensitive is None:
+            # log
+            new_function = SearchForText().new_call(target_path_or_url, text_snippet, True)
+            tool_call.function = new_function
 
     return tool_call
 
 
 def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        glob_pattern = args.get("glob_pattern")
-        invalid = not glob_pattern
-        if invalid:
-            # gemma 4
-            glob_pattern = args.get("glob")
+    args = get_args(tool_call)
+    glob_pattern = args.get("glob_pattern")
+    invalid = not glob_pattern
+    if invalid:
+        # gemma 4
+        glob_pattern = args.get("glob")
 
-        invalid = not glob_pattern
-        if invalid:
-            # gemma 4
-            glob_pattern = args.get("pattern")
+    invalid = not glob_pattern
+    if invalid:
+        # gemma 4
+        glob_pattern = args.get("pattern")
 
-        invalid = not glob_pattern
-        if invalid:
-            # gemma 4
-            glob_pattern = args.get("query")
+    invalid = not glob_pattern
+    if invalid:
+        # gemma 4
+        glob_pattern = args.get("query")
 
-        search_directory = args.get("search_directory")
-        if not search_directory:
-            invalid = True
-            search_directory = ROOT
+    search_directory = args.get("search_directory")
+    if not search_directory:
+        invalid = True
+        search_directory = ROOT
 
-        if invalid:
-            log.info(
-                f"fix invalid {tool_call.function.name}: glob_pattern={glob_pattern}, search_directory={search_directory}")
-            new_function = SearchFileByName().new_call(glob_pattern, search_directory)
-            tool_call.function = new_function
+    if invalid:
+        log.info(
+            f"fix invalid {tool_call.function.name}: glob_pattern={glob_pattern}, search_directory={search_directory}")
+        new_function = SearchFileByName().new_call(glob_pattern, search_directory)
+        tool_call.function = new_function
     return tool_call
 
 
 def fix_read_file(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        target_file, invalid = get_target_file(args)
+    args = get_args(tool_call)
+    target_file, invalid = get_target_file(args)
 
-        if target_file:
-            start_line = as_int_or_none(args.get("start_line"), "start_line")
-            end_line = as_int_or_none(args.get("end_line"), "end_line")
-            line_offset = as_int_or_none(args.get("line_offset"), "line_offset")
+    if target_file:
+        start_line = as_int_or_none(args.get("start_line"), "start_line")
+        end_line = as_int_or_none(args.get("end_line"), "end_line")
+        line_offset = as_int_or_none(args.get("line_offset"), "line_offset")
 
-            if line_offset:
-                pass
-            else:
-                if not start_line:
-                    invalid = True
-                    start_line = 1
-                if not end_line:
-                    invalid = True
-                    end_line = 500
-            if invalid:
-                log.info(
-                    f"fix invalid {tool_call.function.name}: target_file={target_file}, start_line={start_line}, "
-                    f"end_line={end_line}")
-                new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
-                                                   line_offset=line_offset)
-                tool_call.function = new_function
+        if line_offset:
+            pass
+        else:
+            if not start_line:
+                invalid = True
+                start_line = 1
+            if not end_line:
+                invalid = True
+                end_line = 500
+        if invalid:
+            log.info(
+                f"fix invalid {tool_call.function.name}: target_file={target_file}, start_line={start_line}, "
+                f"end_line={end_line}")
+            new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
+                                               line_offset=line_offset)
+            tool_call.function = new_function
 
     return tool_call
 
@@ -256,35 +244,37 @@ def get_target_file(args) -> tuple[str, bool]:
 
 
 def fix_list_dir(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = read_args_as_json(args_raw, tool_call.function)
-    if args:
-        directory_path = args.get("directory_path")
-        invalid = False
-        if not directory_path:
-            invalid = True
-            # gemma4 case
-            directory_path = args.get("dir")
+    args = get_args(tool_call)
+    directory_path = args.get("directory_path")
+    invalid = False
+    if not directory_path:
+        invalid = True
+        # gemma4 case
+        directory_path = args.get("dir")
 
-        if not directory_path:
-            invalid = True
-            root = True
-            directory_path = ROOT
-        else:
-            root = False
+    if not directory_path:
+        invalid = True
+        root = True
+        directory_path = ROOT
+    else:
+        root = False
 
-        depth = args.get("depth")
-        if not depth:
-            invalid = True
-            depth = 5 if root else 2
+    depth = args.get("depth")
+    if not depth:
+        invalid = True
+        depth = 5 if root else 2
 
-        if invalid:
-            log.info(
-                f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
-            new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
-            tool_call.function = new_function
+    if invalid:
+        log.info(
+            f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
+        new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
+        tool_call.function = new_function
 
     return tool_call
+
+
+def get_args(tool_call: ToolCall) -> Any:
+    return read_args_as_json(tool_call.function.arguments, tool_call.function) or {}
 
 
 def as_int_or_none(val, name: str) -> int | None:

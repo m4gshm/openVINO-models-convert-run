@@ -1,9 +1,9 @@
 {
-  "temperature": 1,
+  "temperature": 1.1,
   "top_p": 0.95,
-  "top_k": 64,
+  "top_k": 80,
   "min_p": 0.05,
-  "repetition_penalty": 1.1,
+  "repetition_penalty": 1.05,
   "max_new_tokens": 4096,
   "max_tokens": 32768
 }
