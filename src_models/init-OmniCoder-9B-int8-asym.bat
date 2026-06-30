@@ -1,4 +1,4 @@
- pip install --upgrade "transformers==5.2.0"
+@REM pip install --upgrade "transformers==5.2.0"
  
 set MODEL_NAME=OmniCoder-9B
 set MODEL_DEVELOPER=Tesslate
@@ -13,6 +13,6 @@ optimum-cli export openvino ^
   --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym
 
 pause
