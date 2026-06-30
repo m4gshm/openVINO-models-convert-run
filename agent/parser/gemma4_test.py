@@ -38,5 +38,17 @@ class TestAddFunction(unittest.TestCase):
         self.assertFalse(partial)
 
 
+    def test_read_file_windows_path_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_windows_path.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first: ToolCall = calls[0]
+        self.assertEqual("function", first.type)
+        self.assertEqual("read_file", first.function.name)
+        self.assertEqual("""{"start_line": "1", "end_line": "500", "file_path": "C:/src/MessageStorageImpl.java"}""", first.function.arguments)
+        self.assertFalse(partial)
+
+
 if __name__ == '__main__':
     unittest.main()

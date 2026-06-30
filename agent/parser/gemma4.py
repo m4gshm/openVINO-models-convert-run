@@ -84,10 +84,10 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
         log.debug(f"delimited parameters parsing: result={kv_pairs}")
         structured_parameter = {k1: v1 or v2 for k1, v1, v2 in kv_pairs}
     else:
-        pattern = r'(?:"(\w+)"|(\w+)):(?:\s*"(.*?)"|([^,}]*))'
+        pattern = r'(?:"(\w+)"|(\w+))(:|=)(?:\s*"(.*?)"|([^,}]*))'
         kv_pairs = re.findall(pattern, arguments_block)
         log.debug(f"parameters parsing: result={kv_pairs}")
-        structured_parameter = {k1 or k2: v1 or v2 for k1, k2, v1, v2 in kv_pairs}
+        structured_parameter = {k1 or k2: v1 or v2 for k1, k2, d1, v1, v2 in kv_pairs}
 
     if len(arguments_block) > 0 and len(structured_parameter) == 0:
         log.debug(f"trying to parse as json: {arguments_block}")
