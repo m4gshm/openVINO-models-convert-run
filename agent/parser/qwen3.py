@@ -60,18 +60,16 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
             param_value_norm = param_tail_norm.strip()
 
             expected_property: dict[str, Any] = expected_properties.get(param_name_norm, {})
-            expected_type = expected_property.get(EXPECTED_PROPERTY_TYPE,
-                                                  'string') if expected_property else 'string'
+            expected_type = expected_property.get(EXPECTED_PROPERTY_TYPE, 'string')
             if expected_type == 'array' or expected_type == 'object':
                 try:
-                    structured_parameter: dict[str, Any] | list[Any] = json.loads(param_value_norm)
+                    structured_parameter = json.loads(param_value_norm)
                 except json.decoder.JSONDecodeError as e:
                     log.debug(
                         f"function parameter parsing error, parameter '{param_name}', value '{param_value_norm}', "
                         f"expected_type '{expected_type}': {e}")
-                    structured_parameter: dict[str, Any] | list[Any] = json_repair.loads(param_value_norm)
+                    structured_parameter = json_repair.loads(param_value_norm)
                     log.debug(f"repaired parameter value '{structured_parameter}'")
-
                 arguments[param_name_norm] = structured_parameter
             else:
                 arguments[param_name_norm] = param_value_norm
@@ -113,10 +111,7 @@ class Qwen3Parser(QwenBaseParser):
                     # log
                     continue
 
-                supported_functions = state.supported_functions
-                function = supported_functions.get(func_name) if supported_functions else None
-
-                parameters = function.parameters if function is not None else {}
+                parameters = state.get_function_parameters(func_name)
                 arguments, partial_param = get_arguments(tail or "", parameters)
                 if partial_param:
                     partial = True

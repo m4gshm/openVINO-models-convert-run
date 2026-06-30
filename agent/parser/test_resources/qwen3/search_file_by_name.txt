@@ -1,0 +1,10 @@
+<tool_call>
+<function=search_file_by_name>
+<parameter=glob_pattern>
+Properties.*
+</parameter>
+<parameter=search_directory>
+consumer/config
+</parameter>
+</function>
+</tool_call>

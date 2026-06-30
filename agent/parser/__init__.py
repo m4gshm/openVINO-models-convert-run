@@ -29,6 +29,13 @@ class ParserState:
         self.expect_tool_response = False
         self.role: str | None = None
 
+
+    def get_function_parameters(self, func_name: str) -> dict[str, Any] | dict[Any, Any]:
+        supported_functions = self.supported_functions
+        function = supported_functions.get(func_name)
+        parameters = function.parameters if function is not None else {}
+        return parameters
+
     def start_event(self, event: StateEvent):
         return self.__events.append(event)
 

@@ -1,7 +1,7 @@
 import unittest
 from importlib.resources import files
 
-from agent.openai.chat_completions_api import ToolCall, FunctionDefinition
+from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3Parser
 
 TEST_RESOURCES = "test_resources"
@@ -45,42 +45,37 @@ Target.py
     def test_without_close_tag(self):
         calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag)
         self.assertEqual(len(calls), 1)
-        function_call: ToolCall = calls[0]
-        self.assertEqual("function", function_call.type)
-        self.assertEqual("read_file", function_call.function.name)
-        self.assertEqual("""{"end_line": "75", "start_line": "19", "target_file": "Target.py"}""",
-                         function_call.function.arguments)
+        function_call = calls[0]
+        self.assertEqual("read_file", function_call.name)
+        self.assertEqual({"end_line": "75", "start_line": "19", "target_file": "Target.py"},
+                         function_call.arguments)
 
     def test_two_functions(self):
         calls, partial = parser.parse_tool_calls(state, self.first_function + self.second_function)
         self.assertFalse(partial)
         self.assertEqual(len(calls), 2)
 
-        first: ToolCall = calls[0]
-        self.assertEqual("function", first.type)
-        self.assertEqual("read_file", first.function.name)
-        self.assertEqual("""{"end_line": "75", "start_line": "19", "target_file": "Target.py"}""",
-                         first.function.arguments)
+        first = calls[0]
+        self.assertEqual("read_file", first.name)
+        self.assertEqual({"end_line": "75", "start_line": "19", "target_file": "Target.py"},
+                         first.arguments)
 
-        second: ToolCall = calls[1]
-        self.assertEqual("function", second.type)
-        self.assertEqual("ls", second.function.name)
-        self.assertEqual("""{"directory": "/tmp"}""", second.function.arguments)
+        second = calls[1]
+        self.assertEqual("ls", second.name)
+        self.assertEqual({"directory": "/tmp"}, second.arguments)
 
     def test_two_functions_where_first_without_close_tag(self):
         calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag + self.second_function)
         self.assertEqual(len(calls), 2)
 
-        first: ToolCall = calls[0]
-        self.assertEqual("function", first.type)
-        self.assertEqual("read_file", first.function.name)
-        self.assertEqual("""{"end_line": "75", "start_line": "19", "target_file": "Target.py"}""",
-                         first.function.arguments)
+        first = calls[0]
+        self.assertEqual("read_file", first.name)
+        self.assertEqual({"end_line": "75", "start_line": "19", "target_file": "Target.py"},
+                         first.arguments)
 
-        second: ToolCall = calls[1]
-        self.assertEqual("function", second.type)
-        self.assertEqual("ls", second.function.name)
-        self.assertEqual("""{"directory": "/tmp"}""", second.function.arguments)
+        second = calls[1]
+        self.assertEqual("ls", second.name)
+        self.assertEqual({"directory": "/tmp"}, second.arguments)
 
     def test_functions_with_invalid_json_parameter(self):
         function_name = "select"
@@ -92,24 +87,30 @@ Target.py
         }
         calls, partial = parser.parse_tool_calls(state, self.function_with_invalid_json_parameter)
 
-        first: ToolCall = calls[0]
+        first = calls[0]
+        self.assertEqual("select", first.name)
+        self.assertEqual({"options": [1, 2, "3"]}, first.arguments)
         self.assertFalse(partial)
-        self.assertEqual("function", first.type)
-        self.assertEqual("select", first.function.name)
-        self.assertEqual("""{"options": [1, 2, \"3\"]}""", first.function.arguments)
 
     def test_partial_tool_call(self):
-        pass
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
         tool_call_text = tool_cal_file.read_text(encoding="utf-8")
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        self.assertEqual("write_file", first.name)
+        self.assertEqual({"allow_overwrite": "false", "content": "no finished parameter"}, first.arguments)
         self.assertTrue(partial)
-        first: ToolCall = calls[0]
-        self.assertTrue(partial)
-        self.assertEqual("function", first.type)
-        self.assertEqual("write_file", first.function.name)
-        self.assertEqual("""{"allow_overwrite": "false", "content": "no finished parameter"}""",
-                         first.function.arguments)
+
+    def test_search_file_by_name(self):
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_file_by_name.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        self.assertEqual("search_file_by_name", first.name)
+        self.assertEqual({'glob_pattern': 'Properties.*',
+                          'search_directory': 'consumer/config'},
+                         first.arguments)
+        self.assertFalse(partial)
 
 
 if __name__ == '__main__':

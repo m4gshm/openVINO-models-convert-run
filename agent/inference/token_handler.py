@@ -365,21 +365,18 @@ class TokenHandler:
     def handle_tool_call(self, state: ParserState) -> CompletionResponse:
         tool_call_expression = self.tool_call_phrase
         parsed_function_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
-        if not parsed_function_calls:
+        if len(parsed_function_calls) == 0:
             log.info(
                 f"phrase like tool calls: {tool_call_expression}")
             chunk = new_chunk_response(role=state.role, content=tool_call_expression)
         else:
-            if partial:
-                pass
             fixed_tool_calls = list(
                 map(veai_fix_incorrect_arguments, parsed_function_calls)) if self.is_veai else parsed_function_calls
             if log.isEnabledFor(logging.INFO):
-                adapter = TypeAdapter(List[ToolCall])
-                log.info(
-                    f"tool call: {adapter.dump_json(fixed_tool_calls).decode("utf-8")}")
-
-            # self.tool_call_count += 1
+                adapter = TypeAdapter(List[ParsedFunctionCall])
+                parsed_str = adapter.dump_json(parsed_function_calls).decode("utf-8")
+                fixed_str = adapter.dump_json(fixed_tool_calls).decode("utf-8")
+                log.debug(f"tool calls: parsed={parsed_str}, fixed={fixed_str}")
             chunk = new_chunk_response(role=state.role, tool_calls=list(map(to_openai_tool_call, fixed_tool_calls)))
 
         # self.tool_call_parsing_in_progress = False
