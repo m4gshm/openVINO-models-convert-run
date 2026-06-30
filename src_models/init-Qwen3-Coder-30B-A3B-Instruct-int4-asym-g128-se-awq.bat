@@ -11,12 +11,13 @@ optimum-cli export openvino ^
   --model %MODEL_PATH% ^
   --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
-  --backup-precision int8_sym ^
-  --sym ^
+  --backup-precision int8_asym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  --dataset gsm8k ^
+  --dataset wikitext2 ^
+  --scale-estimation ^
   --awq ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-awq/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%-se-awq
 
 pause
+

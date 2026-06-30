@@ -14,6 +14,7 @@ optimum-cli export openvino ^
   --backup-precision int8_asym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%
 
 pause
+
