@@ -6,9 +6,8 @@ from typing import Any
 import json_repair
 
 import agent
-from agent.openai.chat_api import new_tool_call
-from agent.openai.chat_completions_api import ToolCall, FunctionCall, FunctionDefinition
-from agent.parser import Parser, _is_conversation_start
+from agent.openai.chat_completions_api import FunctionDefinition
+from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall
 
 ROLE = "model"
 
@@ -64,11 +63,10 @@ def parse_name(parameters_block) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | None = None,
-                  is_block_partial: bool = False) -> tuple[str, bool]:
+def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple[dict[str, Any], list[str], bool]:
     arguments_block = arguments_block.strip()
     if not arguments_block:
-        return "{}", is_block_partial
+        return {}, [], is_block_partial
 
     if arguments_block.startswith("{"):
         arguments_block = arguments_block[1:]
@@ -79,36 +77,52 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
     delim = "<|\"|>"
     partial = is_block_partial
     if delim in arguments_block:
-        pattern = r'(\w+):(?:<\|"\|>(.*?)<\|"\|>|([^,}]*))'
+        pattern = r'(\w*):*(?:<\|"\|>(.*?)<\|"\|>|([^,}]*))'
         kv_pairs = re.findall(pattern, arguments_block)
         log.debug(f"delimited parameters parsing: result={kv_pairs}")
-        structured_parameter = {k1: v1 or v2 for k1, v1, v2 in kv_pairs}
+        named_parameters = {}
+        anonymous_parameters = []
+        for k1, v1, v2 in kv_pairs:
+            k = k1
+            v = v1 or v2
+            if k:
+                named_parameters[k] = v
+            elif v:
+                anonymous_parameters.append(v)
     else:
         pattern = r'(?:"(\w+)"|(\w+))(:|=)(?:\s*"(.*?)"|([^,}]*))'
         kv_pairs = re.findall(pattern, arguments_block)
         log.debug(f"parameters parsing: result={kv_pairs}")
-        structured_parameter = {k1 or k2: v1 or v2 for k1, k2, d1, v1, v2 in kv_pairs}
+        named_parameters: dict[str, Any] = {}
+        anonymous_parameters = []
+        for k1, k2, d1, v1, v2 in kv_pairs:
+            k = k1 or k2
+            v = v1 or v2
+            if k:
+                named_parameters[k] = v
+            else:
+                anonymous_parameters.append(v)
 
-    if len(arguments_block) > 0 and len(structured_parameter) == 0:
+    if len(arguments_block) > 0 and not (len(named_parameters) > 0 or len(anonymous_parameters) > 0):
         log.debug(f"trying to parse as json: {arguments_block}")
         possible_json_args = arguments_block.replace(delim, "\"")
         try:
-            arguments = json.loads(possible_json_args)
+            arguments: dict[str, Any] = json.loads(possible_json_args)
         except json.decoder.JSONDecodeError as e:
             try:
                 arguments = json_repair.loads(possible_json_args)
             except Exception as e:
-                arguments = None
+                arguments = {}
         if not arguments:
-            structured_parameter = {}
+            named_parameters: dict[str, Any] = {}
             log.error(f"unrepairable json arguments: {arguments_block}")
         else:
-            structured_parameter = arguments
+            named_parameters = arguments
             partial = True
 
-    arguments_str = json.dumps(structured_parameter, ensure_ascii=False)
-    log.debug(f"tool call parsed: src={arguments_block}, result={arguments_str}")
-    return arguments_str, partial
+    log.debug(f"tool call arguments parsed: src={arguments_block}, named_parameters={named_parameters}, partial={partial}"
+              f"anonymous_parameters={anonymous_parameters}")
+    return named_parameters, anonymous_parameters, partial
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
@@ -164,11 +178,11 @@ class Gemma4ChannelParser(Parser[ParserState]):
     def get_assistant_role_name(self) -> str:
         return ROLE
 
-    def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ToolCall], bool]:
+    def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
         tool_call_expression = tool_call_expression.lstrip()
         tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
 
-        parsed_calls: list[ToolCall] = []
+        parsed_calls: list[ParsedFunctionCall] = []
         partial = False
         for call_block in tool_call_blocks:
             if len(call_block) == 0:
@@ -185,21 +199,15 @@ class Gemma4ChannelParser(Parser[ParserState]):
                     continue
                 function_block = function_block.rstrip()
 
-                # if function_block_rstrip.endswith(FUNCTION_END):
-                #     function_block = function_block_rstrip[:-len(FUNCTION_END)]
-
                 func_name, tail = parse_name(function_block)
                 if func_name is None:
                     # log
                     continue
 
-                supported_functions = state.supported_functions
-                function = supported_functions.get(func_name) if supported_functions else None
-
-                parameters = function.parameters if function is not None else []
-                arguments, partial_param = get_arguments(tail, parameters)
+                arguments, anonymous_parameters, partial_param = get_arguments(tail or "")
                 if partial_param:
                     partial = True
 
-                parsed_calls.append(new_tool_call(FunctionCall(name=func_name, arguments=arguments)))
+                parsed_calls.append(
+                    ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_parameters))
         return parsed_calls, partial

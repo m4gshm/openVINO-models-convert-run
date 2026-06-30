@@ -5,9 +5,7 @@ from typing import Any
 
 import json_repair
 
-from agent.openai.chat_api import new_tool_call
-from agent.openai.chat_completions_api import ToolCall, FunctionCall
-from agent.parser import ParserState
+from agent.parser import ParserState, ParsedFunctionCall
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
 log = logging.getLogger(__name__)
@@ -86,11 +84,11 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
 
 class Qwen2Parser(QwenBaseParser):
 
-    def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ToolCall], bool]:
+    def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
         tool_call_expression = tool_call_expression.lstrip()
         tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
 
-        parsed_calls: list[ToolCall] = []
+        parsed_calls: list[ParsedFunctionCall] = []
         partial = False
         for call_block in tool_call_blocks:
             if len(call_block) == 0:
@@ -122,7 +120,6 @@ class Qwen2Parser(QwenBaseParser):
                 function = supported_functions.get(func_name) if supported_functions else None
 
                 arguments = parsed_function.get("arguments") if function is not None else {}
-                arguments_str = json.dumps(arguments, ensure_ascii=False)
 
-                parsed_calls.append(new_tool_call(FunctionCall(name=func_name, arguments=arguments_str)))
+                parsed_calls.append(ParsedFunctionCall(name=func_name, arguments=arguments))
         return parsed_calls, partial

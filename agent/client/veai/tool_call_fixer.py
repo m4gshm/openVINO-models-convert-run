@@ -13,41 +13,38 @@ from agent.client.veai.tool.read_file import ReadFile
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
-from agent.openai.chat_completions_api import ToolCall, ToolDefinition, FunctionCall
+from agent.openai.chat_completions_api import ToolDefinition
+from agent.parser import ParsedFunctionCall
 
 ROOT = "."
 
 log = logging.getLogger(__name__)
 
 
-def veai_fix_incorrect_arguments(tool_call: ToolCall) -> ToolCall:
-    function = tool_call.function
+def veai_fix_incorrect_arguments(function: ParsedFunctionCall) -> ParsedFunctionCall:
     if "run_command" == function.name:
         pass
     elif list_dir.function_name == function.name:
-        return fix_list_dir(tool_call)
+        return fix_list_dir(function)
     elif file_structure.function_name == function.name:
-        return fix_file_structure(tool_call)
+        return fix_file_structure(function)
     elif edit_file.function_name == function.name:
-        return fix_edit_file(tool_call)
+        return fix_edit_file(function)
     elif write_file.function_name == function.name:
-        return fix_write_file(tool_call)
+        return fix_write_file(function)
     elif read_file.function_name == function.name:
-        return fix_read_file(tool_call)
+        return fix_read_file(function)
     elif search_for_text.function_name == function.name:
-        return fix_search_for_text(tool_call)
+        return fix_search_for_text(function)
     elif search_file_by_name.function_name == function.name:
-        return fix_search_file_by_name(tool_call)
+        return fix_search_file_by_name(function)
     elif ask_user_with_options.function_name == function.name:
-        return fix_ask_user_with_options(tool_call)
+        return fix_ask_user_with_options(function)
+    return function
 
-    return tool_call
 
-
-def fix_ask_user_with_options(tool_call: ToolCall) -> ToolCall:
-    function = tool_call.function
-    args_raw = function.arguments
-    args = get_args(tool_call)
+def fix_ask_user_with_options(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     options_raw = args.get("options")
     is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
     if not is_multiple_choice:
@@ -68,31 +65,30 @@ def fix_ask_user_with_options(tool_call: ToolCall) -> ToolCall:
         elif isinstance(options_raw, list):
             options = options_raw
         else:
-            log.error(f"unexpected options type, function '{function.name}', args '{args_raw}', "
+            log.error(f"unexpected options type, function '{function.name}', args '{args}', "
                       f"options type {type(options_raw)}")
     else:
-        log.error(f"missing options in args, function '{function.name}', args '{args_raw}'")
+        log.error(f"missing options in args, function '{function.name}', args '{args}'")
 
     if options:
         args["options"] = options  # json.dumps(options, ensure_ascii=False)
 
     function.arguments = json.dumps(args, ensure_ascii=False)
     log.info(f"function after repairing, function {function.name}, arguments '{args}'")
-    return tool_call
+    return function
 
 
-def fix_file_structure(tool_call: ToolCall) -> ToolCall:
-    args = get_args(tool_call)
+def fix_file_structure(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     target_file, invalid = get_target_file(args)
     if invalid:
         new_function = FileStructure().new_call(target_file)
-        tool_call.function = new_function
-    return tool_call
+        return new_function
+    return function
 
 
-def fix_edit_file(tool_call: ToolCall) -> ToolCall:
-    function = tool_call.function
-    args = get_args(tool_call)
+def fix_edit_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     target_file, invalid = get_target_file(args)
     if not target_file:
         log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
@@ -122,13 +118,13 @@ def fix_edit_file(tool_call: ToolCall) -> ToolCall:
             log.info(f"repaired edits '{edits_raw}'")
         if invalid:
             new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
-            tool_call.function = new_function
+            return new_function
 
-    return tool_call
+    return function
 
 
-def fix_write_file(tool_call: ToolCall) -> ToolCall:
-    args = get_args(tool_call)
+def fix_write_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     target_file, invalid = get_target_file(args)
     content = args.get("content")
     if target_file and content:
@@ -140,17 +136,16 @@ def fix_write_file(tool_call: ToolCall) -> ToolCall:
 
         if invalid:
             new_function = WriteFile().new_call(target_file, content, allow_overwrite=allow_overwrite)
-            tool_call.function = new_function
+            return new_function
     else:
-        log.error(f"no required args for function {tool_call.function.name}, args={args}, "
+        log.error(f"no required args for function {function.name}, args={args}, "
                   f"required args = ['target_file', 'content']")
 
-    return tool_call
+    return function
 
 
-def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
-    args_raw = tool_call.function.arguments
-    args = get_args(tool_call)
+def fix_search_for_text(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
     text_snippet = args.get("text_snippet")
     if target_path_or_url and text_snippet:
@@ -158,13 +153,13 @@ def fix_search_for_text(tool_call: ToolCall) -> ToolCall:
         if is_case_sensitive is None:
             # log
             new_function = SearchForText().new_call(target_path_or_url, text_snippet, True)
-            tool_call.function = new_function
+            return new_function
 
-    return tool_call
+    return function
 
 
-def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
-    args = get_args(tool_call)
+def fix_search_file_by_name(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     glob_pattern = args.get("glob_pattern")
     invalid = not glob_pattern
     if invalid:
@@ -188,17 +183,24 @@ def fix_search_file_by_name(tool_call: ToolCall) -> ToolCall:
 
     if invalid:
         log.info(
-            f"fix invalid {tool_call.function.name}: glob_pattern={glob_pattern}, search_directory={search_directory}")
+            f"fix invalid {function.name}: glob_pattern={glob_pattern}, search_directory={search_directory}")
         new_function = SearchFileByName().new_call(glob_pattern, search_directory)
-        tool_call.function = new_function
-    return tool_call
+        return new_function
+    return function
 
 
-def fix_read_file(tool_call: ToolCall) -> ToolCall:
-    args = get_args(tool_call)
+def fix_read_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     target_file, invalid = get_target_file(args)
 
-    if target_file:
+    anonymous_arguments = function.anonymous_arguments
+    if not target_file and anonymous_arguments:
+        invalid = True
+        target_file = anonymous_arguments[0]
+
+    if not target_file:
+        log.error(f"no target file for function '{function.name}'")
+    else:
         start_line = as_int_or_none(args.get("start_line"), "start_line")
         end_line = as_int_or_none(args.get("end_line"), "end_line")
         line_offset = as_int_or_none(args.get("line_offset"), "line_offset")
@@ -214,13 +216,13 @@ def fix_read_file(tool_call: ToolCall) -> ToolCall:
                 end_line = 500
         if invalid:
             log.info(
-                f"fix invalid {tool_call.function.name}: target_file={target_file}, start_line={start_line}, "
+                f"fix invalid {function.name}: target_file={target_file}, start_line={start_line}, "
                 f"end_line={end_line}")
             new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
                                                line_offset=line_offset)
-            tool_call.function = new_function
+            return new_function
 
-    return tool_call
+    return function
 
 
 def get_target_file(args) -> tuple[str, bool]:
@@ -243,8 +245,8 @@ def get_target_file(args) -> tuple[str, bool]:
     return target_file, invalid
 
 
-def fix_list_dir(tool_call: ToolCall) -> ToolCall:
-    args = get_args(tool_call)
+def fix_list_dir(function: ParsedFunctionCall) -> ParsedFunctionCall:
+    args = get_args(function)
     directory_path = args.get("directory_path")
     invalid = False
     if not directory_path:
@@ -266,15 +268,15 @@ def fix_list_dir(tool_call: ToolCall) -> ToolCall:
 
     if invalid:
         log.info(
-            f"fix invalid {tool_call.function.name}: directory_path={directory_path}, depth={depth}")
+            f"fix invalid {function.name}: directory_path={directory_path}, depth={depth}")
         new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
-        tool_call.function = new_function
+        return new_function
 
-    return tool_call
+    return function
 
 
-def get_args(tool_call: ToolCall) -> Any:
-    return read_args_as_json(tool_call.function.arguments, tool_call.function) or {}
+def get_args(function: ParsedFunctionCall) -> dict[str, Any]:
+    return function.arguments or {}
 
 
 def as_int_or_none(val, name: str) -> int | None:
@@ -294,13 +296,7 @@ def as_type_or_none[T](t: type[T], val, name: str) -> T | None:
     return None
 
 
-def read_args_as_json(args_raw: str, function: FunctionCall) -> Any:
-    try:
-        args = json.loads(args_raw)
-    except json.decoder.JSONDecodeError as e:
-        log.error(f"bad arguments of function '{function.name}', args '{args_raw}': {e}")
-        args = json_repair.loads(args_raw)
-        log.info(f"repaired arguments '{args}'")
+def read_args_as_json(args: dict[str, Any]) -> Any:
     return args
 
 

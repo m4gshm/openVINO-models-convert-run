@@ -1,4 +1,5 @@
 import collections
+import json
 import logging
 import time
 from datetime import timedelta
@@ -11,9 +12,9 @@ from pydantic import TypeAdapter, BaseModel
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.common.roles import ROLE_ASSISTANT
 from agent.common.time import format_time
-from agent.openai.chat_api import new_chunk_response
-from agent.openai.chat_completions_api import FunctionDefinition, CompletionResponse, ToolCall
-from agent.parser import Parser, StateEvent, ParserState
+from agent.openai.chat_api import new_chunk_response, new_tool_call
+from agent.openai.chat_completions_api import FunctionDefinition, CompletionResponse, ToolCall, FunctionCall
+from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,10 @@ def line_encoded(last_line: str, tokenizer: Tokenizer) -> Sequence[SupportsInt]:
 
 def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
     return [tokenizer.decode(tokens=[token], skip_special_tokens=False) for token in tokens]
+
+
+def to_openai_tool_call(function: ParsedFunctionCall) -> ToolCall:
+    return new_tool_call(FunctionCall(name=function.name, arguments=json.dumps(function.arguments, ensure_ascii=False)))
 
 
 class TokenHandler:
@@ -360,8 +365,8 @@ class TokenHandler:
 
     def handle_tool_call(self, state: ParserState) -> CompletionResponse:
         tool_call_expression = self.tool_call_phrase
-        parsed_tool_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
-        if not parsed_tool_calls:
+        parsed_function_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
+        if not parsed_function_calls:
             log.info(
                 f"phrase like tool calls: {tool_call_expression}")
             chunk = new_chunk_response(role=state.role, content=tool_call_expression)
@@ -369,14 +374,14 @@ class TokenHandler:
             if partial:
                 pass
             fixed_tool_calls = list(
-                map(veai_fix_incorrect_arguments, parsed_tool_calls)) if self.is_veai else parsed_tool_calls
+                map(veai_fix_incorrect_arguments, parsed_function_calls)) if self.is_veai else parsed_function_calls
             if log.isEnabledFor(logging.INFO):
                 adapter = TypeAdapter(List[ToolCall])
                 log.info(
                     f"tool call: {adapter.dump_json(fixed_tool_calls).decode("utf-8")}")
 
             # self.tool_call_count += 1
-            chunk = new_chunk_response(role=state.role, tool_calls=fixed_tool_calls)
+            chunk = new_chunk_response(role=state.role, tool_calls=list(map(to_openai_tool_call, fixed_tool_calls)))
 
         # self.tool_call_parsing_in_progress = False
         self.tool_call_phrase = ""

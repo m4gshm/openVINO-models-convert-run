@@ -1,0 +1,1 @@
+<|tool_call>call:read_file{<|"|>C:/src/MessageStorageImpl.java<|"|>}<tool_call|>

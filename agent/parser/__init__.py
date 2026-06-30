@@ -1,11 +1,11 @@
 import logging
 from enum import Enum
+from typing import Any
 
-import fastapi
-from pygments.styles import nord
+from pydantic import BaseModel
 
 from agent.common.roles import ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition, ToolCall
+from agent.openai.chat_completions_api import FunctionDefinition
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +59,12 @@ def _is_conversation_start(tag: str, token: str) -> tuple[bool, str]:
     return b, tail
 
 
+class ParsedFunctionCall(BaseModel):
+    name: str
+    arguments: dict[str, Any]
+    anonymous_arguments: list[str] = []
+
+
 class Parser[State: ParserState]():
     def new_state(self, init_chat_events=True) -> State:
         state = self._new_state()
@@ -106,7 +112,7 @@ class Parser[State: ParserState]():
     def is_prompt_start_thinking(self, prompt: str) -> bool:
         pass
 
-    def parse_tool_calls(self, state: State, tool_call_expression: str | None) -> tuple[list[ToolCall], bool]:
+    def parse_tool_calls(self, state: State, tool_call_expression: str | None) -> tuple[list[ParsedFunctionCall], bool]:
         return [], False
 
     def is_assistant(self, role):

@@ -3,6 +3,7 @@ from typing import Any
 
 from agent.client.veai.tool import Tool
 from agent.openai.chat_completions_api import FunctionCall
+from agent.parser import ParsedFunctionCall
 
 function_name = "read_file"
 
@@ -14,7 +15,7 @@ class ReadFile(Tool):
 
     @staticmethod
     def new_call(target_file: str, start_line: int | None = 1, end_line: int | None = 1000,
-                 line_offset: int | None = None) -> FunctionCall:
+                 line_offset: int | None = None) -> ParsedFunctionCall:
         arguments: dict[str, Any] = {
             "target_file": target_file,
         }
@@ -23,5 +24,4 @@ class ReadFile(Tool):
         else:
             arguments["start_line"] = start_line
             arguments["end_line"] = end_line
-        arguments_str = json.dumps(arguments, ensure_ascii=False)
-        return FunctionCall(name=function_name, arguments=arguments_str)
+        return ParsedFunctionCall(name=function_name, arguments=arguments)

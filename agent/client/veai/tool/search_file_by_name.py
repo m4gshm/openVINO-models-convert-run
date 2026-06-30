@@ -1,8 +1,7 @@
-import json
 from typing import Any
 
 from agent.client.veai.tool import Tool
-from agent.openai.chat_completions_api import FunctionCall
+from agent.parser import ParsedFunctionCall
 
 function_name = "search_file_by_name"
 
@@ -13,11 +12,8 @@ class SearchFileByName(Tool):
         return function_name
 
     @staticmethod
-    def new_call(glob_pattern: str, search_directory: str) -> FunctionCall:
-        arguments: dict[str, Any] = {
+    def new_call(glob_pattern: str, search_directory: str) -> ParsedFunctionCall:
+        return ParsedFunctionCall(name=function_name, arguments={
             "glob_pattern": glob_pattern,
             "search_directory": search_directory,
-        }
-
-        arguments_str = json.dumps(arguments, ensure_ascii=False)
-        return FunctionCall(name=function_name, arguments=arguments_str)
+        })
