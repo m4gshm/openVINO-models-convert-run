@@ -119,7 +119,8 @@ class VlmController(BaseController):
                     generate_cost = after_generate_mem - before_generate_mem
                     log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
 
-                    self.log_inference_generated.debug("".join(token_handler.generated))
+                    self.log_inference_generated.debug("".join(token_handler.phrase.full))
+                    self.log_inference_generated.debug("".join(token_handler.tool_call_phrase.full))
 
                     inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                     if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:

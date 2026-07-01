@@ -1,0 +1,4 @@
+{
+  "name": "read_file",
+  "arguments": {"target_file": "/opt/test.txt"}
+}

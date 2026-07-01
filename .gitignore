@@ -28,6 +28,7 @@ src_models/codellama
 src_models/sakmkmk2
 models_cache
 models/Qwen*
+models/Qwable*
 models/gpt-oss-20b*
 models/starcoder*/1
 models/SERA*/1

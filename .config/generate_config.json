@@ -1,7 +1,7 @@
 {
   "temperature": 0.4,
   "top_p": 0.95,
-  "top_k": 50,
+  "top_k": 40,
   "min_p": 0.05,
-  "repetition_penalty": 1.05
+  "repetition_penalty": 1.1
 }
