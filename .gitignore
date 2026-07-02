@@ -31,7 +31,7 @@ models/Qwen*
 models/Qwable*
 models/gpt-oss-20b*
 models/starcoder*/1
-models/SERA*/1
+models/SERA*
 models/microsoft*/1
 models/Phi-*
 models/gemma-*
