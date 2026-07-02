@@ -17,6 +17,6 @@ optimum-cli export openvino ^
   --dataset gsm8k ^
   --scale-estimation ^
   --awq ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%-se-awq/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%-se-awq
 
 pause
