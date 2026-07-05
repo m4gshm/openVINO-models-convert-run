@@ -2,7 +2,6 @@ import logging
 
 from agent.inference.loop_error import LoopError
 
-
 INIT_STEP = 1
 
 DUPLICATED_LINES_THRESHOLD = 5
@@ -18,10 +17,10 @@ log = logging.getLogger(__name__)
 
 
 def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[str, list[int]],
-                                                line: list[str]) -> dict[int, int] | None:
+                                                line: list[str]) -> dict[int, int]:
     token_positions = line_tokens[token]
     if len(token_positions) <= 1:
-        return None
+        return {}
     len_line = len(line)
     cycled = False
     check_token_positions = token_positions[:]
@@ -92,7 +91,6 @@ def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[st
             pivot = 0
         else:
             stop = True
-
     return merge_ranges(duplicate_ranges)
 
 
@@ -119,13 +117,13 @@ def merge_ranges(duplicate_ranges: dict[int, int]) -> dict[int, int]:
     return result_ranges
 
 
-def add_token_to_current_line(token: str, current_line: list[str], current_line_tokens: dict[str, list[int]]) -> tuple[
-    list[str], list[int]]:
+def add_token_to_current_line(token: str, current_line: list[str], current_line_tokens: dict[str, list[int]]) -> list[
+    str]:
     current_line += token
     token_positions = current_line_tokens.get(token, [])
     token_positions.append(len(current_line) - 1)
     current_line_tokens[token] = token_positions
-    return current_line, token_positions
+    return current_line
 
 
 class Phrase:
@@ -159,17 +157,17 @@ class Phrase:
             current_line_tokens = self.current_line_tokens
             current_line = self.current_line
 
-            current_line, token_positions = add_token_to_current_line(token, current_line, current_line_tokens)
+            current_line = add_token_to_current_line(token, current_line, current_line_tokens)
 
             self.current_line = current_line
             self.current_line_tokens = current_line_tokens
 
-            duplicates = get_ranges_with_duplicates_started_by_token(token, token_positions, current_line)
-            
+            duplicates = get_ranges_with_duplicates_started_by_token(token, current_line_tokens, current_line)
+
             total_tokens = len(current_line)
             max_duplicated_part_amount = 0
             max_duplicated_part_start = 0
-            
+
             for start, amount in duplicates.items():
                 if amount > max_duplicated_part_amount:
                     max_duplicated_part_amount = amount
@@ -177,9 +175,10 @@ class Phrase:
 
             max_part_rate = max_duplicated_part_amount / total_tokens
             if max_part_rate > DUPLICATES_IN_LINE_RATE:
-                duplicated_payload = current_line[max_duplicated_part_start:max_duplicated_part_start+max_duplicated_part_amount]
+                duplicated_payload = current_line[
+                    max_duplicated_part_start:max_duplicated_part_start + max_duplicated_part_amount]
                 raise LoopError(message="duplicated line part", payload=duplicated_payload)
-            
+
             return None
         else:
             current_line = self.current_line

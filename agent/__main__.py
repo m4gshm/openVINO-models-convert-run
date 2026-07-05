@@ -109,6 +109,7 @@ def main():
 
     model_architectures: set[str] = set()
     max_position_embeddings: int | None = None
+
     if model_path.is_dir():
         openvino_model_config_json = model_path / "config.json"
         if openvino_model_config_json.is_file():
@@ -123,6 +124,9 @@ def main():
                     max_position_embeddings = text_config.get("max_position_embeddings")
             except Exception as e:
                 log.error(f"error on read {openvino_model_config_json}: {e}")
+    elif not model_path.exists():
+        log.error(f"file or directory doesn't exists: '{model_path}'")
+        sys.exit(1)
 
     handler_config = TokenHandlerConfig()
 
@@ -199,8 +203,8 @@ def main():
             pipe = or_default_pipe(pipe, Pipe.VLM)
             parser_type = ParserType.gemma4
         elif is_qwen3_5:
-                parser_type = ParserType.qwen3moe
-                pipe = or_default_pipe(pipe, Pipe.VLM)
+            parser_type = ParserType.qwen3moe
+            pipe = or_default_pipe(pipe, Pipe.VLM)
         elif is_qwen3moe:
             parser_type = ParserType.qwen3moe
             pipe = or_default_pipe(pipe, Pipe.LLM)

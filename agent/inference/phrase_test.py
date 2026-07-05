@@ -38,8 +38,7 @@ class PhraseTestCase(unittest.TestCase):
 
         phrase = Phrase()
         with self.assertRaises(LoopError):
-            tokens = re.split(r"([\n|\s])", loop_messages)
-            for token in tokens:
+            for token in loop_messages:
                 phrase.add_token(token)
 
         self.assertEqual('some normal output\n'
