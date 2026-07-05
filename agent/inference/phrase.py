@@ -11,7 +11,8 @@ DUPLICATED_TOKENS_LIMIT = 100
 DUPLICATED_LINES_RATE_LIMIT = 0.5
 DUPLICATED_LINES_LIMIT = 50
 
-DUPLICATES_IN_LINE_RATE = 0.2
+DUPLICATES_IN_LINE_MIN_LINE_LEN = 200
+DUPLICATES_IN_LINE_RATE = 0.3
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def merge_ranges(duplicate_ranges: dict[int, int]) -> dict[int, int]:
 
 def add_token_to_current_line(token: str, current_line: list[str], current_line_tokens: dict[str, list[int]]) -> list[
     str]:
-    current_line += token
+    current_line.append(token)
     token_positions = current_line_tokens.get(token, [])
     token_positions.append(len(current_line) - 1)
     current_line_tokens[token] = token_positions
@@ -162,22 +163,23 @@ class Phrase:
             self.current_line = current_line
             self.current_line_tokens = current_line_tokens
 
-            duplicates = get_ranges_with_duplicates_started_by_token(token, current_line_tokens, current_line)
+            if len(current_line) >= DUPLICATES_IN_LINE_MIN_LINE_LEN:
+                duplicates = get_ranges_with_duplicates_started_by_token(token, current_line_tokens, current_line)
 
-            total_tokens = len(current_line)
-            max_duplicated_part_amount = 0
-            max_duplicated_part_start = 0
+                total_tokens = len(current_line)
+                max_duplicated_part_amount = 0
+                max_duplicated_part_start = 0
 
-            for start, amount in duplicates.items():
-                if amount > max_duplicated_part_amount:
-                    max_duplicated_part_amount = amount
-                    max_duplicated_part_start = start
+                for start, amount in duplicates.items():
+                    if amount > max_duplicated_part_amount:
+                        max_duplicated_part_amount = amount
+                        max_duplicated_part_start = start
 
-            max_part_rate = max_duplicated_part_amount / total_tokens
-            if max_part_rate > DUPLICATES_IN_LINE_RATE:
-                duplicated_payload = current_line[
-                    max_duplicated_part_start:max_duplicated_part_start + max_duplicated_part_amount]
-                raise LoopError(message="duplicated line part", payload=duplicated_payload)
+                max_part_rate = max_duplicated_part_amount / total_tokens
+                if max_part_rate > DUPLICATES_IN_LINE_RATE:
+                    duplicated_payload = current_line[
+                        max_duplicated_part_start:max_duplicated_part_start + max_duplicated_part_amount]
+                    raise LoopError(message="duplicated line part", payload="".join(duplicated_payload))
 
             return None
         else:
