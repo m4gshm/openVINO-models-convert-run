@@ -1,0 +1,6 @@
+<project_information>
+OS info: Windows 11, version: 10.0, arch: amd64
+IDE: OpenIDE 2025.3
+Project name: java
+Project absolute path: C:\project
+</project_information>

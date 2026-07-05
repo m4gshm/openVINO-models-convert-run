@@ -9,6 +9,7 @@ from typing import Generator
 from typing import SupportsInt, Literal
 
 from fastapi.routing import APIRouter
+from openvino_genai import ChatHistory
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
     Tokenizer, VLMDecodedResults, GenerationConfig
@@ -36,10 +37,12 @@ class VlmController(BaseController):
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
 
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
+    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+                        tokenizer: Tokenizer,
                         init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None
-                        ) -> Generator[CompletionResponse, None, None]:
+                        function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
+                        ) -> Generator[
+        CompletionResponse, None, None]:
 
         response_id = str(uuid.uuid4())
         encode_size = self.get_tokens_size(prompt)
@@ -80,7 +83,7 @@ class VlmController(BaseController):
                     token_handler = TokenHandler(tokenizer=tokenizer, parser=self.parser,
                                                  init_chat_events=init_chat_events,
                                                  is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
-                                                 supported_functions=function_by_name, )
+                                                 supported_functions=function_by_name, user_context=user_context)
                     streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
@@ -135,16 +138,15 @@ class VlmController(BaseController):
                     chunk_queue.put_nowait(new_stop_response(content=err_str, finish_reason=finish_reason))
                     chunk_queue.put_nowait(None)
 
-
             def start_generate_result(streamer: StreamerWrapper) -> VLMDecodedResults:
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
                     vlm_pipe: VLMPipeline = pipe
-                    generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
+                    generate_result = vlm_pipe.generate(history=chat_history, generation_config=generation_config,
                                                         streamer=streamer)
                 elif isinstance(pipe, LLMPipeline):
                     llm_pipe: LLMPipeline = pipe
-                    generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
+                    generate_result = llm_pipe.generate(inputs=chat_history, generation_config=generation_config,
                                                         streamer=streamer)
                 else:
                     raise NotImplementedError(f"unexpected pipe type {type(pipe)}")

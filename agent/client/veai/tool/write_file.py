@@ -13,7 +13,7 @@ class WriteFile(Tool):
         return function_name
 
     @staticmethod
-    def new_call(target_file: str, content: str, allow_overwrite=True) -> ParsedFunctionCall:
+    def new_call(target_file: str, content: Any, allow_overwrite=True) -> ParsedFunctionCall:
         return ParsedFunctionCall(name=function_name, arguments={
             "target_file": target_file,
             "content": content,

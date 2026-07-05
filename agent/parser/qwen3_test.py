@@ -2,15 +2,15 @@ import unittest
 from importlib.resources import files
 
 from agent.openai.chat_completions_api import FunctionDefinition
-from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3Parser
+from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
 TEST_RESOURCES = "test_resources"
 
-parser = Qwen3Parser()
+parser = Qwen3MoeParser()
 state = parser.new_state()
 
 
-class TestAddFunction(unittest.TestCase):
+class Qwen3TestCases(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

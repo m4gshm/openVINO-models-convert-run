@@ -25,8 +25,6 @@ class ParserState:
         self.supported_functions = supported_functions if supported_functions else {}
         self.__events: list[StateEvent] = []
         self.fim_middle_start = False
-        # self.thinking_progress_counter: int = 0
-        self.expect_tool_response = False
         self.role: str | None = None
 
 

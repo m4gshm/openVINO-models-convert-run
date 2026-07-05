@@ -10,7 +10,7 @@ from typing import Literal
 
 from fastapi.routing import APIRouter
 from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason, \
-    GenerationConfig, Tokenizer, GenerationStatus
+    GenerationConfig, Tokenizer, GenerationStatus, ChatHistory
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal, \
@@ -59,10 +59,12 @@ class ContinuousBatchingController(BaseController):
                         # log
                         pass
 
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
+    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+                        tokenizer: Tokenizer,
                         init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None
-                        ) -> Generator[CompletionResponse, None, None]:
+                        function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
+                        ) -> Generator[
+        CompletionResponse, None, None]:
         before_generate_mem = get_current_memory()
         request_id = next(request_counter)
         response_id = str(uuid.uuid4())
@@ -136,6 +138,7 @@ class ContinuousBatchingController(BaseController):
                 yield stop_response
             else:
                 unique_id = str(uuid.uuid4())
+
                 def read():
                     empty_tokens_limit = 100
                     empty_out_counter = 0

@@ -8,6 +8,7 @@ from typing import Sequence, SupportsInt, Callable, List, Literal
 from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason
 from pydantic import TypeAdapter, BaseModel
 
+from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.common.roles import ROLE_ASSISTANT
 from agent.common.time import format_time
@@ -96,8 +97,10 @@ class TokenHandler:
                  is_stop: Callable[[], bool] | None,
                  config: TokenHandlerConfig,
                  is_veai: bool,
+                 user_context: UserContext | None = None,
                  supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()
+        self.user_context = user_context
         self.is_veai = is_veai
 
         self.tokenizer = tokenizer
@@ -175,15 +178,25 @@ class TokenHandler:
             else:
                 log.debug("empty role for conversation start")
         elif parser.is_think_start(state, token):
-            self.thinking_start(state)
+            if current_event == StateEvent.TOOL_CALL:
+                log.debug(f"tool call is finished by generated thinking tag: '{token}'")
+                tool_call, stop_signal = self.tool_call_end(state, token)
+                result.append(tool_call)
+            else:
+                self.thinking_start(state)
         elif parser.is_think_end(state, token):
             self.thinking_end(state)
         elif parser.is_tool_call_start(state, token):
-            self.tool_call_start(state, token)
+            if current_event == StateEvent.TOOL_CALL:
+                log.debug(f"tool call is finished by starting new tool call: '{token}'")
+                tool_call, stop_signal = self.tool_call_end(state, token)
+                result.append(tool_call)
+            else:
+                self.tool_call_start(state, token)
+
         elif parser.is_tool_call_end(state, token):
             tool_call, stop_signal = self.tool_call_end(state, token)
             result.append(tool_call)
-            state.expect_tool_response = True
         elif parser.is_tool_response_start(state, token):
             state.start_event(StateEvent.TOOL_RESPONSE)
             log.debug(f"tool response start: {token}")
@@ -353,8 +366,8 @@ class TokenHandler:
             log.info(f"phrase like tool calls: {tool_call_expression}")
             chunk = new_chunk_response(role=state.role, content=tool_call_expression)
         else:
-            fixed_tool_calls = list(
-                map(veai_fix_incorrect_arguments, parsed_function_calls)) if self.is_veai else parsed_function_calls
+            fixed_tool_calls = [veai_fix_incorrect_arguments(tc, user_context=self.user_context) for tc in
+                                parsed_function_calls] if self.is_veai else parsed_function_calls
             if log.isEnabledFor(logging.INFO):
                 adapter = TypeAdapter(List[ParsedFunctionCall])
                 parsed_str = adapter.dump_json(parsed_function_calls).decode("utf-8")
@@ -365,14 +378,15 @@ class TokenHandler:
         self.__clean_tool_call_phrase()
         return chunk
 
-    def tool_call_end(self, state: ParserState, token: str) -> tuple[
+    def tool_call_end(self, state: ParserState, token: str | None) -> tuple[
         CompletionResponse, Literal[StopSignal.TOOL_CALL]]:
         self.tool_call_parsing_start_time = None
         state.finish_current_event(expected_state=StateEvent.TOOL_CALL)
-        try:
-            self.tool_call_phrase.add_token(token)
-        except LoopError as e:
-            log.debug(f"loop at the end of tool call {self.tool_call_phrase.full}")
+        if token:
+            try:
+                self.tool_call_phrase.add_token(token)
+            except LoopError as e:
+                log.debug(f"loop at the end of tool call {self.tool_call_phrase.full}")
         log.debug(f"tool call end: {self.tool_call_phrase.full}")
 
         return self.handle_tool_call(state), StopSignal.TOOL_CALL

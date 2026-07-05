@@ -76,7 +76,7 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
     return arguments, partial
 
 
-class Qwen3Parser(QwenBaseParser):
+class Qwen3MoeParser(QwenBaseParser):
     def new_state(self, init_chat_events=True) -> ParserState:
         state = super().new_state(init_chat_events=init_chat_events)
         if init_chat_events:

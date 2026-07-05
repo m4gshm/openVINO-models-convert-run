@@ -4,12 +4,14 @@ from typing import Any
 
 import json_repair
 
+from agent.client.user_context import UserContext
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
-    search_file_by_name, file_structure
+    search_file_by_name, file_structure, run_command
 from agent.client.veai.tool.edit_file import EditFile
 from agent.client.veai.tool.file_structure import FileStructure
 from agent.client.veai.tool.list_dir import ListDir
 from agent.client.veai.tool.read_file import ReadFile
+from agent.client.veai.tool.run_command import RunCommand
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
@@ -21,29 +23,30 @@ ROOT = "."
 log = logging.getLogger(__name__)
 
 
-def veai_fix_incorrect_arguments(function: ParsedFunctionCall) -> ParsedFunctionCall:
-    if "run_command" == function.name:
-        pass
+def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
+                                 user_context: UserContext | None = None) -> ParsedFunctionCall:
+    if run_command.function_name == function.name:
+        return fix_run_command(function, user_context)
     elif list_dir.function_name == function.name:
-        return fix_list_dir(function)
+        return fix_list_dir(function, user_context)
     elif file_structure.function_name == function.name:
-        return fix_file_structure(function)
+        return fix_file_structure(function, user_context)
     elif edit_file.function_name == function.name:
-        return fix_edit_file(function)
+        return fix_edit_file(function, user_context)
     elif write_file.function_name == function.name:
-        return fix_write_file(function)
+        return fix_write_file(function, user_context)
     elif read_file.function_name == function.name:
-        return fix_read_file(function)
+        return fix_read_file(function, user_context)
     elif search_for_text.function_name == function.name:
-        return fix_search_for_text(function)
+        return fix_search_for_text(function, user_context)
     elif search_file_by_name.function_name == function.name:
-        return fix_search_file_by_name(function)
+        return fix_search_file_by_name(function, user_context)
     elif ask_user_with_options.function_name == function.name:
-        return fix_ask_user_with_options(function)
+        return fix_ask_user_with_options(function, user_context)
     return function
 
 
-def fix_ask_user_with_options(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     options_raw = args.get("options")
     is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
@@ -78,44 +81,60 @@ def fix_ask_user_with_options(function: ParsedFunctionCall) -> ParsedFunctionCal
     return function
 
 
-def fix_file_structure(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_file_structure(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args)
+    target_file, invalid = get_target_file(args, context)
     if invalid:
         new_function = FileStructure().new_call(target_file)
         return new_function
     return function
 
 
-def fix_edit_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args)
+    target_file, invalid = get_target_file(args, context)
     if not target_file:
         log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
-    edits_raw = args.get("edits")
-    if target_file and edits_raw:
+    edits = args.get("edits")
+    if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
-        invalid = False
         if not allow_multiple_matches:
             invalid = True
             allow_multiple_matches = True
         # qwen2 case
-        if isinstance(edits_raw, list):
-            edits_list = edits_raw
-            edits_raw = edits_list[0] if edits_list else ""
-            log.debug(f"convert 'edits' list to str: list={edits_list}, str={edits_raw}")
+        if not isinstance(edits, list):
+            log.error(f"unexpected edits type, function '{function.name}', args '{edits}', type {type(edits)}")
+        else:
+            for i, edit in enumerate(edits):
+                if isinstance(edit, list):
+                    invalid = True
+                    edit = edit[0] if edit else None
+                elif isinstance(edit, dict):
+                    # valid
+                    pass
+                else:
+                    edit_str: str | None = None
+                    if isinstance(edits, bytes):
+                        edit_str = bytearray(edits).decode()
+                    elif isinstance(edits, bytearray):
+                        edit_str = edits.decode()
+                    elif isinstance(edits, str):
+                        edit_str = edits
+                    invalid = True
+                    if edit_str is None:
+                        edit = edits
+                        log.error(
+                            f"unexpected edits element type, function '{function.name}', element {i} '{edit}', type {type(edit)}")
+                    else:
+                        try:
+                            edit = json.loads(edit_str)
+                        except json.decoder.JSONDecodeError as e:
+                            log.info(f"bad edits of function '{function.name}', options: '{edit_str}': {e}")
+                            edit = json_repair.loads(str(edit_str))
+                            log.info(f"repaired edits '{json.dumps(edit)}'")
 
-        if not isinstance(edits_raw, str):
-            log.error(
-                f"unexpected edits type, function '{function.name}', args '{edits_raw}', type {type(edits_raw)}")
-        try:
-            edits = json.loads(edits_raw)
-        except json.decoder.JSONDecodeError as e:
-            invalid = True
-            log.info(f"bad edits of function '{function.name}', options: '{edits_raw}': {e}")
-            edits = json_repair.loads(edits_raw)
-            edits_raw = json.dumps(edits)
-            log.info(f"repaired edits '{edits_raw}'")
+                edits[i] = edit
+
         if invalid:
             new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
             return new_function
@@ -123,12 +142,12 @@ def fix_edit_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
     return function
 
 
-def fix_write_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_write_file(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args)
+    target_file, invalid = get_target_file(args, context)
     content = args.get("content")
     if target_file and content:
-        allow_overwrite: bool = args.get("allow_overwrite")
+        allow_overwrite = args.get("allow_overwrite")
 
         if not allow_overwrite:
             invalid = True
@@ -144,11 +163,12 @@ def fix_write_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
     return function
 
 
-def fix_search_for_text(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
     text_snippet = args.get("text_snippet")
     if target_path_or_url and text_snippet:
+        target_path_or_url, fixed = fix_windows_path(target_path_or_url, context)
         is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive")
         if is_case_sensitive is None:
             # log
@@ -158,7 +178,7 @@ def fix_search_for_text(function: ParsedFunctionCall) -> ParsedFunctionCall:
     return function
 
 
-def fix_search_file_by_name(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     glob_pattern = args.get("glob_pattern")
     invalid = not glob_pattern
@@ -180,6 +200,10 @@ def fix_search_file_by_name(function: ParsedFunctionCall) -> ParsedFunctionCall:
     if not search_directory:
         invalid = True
         search_directory = ROOT
+    else:
+        search_directory, fixed = fix_windows_path(search_directory, context)
+        if fixed:
+            invalid = True
 
     if invalid:
         log.info(
@@ -189,9 +213,9 @@ def fix_search_file_by_name(function: ParsedFunctionCall) -> ParsedFunctionCall:
     return function
 
 
-def fix_read_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args)
+    target_file, invalid = get_target_file(args, context)
 
     anonymous_arguments = function.anonymous_arguments
     if not target_file and anonymous_arguments:
@@ -225,7 +249,7 @@ def fix_read_file(function: ParsedFunctionCall) -> ParsedFunctionCall:
     return function
 
 
-def get_target_file(args) -> tuple[str, bool]:
+def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
     target_file = args.get("target_file")
 
     invalid = not target_file
@@ -242,10 +266,15 @@ def get_target_file(args) -> tuple[str, bool]:
         if not target_file:
             invalid = True
             target_file = args.get("path")
+
+    target_file, fixed = fix_windows_path(target_file, context)
+    if fixed:
+        invalid = True
+
     return target_file, invalid
 
 
-def fix_list_dir(function: ParsedFunctionCall) -> ParsedFunctionCall:
+def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     directory_path = args.get("directory_path")
     invalid = False
@@ -266,13 +295,61 @@ def fix_list_dir(function: ParsedFunctionCall) -> ParsedFunctionCall:
         invalid = True
         depth = 5 if root else 2
 
+    directory_path, fixed = fix_windows_path(directory_path, context)
+    if fixed:
+        invalid = True
+
     if invalid:
         log.info(
             f"fix invalid {function.name}: directory_path={directory_path}, depth={depth}")
         new_function = ListDir().new_call(directory_path=directory_path, depth=depth)
         return new_function
+    else:
+        return function
 
-    return function
+
+def is_windows(context: UserContext | None):
+    return "windows" in context.os.lower() if context and context.os else False
+
+
+def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+    args = get_args(function)
+
+    working_directory = args.get("working_directory")
+    command = args.get("command")
+    is_background = args.get("is_background")
+    invalid = False
+    if not is_background:
+        invalid = True
+        is_background = False
+    safe_to_run = args.get("safe_to_run")
+    if not safe_to_run:
+        invalid = True
+        safe_to_run = False
+
+    working_directory, fixed = fix_windows_path(working_directory, context)
+    if fixed:
+        invalid = True
+
+    if invalid:
+        log.info(
+            f"fix invalid {function.name}: command={command}, working_directory={working_directory}, "
+            f"is_background={is_background}, safe_to_run={safe_to_run}")
+        new_function = RunCommand().new_call(command=command, working_directory=working_directory,
+                                             is_background=is_background, safe_to_run=safe_to_run)
+        return new_function
+    else:
+        return function
+
+
+def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any, bool]:
+    fixed = False
+    if path and isinstance(path, str) and is_windows(context):
+        # SERA case
+        if path.startswith("/"):
+            fixed = True
+            path = path[1:]
+    return path, fixed
 
 
 def get_args(function: ParsedFunctionCall) -> dict[str, Any]:

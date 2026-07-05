@@ -1,0 +1,24 @@
+<tool_call>
+{
+"name": "list_dir",
+"arguments": {
+"directory_path": "C:/"
+}
+}
+<tool_call>
+{
+"name": "search_file_by_name",
+"arguments": {
+"glob_pattern": "**/*Test*",
+"search_directory": ".",
+"is_case_sensitive": true
+}
+}
+<tool_call>
+{
+"name": "write_file",
+"arguments": {
+"target_file": "C:/test.txt",
+"content": "text",
+"allow_overwrite": false
+}

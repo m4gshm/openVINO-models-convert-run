@@ -17,7 +17,8 @@ from starlette.responses import StreamingResponse
 
 from agent import inference
 from agent.client.tool_select_options import detect_select_options
-from agent.client.veai import is_veai_agent
+from agent.client.user_context import UserContext
+from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
 from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.openai import GenerateConfig, completions_api
@@ -57,7 +58,7 @@ class BaseController(ABC):
         self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         self.log_inference_generated = logging.getLogger(inference.log.name + ".generated")
-        self.log_inference_token_metrics  = logging.getLogger(inference.log.name + ".token_metrics")
+        self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
 
     def shutdown(self):
@@ -71,12 +72,12 @@ class BaseController(ABC):
         )])
 
     def new_generation_config(self,
-                              prompt: str | None,
                               temperature: float | None,
                               max_tokens: int | None,
                               max_completion_tokens: int | None,
                               top_p: float | None,
                               frequency_penalty: float | None,
+                              apply_chat_template: bool = True,
                               logprobs: bool | None = None,
                               stop: list[str] | str | None = None,
                               ) -> GenerationConfig:
@@ -87,7 +88,7 @@ class BaseController(ABC):
         max_length = max_tokens or self.generate_config.max_tokens
         if max_length:
             generation_config.max_length = max_length
-        generation_config.apply_chat_template = False if prompt else True
+        generation_config.apply_chat_template = apply_chat_template
 
         temp = temperature or self.generate_config.temperature
         if not temp or temp <= 0.0:
@@ -115,6 +116,15 @@ class BaseController(ABC):
         return generation_config
 
     async def chat(self, body: ChatCompletionRequest, request: Request):
+        headers = request.headers
+        host = headers.get("host")
+        user_agent = headers.get("user-agent")
+        x_device_id = headers.get("x-device-id")
+        x_request_id = headers.get("x-request-id")
+
+        log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
+                  f"x_device_id={x_device_id}, x_request_id={x_request_id}")
+
         loop = asyncio.get_event_loop()
 
         # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
@@ -123,8 +133,10 @@ class BaseController(ABC):
         messages = body.messages
 
         is_veai = is_veai_agent(messages)
+        user_context = get_veai_context(messages) if is_veai else None
 
         last_message = messages[-1] if messages else None
+
         stream = body.stream == True
         if last_message:
             if is_middleware_checkpoint(last_message):
@@ -142,34 +154,32 @@ class BaseController(ABC):
 
         tools_raw, function_by_name = group_function_by_name(tools, is_veai)
 
-        chat_history = new_chat_history(messages, tools_raw)
-
         tokenizer = self.tokenizer
         extra_context = {}
         # if self.generate_config.reasoning_supported:
         #     extra_context["enable_thinking"] = is_reasoning_enabled
 
+        chat_history = new_chat_history(messages, tools_raw)
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
-                                                    tools=tools_raw,
                                                     extra_context=extra_context,
                                                     chat_template=self.chat_template)
 
-        if self.generate_config.preprocess_prompt_by_parser:
-            full_prompt = self.parser.process_chat_prompt(full_prompt)
+        # if self.generate_config.preprocess_prompt_by_parser:
+        #     full_prompt = self.parser.process_chat_prompt(full_prompt)
 
         self.log_inference_prompt.debug(full_prompt)
 
-        generation_config = self.new_generation_config(prompt=full_prompt, temperature=body.temperature,
+        generation_config = self.new_generation_config(temperature=body.temperature,
                                                        max_tokens=body.max_tokens,
                                                        max_completion_tokens=body.max_completion_tokens,
                                                        top_p=body.top_p, frequency_penalty=body.frequency_penalty,
                                                        logprobs=body.logprobs, stop=body.stop)
 
         chunk_generator = self.chunk_generator(
-            prompt=full_prompt, generation_config=generation_config, tokenizer=tokenizer,
+            prompt=full_prompt, chat_history=chat_history, generation_config=generation_config, tokenizer=tokenizer,
             init_chat_events=True, is_stop=lambda: is_disconnected(loop, request),
-            is_veai=is_veai, function_by_name=function_by_name)
+            is_veai=is_veai, user_context=user_context, function_by_name=function_by_name)
         if stream:
             return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
         else:
@@ -179,9 +189,11 @@ class BaseController(ABC):
                 finish_reason=finish_reason, stream=False)
 
     @abstractmethod
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, tokenizer: Tokenizer,
+    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+                        tokenizer: Tokenizer,
                         init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None
+                        function_by_name: dict[str, FunctionDefinition] | None = None,
+                        user_context: UserContext | None = None,
                         ) -> Generator[CompletionResponse, None, None]:
         pass
 
@@ -214,7 +226,7 @@ class BaseController(ABC):
 
         self.log_inference_prompt.debug(prompt)
 
-        generation_config = self.new_generation_config(prompt=prompt, temperature=body.temperature,
+        generation_config = self.new_generation_config(temperature=body.temperature,
                                                        max_tokens=None,
                                                        max_completion_tokens=body.max_tokens,
                                                        top_p=None, frequency_penalty=None,
@@ -229,8 +241,8 @@ class BaseController(ABC):
 
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               init_chat_events=False, tokenizer=self.tokenizer,
-                                               is_veai=False, is_stop=lambda: is_disconnected(loop, request))
+                                               tokenizer=self.tokenizer, init_chat_events=False,
+                                               is_stop=lambda: is_disconnected(loop, request), is_veai=False)
 
         def chunk_converter(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[
             completions_api.CompletionResponse, None, None]:

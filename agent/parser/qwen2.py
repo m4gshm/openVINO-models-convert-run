@@ -97,6 +97,8 @@ class Qwen2Parser(QwenBaseParser):
             call_block_rstrip = call_block.rstrip()
             if call_block_rstrip.endswith(TOOL_CALL_END):
                 call_block = call_block_rstrip[:-len(TOOL_CALL_END)]
+            else:
+                partial = True
 
             call_block = call_block.lstrip()
             function_blocks = call_block.split(FUNCTION_START_PREF)
@@ -116,10 +118,7 @@ class Qwen2Parser(QwenBaseParser):
                     # log
                     continue
 
-                supported_functions = state.supported_functions
-                function = supported_functions.get(func_name) if supported_functions else None
-
-                arguments = parsed_function.get("arguments") if function is not None else {}
+                arguments = parsed_function.get("arguments")
 
                 parsed_calls.append(ParsedFunctionCall(name=func_name, arguments=arguments))
         return parsed_calls, partial

@@ -17,7 +17,7 @@ from agent.server import init_continuous_batching_engine, init_sequential_engine
 from .common.log import logging_config
 from .inference.token_handler import TokenHandlerConfig
 from .parser.gemma4 import Gemma4ChannelParser
-from .parser.qwen3 import Qwen3Parser
+from .parser.qwen3 import Qwen3MoeParser
 
 default_device = "GPU"
 
@@ -40,7 +40,7 @@ class Pipe(Enum):
 
 class ParserType(Enum):
     qwen2 = 'qwen2'
-    qwen3 = 'qwen3'
+    qwen3moe = 'qwen3moe'
     gemma4 = 'gemma4'
 
 
@@ -191,35 +191,35 @@ def main():
     parser_type: ParserType = args.parser
     if not parser_type:
         is_qwen3_5 = any("qwen3_5" in model_arch.lower() for model_arch in model_architectures)
-        is_qwen3 = any("qwen3moe" in model_arch.lower() for model_arch in model_architectures)
+        is_qwen3moe = any("qwen3moe" in model_arch.lower() for model_arch in model_architectures)
+        is_qwen3 = any("qwen3" in model_arch.lower() for model_arch in model_architectures)
         is_qwen2 = any("qwen2" in model_arch.lower() for model_arch in model_architectures)
         is_gemma4 = any("gemma4" in model_arch.lower() for model_arch in model_architectures)
-        if is_qwen3 or is_qwen3_5:
-            parser_type = ParserType.qwen3
-            if not pipe:
-                if is_qwen3_5:
-                    # pipe = Pipe.CB
-                    pipe = Pipe.VLM
-                else:
-                    pipe = Pipe.LLM
-        elif is_qwen2:
-            parser_type = ParserType.qwen2
-            pipe = Pipe.LLM
-        elif is_gemma4:
-            pipe = Pipe.VLM
+        if is_gemma4:
+            pipe = or_default_pipe(pipe, Pipe.VLM)
             parser_type = ParserType.gemma4
+        elif is_qwen3_5:
+                parser_type = ParserType.qwen3moe
+                pipe = or_default_pipe(pipe, Pipe.VLM)
+        elif is_qwen3moe:
+            parser_type = ParserType.qwen3moe
+            pipe = or_default_pipe(pipe, Pipe.LLM)
+        elif is_qwen3 or is_qwen2:
+            parser_type = ParserType.qwen2
+            pipe = or_default_pipe(pipe, Pipe.LLM)
 
     if not pipe:
-        log.error("need define --pipe")
+        log.error(f"need define --pipe for model architectures={model_architectures}")
         sys.exit(1)
 
-    model_parser = Qwen3Parser() if parser_type == ParserType.qwen3 else \
+    model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
                 Parser()
 
     log.info(
-        f"model: path='{model_path}', architectures={model_architectures}, parser='{parser_type}', parser_type='{type(model_parser)}'")
+        f"model: path='{model_path}', architectures={model_architectures}, pipe={pipe}, parser='{parser_type}', "
+        f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
     gpu_pipeline_properties = {
@@ -288,6 +288,10 @@ def main():
 
     log.info(f"listening {args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port, reload=False)
+
+
+def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:
+    return pipe or default
 
 
 if __name__ == "__main__":
