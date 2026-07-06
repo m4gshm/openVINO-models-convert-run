@@ -6,6 +6,19 @@ CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
 CHAT_COMPLETION = "chat.completion"
 
 
+class FunctionCall(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str
+    arguments: str  # JSON string
+
+
+class ToolCall(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    type: str = "function"
+    function: FunctionCall
+
+
 # --- Request Components ---
 
 class ResponseFormat(BaseModel):
@@ -14,12 +27,12 @@ class ResponseFormat(BaseModel):
 
 
 class ChatCompletionMessageParam(BaseModel):
-    """Represents an item in the 'messages' array."""
     model_config = ConfigDict(extra="allow")
     role: str  # "system", "user", "assistant", "tool", or "function"
     content: Optional[Union[str, List[Dict[str, Any]]]] = None
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
+    tool_calls: Optional[List[ToolCall]] = None
 
 
 class FunctionDefinition(BaseModel):
@@ -74,19 +87,6 @@ class ChatCompletionRequest(BaseModel):
 
 
 # --- Response Components ---
-
-class FunctionCall(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    name: str
-    arguments: str  # JSON string
-
-
-class ToolCall(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    id: str
-    type: str = "function"
-    function: FunctionCall
-
 
 class ChatCompletionMessage(BaseModel):
     model_config = ConfigDict(extra="allow")

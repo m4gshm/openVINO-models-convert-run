@@ -10,7 +10,7 @@ import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig
 from pydantic.json import pydantic_encoder
 
-from agent.openai import GenerateConfig, default_generate_config
+from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
 from agent.parser import Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.server import init_continuous_batching_engine, init_sequential_engine
@@ -31,6 +31,7 @@ os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
+log = logging.getLogger(__name__)
 
 class Pipe(Enum):
     CB = 'CB'
@@ -69,14 +70,15 @@ def main():
                              default=None, choices=list(Pipe), help="%(default)s")
     args_parser.add_argument("--attention_backend", type=lambda c: AttentionBackend[c], required=False,
                              default=None, choices=list(AttentionBackend), help="%(default)s")
-    args_parser.add_argument("--no_prefix_caching", type=bool, required=False, default=False, help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
-    args_parser.add_argument("--cache_size", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--cache_precision", type=lambda c: CachePrecision[c], required=False,
                              default=None, choices=list(CachePrecision), help="%(default)s")
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
+                             help="%(default)s")
+    args_parser.add_argument("--scheduler_config_file", type=str, required=False,
+                             default=".config/scheduler_config_file.json",
                              help="%(default)s")
     args = args_parser.parse_args()
 
@@ -104,7 +106,6 @@ def main():
 
     logging.config.dictConfig(base_log_config)
 
-    log = logging.getLogger(__name__)
     log.info("server starting")
 
     model_architectures: set[str] = set()
@@ -130,16 +131,33 @@ def main():
 
     handler_config = TokenHandlerConfig()
 
-    generate_config_file = args.generate_config_file
-    generate_config: GenerateConfig | None = None
-    if generate_config_file:
-        log.info(f"load {generate_config_file}")
+    default_generate_opts = get_default_generate_opts()
+    generate_opts_file = args.generate_config_file
+    generate_opts: GenerateOpts
+    if generate_opts_file:
+        log.info(f"load {generate_opts_file}")
         try:
-            with open(generate_config_file, "r", encoding="utf-8") as file:
-                generate_config: GenerateConfig = GenerateConfig.model_validate_json(file.read())
+            with open(generate_opts_file, "r", encoding="utf-8") as file:
+                generate_opts: GenerateOpts = GenerateOpts.model_validate_json(file.read())
         except FileNotFoundError as e:
             log.error(f"{e}")
             raise e
+    else:
+        generate_opts = default_generate_opts
+
+    default_scheduler_opts = get_default_scheduler_opts()
+    scheduler_opts_file = args.scheduler_config_file
+    scheduler_opts: SchedulerOpts
+    if scheduler_opts_file:
+        log.info(f"load {scheduler_opts_file}")
+        try:
+            with open(scheduler_opts_file, "r", encoding="utf-8") as file:
+                scheduler_opts = SchedulerOpts.model_validate_json(file.read())
+        except FileNotFoundError as e:
+            log.error(f"{e}")
+            raise e
+    else:
+        scheduler_opts = default_scheduler_opts
 
     chat_template = ''
     chat_template_file = args.chat_template_file
@@ -152,32 +170,41 @@ def main():
             log.error(f"{e}")
             raise e
 
-    if not generate_config:
-        generate_config = default_generate_config()
-
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
-        max_prompt_len = generate_config.max_tokens
+        max_prompt_len = generate_opts.max_tokens or default_generate_opts.max_tokens
     device = args.device
     is_device_npu = device == "NPU"
     if not max_prompt_len:
         max_prompt_len = max_position_embeddings
 
-    generate_config.max_tokens = max_prompt_len
-
-    dynamic_split_fuse = True
+    generate_opts.max_tokens = max_prompt_len
 
     scheduler_config = SchedulerConfig()
-    scheduler_config.max_num_batched_tokens = default_batch_size if dynamic_split_fuse else max_prompt_len
+    dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts
+    num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens
+    if dynamic_split_fuse == True and num_batched_tokens:
+        scheduler_config.max_num_batched_tokens = num_batched_tokens
+    else:
+        scheduler_config.max_num_batched_tokens = max_prompt_len
+    opts_cache_size = scheduler_opts.cache_size or default_scheduler_opts.cache_size
+    if opts_cache_size:
+        scheduler_config.cache_size = opts_cache_size
+    cache_interval_multiplier = scheduler_opts.cache_interval_multiplier or default_scheduler_opts.cache_interval_multiplier
+    if cache_interval_multiplier:
+        scheduler_config.cache_interval_multiplier = cache_interval_multiplier
+    opts_max_num_seqs = scheduler_opts.max_num_seqs or default_scheduler_opts.max_num_seqs
+    if opts_max_num_seqs:
+        scheduler_config.max_num_seqs = opts_max_num_seqs
+    if not dynamic_split_fuse is None:
+        scheduler_config.dynamic_split_fuse = dynamic_split_fuse == True
     # scheduler_config.num_kv_blocks = 2048
-    scheduler_config.cache_size = args.cache_size if args.cache_size else 0
-    # scheduler_config.cache_interval_multiplier = 1
     # scheduler_config.num_linear_attention_blocks = 256
-    scheduler_config.max_num_seqs = 1
-    scheduler_config.dynamic_split_fuse = dynamic_split_fuse
     # scheduler_config.use_sparse_attention = True
     # scheduler_config.sparse_attention_config
-    scheduler_config.enable_prefix_caching = False if args.no_prefix_caching else True
+    prefix_caching = scheduler_opts.enable_prefix_caching or default_scheduler_opts.enable_prefix_caching
+    if prefix_caching:
+        scheduler_config.enable_prefix_caching = prefix_caching
     scheduler_config.use_cache_eviction = False
     # max_cache_size = 4096 * 4
     # kv_crush_config = KVCrushConfig(budget=max_cache_size, anchor_point_mode=KVCrushAnchorPointMode.MEAN)
@@ -274,7 +301,7 @@ def main():
                                      device=device,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
-                                     generate_config=generate_config,
+                                     generate_config=generate_opts,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
                                      pipeline_properties=pipeline_properties)
@@ -283,7 +310,7 @@ def main():
                                               model_path=str(model_path),
                                               device=device,
                                               parser=model_parser,
-                                              generate_config=generate_config,
+                                              generate_config=generate_opts,
                                               handler_config=handler_config,
                                               scheduler_config=scheduler_config,
                                               pipeline_properties=pipeline_properties,

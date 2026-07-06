@@ -20,15 +20,19 @@ from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
-from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
-from agent.openai import GenerateConfig, completions_api
+from agent.common.roles import ROLE_TOOL
+from agent.inference.token_handler import markdown_bold, markdown_back_tick
+from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import new_response, new_message, new_tool_call, new_stop_response
 from agent.openai.chat_completions_api import CompletionResponse, ToolCall, ToolDefinition, FunctionDefinition, \
-    ChatCompletionMessageParam, ChatCompletionChoice, ChatCompletionRequest, ChatCompletionMessage
+    ChatCompletionMessageParam, ChatCompletionChoice, ChatCompletionRequest
 from agent.openai.completions_api import CompletionChoice
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.tool_call import PreprocessToolCall
+
+STOP: Literal["stop"] = "stop"
+LENGTH: Literal["length"] = "length"
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ class ControllerConfig(BaseModel):
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateConfig, router: APIRouter, chat_template: str = ''):
+                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
         router.post("/v1/completions")(self.completions)
         router.post("/v1/chat/completions")(self.chat)
         router.get(path="/v1/models", response_model_exclude_none=True)(self.models)
@@ -142,7 +146,7 @@ class BaseController(ABC):
             if is_middleware_checkpoint(last_message):
                 if USER_SELECT_INTERRUPT in str(last_message.content).lower():
                     return new_response(
-                        message=ChatCompletionMessage(role=ROLE_ASSISTANT, content="Interrupted"),
+                        message=new_message(content="Interrupted"),
                         stream=stream, finish_reason="stop")
 
         log.info(f"inbound history messages {len(messages)}")
@@ -200,21 +204,24 @@ class BaseController(ABC):
     def validate_messages(self, messages, tools) -> CompletionResponse | None:
         request_user_select = detect_select_options(tools)
         preprocess_tool_call = PreprocessToolCall()
-        looped_function = preprocess_tool_call.check_loop_calls(messages)
+        looped_function, count = preprocess_tool_call.check_loop_calls(messages)
         if looped_function:
             # log
-            msg = f"Multiple calls of the '{looped_function.name}' tool " \
-                  f"result in the same response '{looped_function.result}'. "
+            msg = looped_function.render_markdown()
             if request_user_select:
                 # log
-                question = request_user_select.new_call(msg + "What to do next?",
-                                                        [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
+                question = request_user_select.new_call(
+                    msg +
+                    "\n\n" +
+                    "Repeated: " + markdown_back_tick(str(count) + "time" if count == 1 else "times") +
+                    "\n\n" + markdown_bold("What to do next?"),
+                    [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
                 tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
                                           function=question.to_openai_function_call())
                 completion_message = new_message(tool_calls=[tool_call])
             else:
                 completion_message = new_message(content=(msg + WARN_GENERATION_IS_INTERRUPTED_))
-            return new_response(message=completion_message, finish_reason="stop")
+            return new_response(message=completion_message, finish_reason=STOP)
         return None
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
@@ -272,7 +279,7 @@ class BaseController(ABC):
                            response_id: str) -> CompletionResponse | None:
         model_name = self.config.model_name
         if encode_size >= max_length:
-            return new_stop_response(response_id, model_name, finish_reason="length",
+            return new_stop_response(response_id, model_name, finish_reason=LENGTH,
                                      content=f"prompt exceeds limit: {encode_size} >= {max_length}")
         return None
 

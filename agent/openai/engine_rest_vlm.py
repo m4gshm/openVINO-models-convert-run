@@ -16,9 +16,10 @@ from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanSt
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
-from agent.openai import GenerateConfig
+from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response
 from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
+from agent.openai.engine_rest import add_stop_signal
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser
 
@@ -28,7 +29,7 @@ log = logging.getLogger(__name__)
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig,
-                 generate_config: GenerateConfig, router: APIRouter, chat_template: str = ''):
+                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
         super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
@@ -207,9 +208,15 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
             return StreamingStatus.STOP
 
         responses, stop_signal = self.streamer.handle_token(tokens)
+        if stop_signal:
+            add_stop_signal(responses, stop_signal)
 
+        finish_reason = None
         if responses:
             for response in responses:
+                for choice in response.choices:
+                    if not finish_reason:
+                        finish_reason = choice.finish_reason
                 self.chunk_queue.put_nowait(response)
 
         if stop_signal == StopSignal.STOP:

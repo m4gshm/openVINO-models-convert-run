@@ -1,0 +1,8 @@
+{
+  "max_num_seqs": 1,
+
+  "dynamic_split_fuse": true,
+  "max_num_batched_tokens": 512,
+
+  "enable_prefix_caching": true
+}

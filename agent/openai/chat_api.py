@@ -7,11 +7,15 @@ from agent.common.roles import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import ChatCompletionMessage, ToolCall, CHAT_COMPLETION_CHUNK, \
     CompletionResponse, CHAT_COMPLETION, FunctionCall, ChatCompletionChoice
 
+EMPTY_CONTENT = ' '
+
 tool_call_counter = itertools.count(start=0)
 
 
 def new_message(content: str | None = None, reasoning_content: str | None = None,
                 tool_calls: list[ToolCall] | None = None) -> ChatCompletionMessage:
+    if not content or reasoning_content or tool_calls:
+        content = EMPTY_CONTENT
     message = ChatCompletionMessage()
     message.role = ROLE_ASSISTANT
     message.content = content
@@ -41,7 +45,8 @@ def new_stop_response(response_id: str | None = None, model: str | None = None,
                         message=new_message(content=content))
 
 
-def new_response(stream: bool = True, message: ChatCompletionMessage = new_message(),
+def new_response(message: ChatCompletionMessage,
+                 stream: bool = True,
                  response_id: str | None = None,
                  finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None,
                  model: str | None = None) -> CompletionResponse:

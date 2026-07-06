@@ -14,7 +14,7 @@ from agent.common.roles import ROLE_ASSISTANT
 from agent.common.time import format_time
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import Phrase
-from agent.openai.chat_api import new_chunk_response, new_tool_call
+from agent.openai.chat_api import new_chunk_response, new_tool_call, new_stop_response
 from agent.openai.chat_completions_api import FunctionDefinition, CompletionResponse, ToolCall
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
@@ -27,12 +27,14 @@ class TokenHandlerConfig(BaseModel):
     prevent_no_assistant_inference_output: bool = True
     no_conversation_counter_erased_max: int = 40
     no_conversation_counter_max: int = 20
+    empty_conversation_counter_max: int = 20
 
 
 class StopSignal(Enum):
     STOP = "stop", GenerationFinishReason.STOP
     TOOL_CALL = "tool_call", GenerationFinishReason.TOOL_CALL
     CANCEL = "cancel", GenerationFinishReason.STOP
+    LENGTH = "length", GenerationFinishReason.LENGTH
 
     def __new__(cls, *args, **kwds):
         obj = object.__new__(cls)
@@ -54,8 +56,15 @@ class StopSignal(Enum):
         return self._finish_reason_
 
 
-def get_finish_str(stop_signal: StopSignal) -> Literal["stop", "length", "tool_calls"]:
-    return "tool_calls" if stop_signal == StopSignal.TOOL_CALL else "stop"
+def get_finish_str(stop_signal: StopSignal) -> Literal["stop", "length", "tool_calls", "content_filter"]:
+    if stop_signal == StopSignal.TOOL_CALL:
+        return "tool_calls"
+    elif stop_signal == StopSignal.CANCEL:
+        return "content_filter"
+    elif stop_signal == StopSignal.LENGTH:
+        return "length"
+    else:
+        return "stop"
 
 
 def get_stop_signal_by_finish_reason(finish_reason: GenerationFinishReason) -> StopSignal | None:
@@ -78,6 +87,31 @@ def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
 
 def to_openai_tool_call(function: ParsedFunctionCall) -> ToolCall:
     return new_tool_call(function.to_openai_function_call())
+
+
+def markdown_bold(value: str) -> str:
+    return "**" + value + "**"
+
+
+def markdown_back_tick(value: str) -> str:
+    return "`" + value + "`"
+
+
+def markdown_file_content(value: str, mime: str = "") -> str:
+    return f"```{mime}\n{value}\n```"
+
+
+def markdown_json(value: str) -> str:
+    return markdown_file_content(value, "json")
+
+
+def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> str | None:
+    return (markdown_bold("Tool call error: " + loop_cause) + "\n") if loop_cause else "" + markdown_file_content(
+        loop_error)
+
+
+def now() -> float:
+    return time.perf_counter()
 
 
 class TokenHandler:
@@ -134,7 +168,7 @@ class TokenHandler:
         is_stop = self.is_stop
         if is_stop and is_stop():
             log.info("stream finished by user disconnected")
-            return [], StopSignal.STOP
+            return [], StopSignal.CANCEL
 
         decoded_tokens = decode(tokens, self.tokenizer)
         return self.process_tokens(decoded_tokens, self.state, self.parser, stop_no_conversations)
@@ -155,6 +189,7 @@ class TokenHandler:
                     return result, stop_signal
         except Exception as e:
             log.error(f"streamer error: {e}", exc_info=e)
+            result.append(new_stop_response(markdown_bold(f"StreamerError:{e}")))
             return result, StopSignal.CANCEL
 
         return result, None
@@ -162,7 +197,7 @@ class TokenHandler:
     def process_token(self, token: str, token_number: int, state: ParserState, parser: Parser,
                       stop_no_conversations=True) -> tuple[
         list[CompletionResponse], StopSignal | None]:
-        now_time = time.perf_counter()
+        now_time = now()
         result: list[CompletionResponse] = []
         stop_signal = None
 
@@ -214,24 +249,25 @@ class TokenHandler:
                 try:
                     self.tool_call_phrase.add_token(token)
                 except LoopError as e:
-                    loop_error = f"{e}"
+                    log.error(f"tool call error: {e}")
+                    loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
                 if loop_error:
-                    result.append(new_chunk_response(role=ROLE_ASSISTANT, content=loop_error))
                     tool_call, stop_signal = self.tool_call_end(state, token)
+                    result.append(new_chunk_response(role=ROLE_ASSISTANT, content=loop_error))
                     result.append(tool_call)
-                    stop_signal = StopSignal.TOOL_CALL
                 else:
                     parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
                     if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
-                        result.append(new_chunk_response(role=ROLE_ASSISTANT, content=f"Long parsing of tool call "
-                                                                                      f"({format_time(self.config.tool_call_parting_duration_warning)})"))
+                        time = format_time(self.config.tool_call_parting_duration_warning)
+                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})")
+                        result.append(new_chunk_response(role=ROLE_ASSISTANT, content=warning_msg))
                         self.tool_call_parsing_long_time_warned = True
                     elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
-                        result.append(
-                            new_chunk_response(role=ROLE_ASSISTANT, content=f"Tool call parsing exceeded time limit"
-                                                                            f" {format_time(self.config.tool_call_parting_duration_limit)}.\n"
-                                                                            f"```\n{self.tool_call_phrase.full}\n```"))
+                        time = format_time(self.config.tool_call_parting_duration_limit)
+                        warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {time}.\n"
+                                                    ) + markdown_file_content(self.tool_call_phrase.full)
+                        result.append(new_chunk_response(role=ROLE_ASSISTANT, content=warning_msg))
                         self.tool_call_parsing_max_time_warned = True
                     tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
                     if tool_call_snapshot_time >= 10:
@@ -239,16 +275,16 @@ class TokenHandler:
                         log.debug(f"tool call part: {self.tool_call_phrase.full}")
             else:
                 loop_error: str | None = None
-
                 try:
                     prev_line = self.phrase.add_token(token)
                 except LoopError as e:
                     prev_line = None
-                    loop_error = f"{e}"
+                    log.error(f"tool call error: {e}")
+                    loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
                 if loop_error:
                     result.append(new_chunk_response(role=state.role, content=loop_error))
-                    stop_signal = StopSignal.STOP
+                    stop_signal = StopSignal.CANCEL
                 else:
                     if self.phrase_tick is None:
                         self.phrase_tick = now_time
@@ -269,13 +305,15 @@ class TokenHandler:
                             log.debug("no more conversations")
                             self.no_conversation_counter += 1
                         if self.no_conversation_counter_erased > self.config.no_conversation_counter_erased_max:
-                            log.debug(
-                                f"empty conversations (erased) limits exceed ({self.no_conversation_counter_erased}), abort inference")
-                            stop_signal = StopSignal.STOP
+                            warning_msg = f"empty conversations (erased) limits exceed ({self.no_conversation_counter_erased}), abort inference"
+                            log.debug(warning_msg)
+                            result.append(new_chunk_response(role=ROLE_ASSISTANT, content=markdown_bold(warning_msg)))
+                            stop_signal = StopSignal.CANCEL
                         elif self.no_conversation_counter > self.config.no_conversation_counter_max:
-                            log.debug(
-                                f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference")
-                            stop_signal = StopSignal.STOP
+                            warning_msg = f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference"
+                            log.warning(warning_msg)
+                            result.append(new_chunk_response(role=ROLE_ASSISTANT, content=markdown_bold(warning_msg)))
+                            stop_signal = StopSignal.CANCEL
                     else:
                         erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
                         is_assistant = ROLE_ASSISTANT == self.state.role
@@ -304,9 +342,9 @@ class TokenHandler:
         log.debug(f"set conversation role {state.role}, prev {self.prev_role}")
 
     def conversation_end(self, state: ParserState, token_number: int) -> tuple[
-        list[CompletionResponse], Literal[StopSignal.CANCEL] | None]:
+        list[CompletionResponse], StopSignal | None]:
         result: list[CompletionResponse] = []
-        stop_signal: Literal[StopSignal.CANCEL] | None = None
+        stop_signal: Literal[StopSignal.TOOL_CALL, StopSignal.CANCEL] | None = None
         if state.get_current_event() == StateEvent.TOOL_CALL:
             # sometimes Qwen3.5 ends tool call by end conversation token
             if log.isEnabledFor(logging.DEBUG):
@@ -315,7 +353,8 @@ class TokenHandler:
             else:
                 log.info("tool call ended by end conversation token")
             state.finish_current_event(StateEvent.TOOL_CALL)
-            result = [self.handle_tool_call(state)]
+            resp, stop_signal = self.handle_tool_call(state)
+            result.append(resp)
         if state.get_current_event() == StateEvent.THINK:
             # The generated text is returned as a normal response because it was already sent as a thought,
             # but the model did not end it with a thought end marker.
@@ -335,10 +374,10 @@ class TokenHandler:
                     f"{state.role} conversation end by: {phrase}, last token num: {token_number}")
                 self.__clean_phrase()
 
-            if self.empty_conversation_counter > 20:
-                log.warning(
-                    f"many empty conversations ({self.empty_conversation_counter}), interrupt inference")
-                result = []
+            if self.empty_conversation_counter > self.config.empty_conversation_counter_max:
+                warning_msg = f"many empty conversations ({self.empty_conversation_counter}), interrupt inference"
+                log.warning(warning_msg)
+                result.append(new_chunk_response(role=ROLE_ASSISTANT, content=markdown_bold(warning_msg)))
                 stop_signal = StopSignal.CANCEL
         state.finish_current_event(StateEvent.CONVERSATION)
         return result, stop_signal
@@ -359,7 +398,7 @@ class TokenHandler:
         else:
             self.expect_role = True
 
-    def handle_tool_call(self, state: ParserState) -> CompletionResponse:
+    def handle_tool_call(self, state: ParserState) -> tuple[CompletionResponse, Literal[StopSignal.TOOL_CALL]]:
         tool_call_expression = self.tool_call_phrase.full
         parsed_function_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
         if len(parsed_function_calls) == 0:
@@ -376,7 +415,7 @@ class TokenHandler:
             chunk = new_chunk_response(role=state.role, tool_calls=list(map(to_openai_tool_call, fixed_tool_calls)))
 
         self.__clean_tool_call_phrase()
-        return chunk
+        return chunk, StopSignal.TOOL_CALL
 
     def tool_call_end(self, state: ParserState, token: str | None) -> tuple[
         CompletionResponse, Literal[StopSignal.TOOL_CALL]]:
@@ -386,10 +425,9 @@ class TokenHandler:
             try:
                 self.tool_call_phrase.add_token(token)
             except LoopError as e:
-                log.debug(f"loop at the end of tool call {self.tool_call_phrase.full}")
+                log.warning(f"loop at the end of tool call {self.tool_call_phrase.full}")
         log.debug(f"tool call end: {self.tool_call_phrase.full}")
-
-        return self.handle_tool_call(state), StopSignal.TOOL_CALL
+        return self.handle_tool_call(state)
 
     def tool_call_start(self, state: ParserState, token: str):
         state.start_event(StateEvent.TOOL_CALL)
@@ -400,13 +438,13 @@ class TokenHandler:
             log.info(f"{state.role} phrase before tool call: '{phrase}'")
             self.__clean_phrase()
 
-        now_time = time.perf_counter()
+        now_time = now()
         self.tool_call_parsing_tick = now_time
         self.tool_call_parsing_start_time = now_time
         self.tool_call_phrase.add_token(token)
 
     def thinking_end(self, state: ParserState):
-        now_time = time.perf_counter()
+        now_time = now()
         state.finish_current_event(expected_state=StateEvent.THINK)
         if state.has_event(StateEvent.TOOL_CALL):
             self.tool_call_parsing_start_time = now_time

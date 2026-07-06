@@ -13,10 +13,10 @@ from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, Generat
     GenerationConfig, Tokenizer, GenerationStatus, ChatHistory
 
 from agent.common.metric_mem import get_current_memory
-from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal, \
-    get_stop_signal_by_finish_reason, get_finish_str
-from agent.openai import GenerateConfig
-from agent.openai.chat_api import new_stop_response
+from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
+    markdown_bold, get_finish_str, StopSignal
+from agent.openai import GenerateOpts
+from agent.openai.chat_api import new_stop_response, EMPTY_CONTENT
 from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser, StateEvent
@@ -26,10 +26,20 @@ log = logging.getLogger(__name__)
 request_counter = itertools.count(start=0)
 
 
+def add_stop_signal(responses: list[CompletionResponse], stop_signal: StopSignal):
+    choices = responses[-1].choices if responses else None
+    finish_reason = get_finish_str(stop_signal)
+    if choices:
+        choices[-1].finish_reason = finish_reason
+    else:
+        responses.append(new_stop_response(finish_reason=finish_reason))
+    return responses
+
+
 class ContinuousBatchingController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
                  handler_config: TokenHandlerConfig,
-                 generate_config: GenerateConfig, router: APIRouter, chat_template: str = ''):
+                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
         super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
@@ -170,42 +180,44 @@ class ContinuousBatchingController(BaseController):
                                     empty_out_counter += 1
                                     if empty_out_counter >= empty_tokens_limit:
                                         self.log_inference.error("empty generation limits exceed")
-                                        yield new_stop_response(response_id, model_name)
+                                        yield new_stop_response(content=markdown_bold(
+                                            f"empty generation limits exceed: {empty_tokens_limit}"),
+                                            response_id=response_id, model=model_name)
                                         return
                                 for k, generation_output in items:
                                     generated_ids = generation_output.generated_ids
                                     self.log_inference_token_metrics.debug(f"generation_output: ids={generated_ids}, "
                                                                            f"score={generation_output.score}, "
                                                                            f"log_probs={generation_output.generated_log_probs}")
+
                                     responses, stop_signal = token_handler.handle_token(generated_ids)
+
+                                    finish_reason = generation_output.finish_reason
+                                    if not stop_signal and finish_reason and finish_reason != GenerationFinishReason.NONE:
+                                        stop_signal = get_stop_signal_by_finish_reason(finish_reason)
+                                        log.debug(f"generation_output has finish_reason '{finish_reason}' converted to "
+                                                  f"stop_signal '{stop_signal}'")
+
+                                    if stop_signal:
+                                        add_stop_signal(responses, stop_signal)
+
                                     for response in responses:
                                         response.id = unique_id
                                         response.model = model_name
                                         yield response
-
-                                    finish_reason = generation_output.finish_reason
-                                    if finish_reason and finish_reason != GenerationFinishReason.NONE:
-                                        stop_signal = get_stop_signal_by_finish_reason(finish_reason)
-                                        if not stop_signal:
-                                            stop_signal = StopSignal.STOP
-                                        yield new_stop_response(finish_reason=get_finish_str(stop_signal),
-                                                                model=model_name, response_id=response_id)
-                                        return
-                                    elif stop_signal:
-                                        generation_handle.stop(stop_signal.finish_reason)
-                                        yield new_stop_response(finish_reason=get_finish_str(stop_signal),
-                                                                model=model_name, response_id=response_id)
+                                    if stop_signal:
                                         return
                         elif started:
                             self.log_inference.debug("no more reads")
                             if token_handler.state.has_event(StateEvent.CONVERSATION):
                                 self.log_inference.debug("force end conversation")
-                                responses, signal = token_handler.conversation_end(token_handler.state, -1)
+                                responses, stop_signal = token_handler.conversation_end(token_handler.state, -1)
+                                if stop_signal:
+                                    add_stop_signal(responses, stop_signal)
                                 for response in responses:
                                     response.id = unique_id
                                     response.model = model_name
                                     yield response
-                            yield stop_response
                             return
 
                 yield from read()
@@ -221,13 +233,13 @@ class ContinuousBatchingController(BaseController):
                                     f"requests={metrics.requests}, "
                                     f"scheduled_requests={metrics.scheduled_requests}"
                                     )
-            self.log_inference_generated.debug("".join(token_handler.generated))
+            self.log_inference_generated.debug(token_handler.phrase.full + token_handler.tool_call_phrase.full)
         except Exception as e:
             self.log_inference.error(f"inference error: {e}", exc_info=e)
             msg = f"{e.args}"
             finish_reason: Literal["length", "stop"] = "length" if "max_length > prompt_len" in msg else "stop"
             yield new_stop_response(finish_reason=finish_reason, response_id=response_id,
-                                    model=self.config.model_name, content="ERROR:" + msg)
+                                    model=self.config.model_name, content=markdown_bold("ERROR: " + msg))
 
         status = generation_handle.get_status()
         if status == GenerationStatus.RUNNING:

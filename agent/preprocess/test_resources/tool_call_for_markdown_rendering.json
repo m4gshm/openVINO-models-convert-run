@@ -1,0 +1,23 @@
+[
+  {
+    "content": "\n\n",
+    "role": "assistant",
+    "tool_calls": [
+      {
+        "id": "call_1783352925_34_list_dir",
+        "type": "function",
+        "function": {
+          "name": "list_dir",
+          "arguments": "{\"directory_path\": \"test_dir\", \"depth\": \"2\"}"
+        }
+      }
+    ],
+    "reasoning_content": "Нужно проверить структуру директории storage/tables для поиска файла InputMessages.\n"
+  },
+  {
+    "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: java/idempotent-consumer-jdbc/src/main/java/io/github/m4gshm/idempotent/consumer/storage\"}",
+    "role": "tool",
+    "name": "list_dir",
+    "tool_call_id": "call_1783352925_34_list_dir"
+  }
+]

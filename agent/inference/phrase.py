@@ -152,7 +152,7 @@ class Phrase:
                     break
                 i += 1
                 if i >= DUPLICATED_TOKENS_LIMIT:
-                    raise LoopError(message="duplicated token", payload=token)
+                    raise LoopError(message="Duplicate token looks like the model is in a loop", payload=token)
 
         if token != '\n':
             current_line_tokens = self.current_line_tokens
@@ -177,9 +177,11 @@ class Phrase:
 
                 max_part_rate = max_duplicated_part_amount / total_tokens
                 if max_part_rate > DUPLICATES_IN_LINE_RATE:
-                    duplicated_payload = current_line[
-                        max_duplicated_part_start:max_duplicated_part_start + max_duplicated_part_amount]
-                    raise LoopError(message="duplicated line part", payload="".join(duplicated_payload))
+                    end = max_duplicated_part_start + max_duplicated_part_amount
+                    duplicated_payload = "".join(current_line[
+                                                     max_duplicated_part_start:end])
+                    raise LoopError(message="Duplicate fragments looks like the model is in a loop",
+                                    payload=duplicated_payload)
 
             return None
         else:
@@ -253,7 +255,7 @@ class Phrase:
 
                 if cycle_start and cycle_end:
                     cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
-                    raise LoopError(message="cycled", payload=cycled_phrase)
+                    raise LoopError(message="Cycled phrase looks like the model is in a loop", payload=cycled_phrase)
                 else:
                     duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
                     log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
@@ -261,8 +263,8 @@ class Phrase:
         duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
         duplicated_rate = duplicated_lines_amount / lines_amount
         if duplicated_rate >= DUPLICATED_LINES_RATE_LIMIT and duplicated_lines_amount >= DUPLICATED_LINES_LIMIT:
-            payload = list(self.lines_unique.keys())
-            raise LoopError(message="duplicated lines", payload=payload)
+            payload = "".join(list(self.lines_unique.keys()))
+            raise LoopError(message="Duplicate lines looks like the model is in a loop", payload=payload)
 
         self.clean_current_line()
         return current_line_str

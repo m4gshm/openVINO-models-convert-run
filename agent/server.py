@@ -10,7 +10,7 @@ from openvino_genai import py_openvino_genai
 from agent.common.metric_mem import get_current_memory
 from agent.parser import Parser
 from agent.inference.token_handler import TokenHandlerConfig
-from agent.openai import GenerateConfig
+from agent.openai import GenerateOpts
 from agent.openai.engine_rest import ContinuousBatchingController, ControllerConfig
 from agent.openai.engine_rest_vlm import VlmController
 from agent.openai.logger_rest import LoggingRoute
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 def init_continuous_batching_engine(model: str, model_path: str, device: str, parser: Parser,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
-                                    generate_config=GenerateConfig(), handler_config=TokenHandlerConfig(),
+                                    generate_config=GenerateOpts(), handler_config=TokenHandlerConfig(),
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
@@ -69,7 +69,7 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
 
 
 def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: bool, parser: Parser,
-                           generate_config=GenerateConfig(),
+                           generate_config=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
                            pipeline_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
     if not pipeline_properties:
