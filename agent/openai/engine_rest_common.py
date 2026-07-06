@@ -213,7 +213,7 @@ class BaseController(ABC):
                 question = request_user_select.new_call(
                     msg +
                     "\n\n" +
-                    "Repeated: " + markdown_back_tick(str(count) + "time" if count == 1 else "times") +
+                    "Repeated: " + markdown_back_tick(str(count) + ("time" if count == 1 else "times")) +
                     "\n\n" + markdown_bold("What to do next?"),
                     [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
                 tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
