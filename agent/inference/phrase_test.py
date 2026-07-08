@@ -1,26 +1,23 @@
-import cProfile
-import pstats
-import re
 import unittest
 from importlib.resources import files
+from typing import Any
 
 from agent.inference.loop_error import LoopError
-from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, add_token_to_current_line, \
-    get_ranges_with_duplicates_started_by_token, merge_ranges
+from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
+    get_ranges_with_duplicates_started_by_token, merge_ranges, visualize_duplicate_parts, get_duplicated_parts, \
+    add_token_to_line
 
 TEST_RESOURCES = "test_resources/phrase"
 
 
-def visualize_duplicate_parts(current_line: list[str], duplicated_ranges: dict[int, int]) -> str:
-    result = ""
-    start = 0
-    for dstart, damount in duplicated_ranges.items():
-        if dstart > start:
-            result += "-" * (dstart - start)
-        dend = dstart + damount
-        result += "".join(current_line[dstart:dend])
-        start = dend
-    return result
+def merge(ranges: dict[int, int]) -> dict[Any, Any]:
+    result_ranges = {}
+    if ranges:
+        for k, v in ranges.items():
+            get = result_ranges.get(k, 0)
+            s = max(get, v)
+            result_ranges[k] = s
+    return result_ranges
 
 
 class PhraseTestCase(unittest.TestCase):
@@ -57,17 +54,18 @@ class PhraseTestCase(unittest.TestCase):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line.txt")
         loop_messages = loop_messages_file.read_text(encoding="utf-8")
 
-        current_line = list[str]()
-        current_line_tokens = dict[str, list[int]]()
+        line = list[str]()
+        line_tokens = dict[str, list[int]]()
 
+        line_phrases = dict[str, set[int]]()
+        line_phrases_back = dict[int, set[str]]()
         for i, token in enumerate(loop_messages):
-            add_token_to_current_line(token, current_line, current_line_tokens)
+            add_token_to_line(token, line, line_tokens, line_phrases, line_phrases_back)
 
         result_ranges = {}
         for i, token in enumerate(loop_messages):
-            ranges = get_ranges_with_duplicates_started_by_token(token, current_line_tokens, current_line)
+            ranges = get_ranges_with_duplicates_started_by_token(token, line_tokens, line)
             if ranges:
-                parts = visualize_duplicate_parts(current_line, ranges)
                 for k, v in ranges.items():
                     get = result_ranges.get(k, 0)
                     s = max(get, v)
@@ -75,29 +73,31 @@ class PhraseTestCase(unittest.TestCase):
 
         result_ranges = merge_ranges(result_ranges)
 
-        loop_part = result = visualize_duplicate_parts(current_line, result_ranges)
+        parts = get_duplicated_parts(line, result_ranges)
+
+        loop_part = result = visualize_duplicate_parts(line, result_ranges)
         self.assertEqual('----imoim-lloimport\\nimport\\nimportiiiii', loop_part)
-        #----imoim-lloimport\nimport\nimportiiiii
-        #ilheimoimalloimport\nimport\nimportiiiii
+        # ----imoim-lloimport\nimport\nimportiiiii
+        # ilheimoimalloimport\nimport\nimportiiiii
 
     def test_loop_in_one_line2(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
-        loop_messages_expected_result = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2_result.txt").read_text(encoding="utf-8")
+        loop_messages_expected_result = files(__package__).joinpath(TEST_RESOURCES,
+                                                                    "loop_in_line2_result.txt").read_text(
+            encoding="utf-8")
 
-        current_line = list[str]()
-        current_line_tokens = dict[str, list[int]]()
+        line = list[str]()
+        line_tokens = dict[str, list[int]]()
 
         for i, token in enumerate(loop_messages):
-            add_token_to_current_line(token, current_line, current_line_tokens)
-
-        result_ranges = {}
+            add_token_to_line(token, line, line_tokens)
 
         # profiler = cProfile.Profile()
         # profiler.enable()
 
         # for i, token in enumerate(loop_messages):
         token = 'i'
-        ranges = get_ranges_with_duplicates_started_by_token(token, current_line_tokens, current_line)
+        ranges = get_ranges_with_duplicates_started_by_token(token, line_tokens, line)
 
         # profiler.disable()
 
@@ -105,13 +105,9 @@ class PhraseTestCase(unittest.TestCase):
         # stats = pstats.Stats(profiler).sort_stats('cumtime')
         # stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        if ranges:
-            for k, v in ranges.items():
-                get = result_ranges.get(k, 0)
-                s = max(get, v)
-                result_ranges[k] = s
+        result_ranges = merge(ranges)
+        result = visualize_duplicate_parts(line, result_ranges)
 
-        result = visualize_duplicate_parts(current_line, result_ranges)
         self.maxDiff = None
         self.assertEqual(loop_messages_expected_result, result)
 
@@ -124,10 +120,25 @@ class PhraseTestCase(unittest.TestCase):
 
         duplicates_rate = total_in_duplicates / total_tokens
         max_part_rate = max_part_in_duplicates / total_tokens
-        
+
         pass
 
+    def test_loop_in_one_line3(self):
+        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line3_success_case.txt").read_text(
+            encoding="utf-8")
 
+        line = list[str]()
+        line_tokens = dict[str, list[int]]()
+
+        for i, token in enumerate(loop_messages):
+            add_token_to_line(token, line, line_tokens)
+
+        token = 'n'
+        ranges = get_ranges_with_duplicates_started_by_token(token, line_tokens, line)
+
+        parts = get_duplicated_parts(line, ranges)
+        result = visualize_duplicate_parts(line, ranges)
+        pass
 
 
 if __name__ == '__main__':

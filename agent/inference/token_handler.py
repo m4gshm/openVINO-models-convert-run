@@ -106,7 +106,7 @@ def markdown_json(value: str) -> str:
 
 
 def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> str | None:
-    return (markdown_bold("Tool call error: " + loop_cause) + "\n") if loop_cause else "" + markdown_file_content(
+    return ((markdown_bold("WARNING:" + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
         loop_error)
 
 

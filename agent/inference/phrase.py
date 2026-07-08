@@ -1,6 +1,9 @@
 import logging
+from typing import Any
 
 from agent.inference.loop_error import LoopError
+
+IGNORE_DUPLICATED_PARTS_SIZE = 10
 
 INIT_STEP = 1
 
@@ -11,8 +14,8 @@ DUPLICATED_TOKENS_LIMIT = 100
 DUPLICATED_LINES_RATE_LIMIT = 0.5
 DUPLICATED_LINES_LIMIT = 50
 
-DUPLICATES_IN_LINE_MIN_LINE_LEN = 200
-DUPLICATES_IN_LINE_RATE = 0.3
+DUPLICATES_IN_LINE_MIN_LINE_LEN = 500
+DUPLICATES_IN_LINE_RATE = 0.4
 
 log = logging.getLogger(__name__)
 
@@ -20,10 +23,12 @@ log = logging.getLogger(__name__)
 def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[str, list[int]],
                                                 line: list[str]) -> dict[int, int]:
     token_positions = line_tokens[token]
+
     if len(token_positions) <= 1:
         return {}
     len_line = len(line)
-    cycled = False
+    token_repeats = dict[int, str]()
+    repeated_tokens_start = dict[int, int]()
     check_token_positions = token_positions[:]
     check_token_positions_next_round = []
     duplicate_ranges = dict[int, int]()
@@ -45,7 +50,6 @@ def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[st
         next_token_position = token_position + step
         if next_token_position >= len_line:
             pivot += 1
-            # check_token_positions.pop(pivot)
             continue
         next_token = line[next_token_position]
         next_token_positions = line_tokens[next_token]
@@ -56,9 +60,23 @@ def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[st
             cycled = True
             pivot += 1
             if step == INIT_STEP:
-                duplicate_ranges[token_position] = step + 1
+                repeated_token_start = repeated_tokens_start.get(token_position - 1)
+                already_repeated = False
+                if repeated_token_start:
+                    repeated_token = token_repeats.get(repeated_token_start)
+                    already_repeated = repeated_token == token
+                    if already_repeated:
+                        old_step = token_position - repeated_token_start
+                        duplicate_ranges[repeated_token_start] = old_step + step + 1
+                        repeated_tokens_start[token_position] = repeated_token_start
+
+                if not already_repeated:
+                    duplicate_ranges[token_position] = step + 1
+
+                    token_repeats[token_position] = token
+                    repeated_tokens_start[token_position] = token_position
+                    repeated_tokens_start[token_position + 1] = token_position
             else:
-                # pivot must be moved right
                 duplicates_count = duplicate_ranges.get(next_token_position)
                 step = duplicates_count if duplicates_count else INIT_STEP
             continue
@@ -92,10 +110,10 @@ def get_ranges_with_duplicates_started_by_token(token: str, line_tokens: dict[st
             pivot = 0
         else:
             stop = True
-    return merge_ranges(duplicate_ranges)
+    return merge_intersect_ranges(line, duplicate_ranges)
 
 
-def merge_ranges(duplicate_ranges: dict[int, int]) -> dict[int, int]:
+def merge_ranges(duplicate_ranges: dict[int, int], filter_leq: int | None = None) -> dict[int, int]:
     bitset = 0
     last = 0
     for start, amount in duplicate_ranges.items():
@@ -113,18 +131,254 @@ def merge_ranges(duplicate_ranges: dict[int, int]) -> dict[int, int]:
                 start = i
         elif start:
             finish = i
-            result_ranges[start] = (finish - start)
+            amount = (finish - start)
+            if not filter_leq or amount > filter_leq:
+                result_ranges[start] = amount
             start = None
     return result_ranges
 
 
-def add_token_to_current_line(token: str, current_line: list[str], current_line_tokens: dict[str, list[int]]) -> list[
-    str]:
-    current_line.append(token)
-    token_positions = current_line_tokens.get(token, [])
-    token_positions.append(len(current_line) - 1)
-    current_line_tokens[token] = token_positions
-    return current_line
+def merge_intersect_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> dict[
+    int, int]:
+    bitset = 0
+    last = 0
+    for start, amount in duplicate_ranges.items():
+
+        last = max(last, start + amount)
+        for i in range(amount):
+            start_i = start + i
+            bitset |= 1 << (start_i)
+
+    result_ranges = dict[int, int]()
+    start: int | None = None
+    expected_finish: int | None = None
+    for i in range(last + 1):
+        is_in_range = bool(bitset & (1 << i))
+        if is_in_range:
+            if start is None:
+                start = i
+                amount = duplicate_ranges.get(i)
+                expected_finish = start + amount
+            else:
+                if i == expected_finish:
+                    amount = (i - start)
+                    result_ranges[start] = amount
+
+                    start = i
+                    amount = duplicate_ranges.get(i)
+                    expected_finish = start + amount
+                else:
+                    intersect_amount = duplicate_ranges.get(i)
+                    if intersect_amount:
+                        intersect_expected_finish = i + intersect_amount
+                        new_expected_finish = max(expected_finish, intersect_expected_finish)
+                        expected_finish = new_expected_finish
+        elif start:
+            amount = (i - start)
+            result_ranges[start] = amount
+            start = None
+            expected_finish = None
+    return result_ranges
+
+
+def filter_ranges(duplicate_ranges: dict[int, int], filter_leq: int | None = None) -> dict[int, int]:
+    if filter_leq:
+        for start in list(duplicate_ranges.keys()):
+            amount = duplicate_ranges[start]
+            if amount <= filter_leq:
+                del duplicate_ranges[start]
+
+    return duplicate_ranges
+
+
+def visualize_duplicate_parts(line: list[str], duplicated_ranges: dict[int, int]) -> str:
+    only_duplicates_line: list[str] = []
+    i = 0
+    while i < len(line):
+        amount = duplicated_ranges.get(i)
+        if not amount:
+            only_duplicates_line.append("-")
+            i += 1
+        else:
+            only_duplicates_line.append(line[i])
+            end = i + amount
+            i += 1
+            while i < end:
+                intersect_amount = duplicated_ranges.get(i)
+                if intersect_amount:
+                    intersect_end = i + intersect_amount
+                    end = max(end, intersect_end)
+                only_duplicates_line.append(line[i])
+                i += 1
+
+    result = "".join(only_duplicates_line)
+    return result
+
+
+def get_duplicated_parts(line: list[str], duplicated_ranges: dict[int, int]) -> dict[str, list[int]]:
+    parts = dict[str, list[int]]()
+    for start, amount in duplicated_ranges.items():
+        part = "".join(line[start:start + amount])
+        positions = parts.get(part, [])
+        positions.append(start)
+        parts[part] = positions
+    return parts
+
+
+def add_token_to_line(token1: str, line: list[str], line_tokens: dict[str, list[int]],
+                      line_phrases: dict[str, set[int]], line_phrases_back: dict[int, set[str]]) -> list[str]:
+    line.append(token1)
+    token_positions = line_tokens.get(token1, [])
+    token_positions.append(len(line) - 1)
+    line_tokens[token1] = token_positions
+
+    if len(token_positions) <= 1:
+        return line
+
+    phrases_positions = dict[str, set[int]]()
+    prev_step_phrase_mapping = dict[str, str]()
+
+    phrases = dict[int, set[str]]()
+    for token_position in token_positions:
+        position_phrases = line_phrases_back.get(token_position)
+        if not position_phrases:
+            position_phrases = {token1}
+            line_phrases_back[token_position] = position_phrases
+
+        phrases[token_position] = position_phrases
+
+    step = 1
+    while token_positions:
+        i = len(token_positions) - 1
+
+        phrases_next_round = dict[str, set[int]]()
+        while i >= 0:
+            token_position: int = token_positions[i]
+            prev_token_position = token_position - step
+            if prev_token_position < 0:
+                i -= 1
+                continue
+
+            token = line[token_position]
+            prev_token = line[prev_token_position]
+
+            pref_token_positions = line_tokens.get(prev_token, [])
+            if len(pref_token_positions) <= 1:
+                i -= 1
+                continue
+
+            prev_step_phrases = phrases.get(token_position)
+            for prev_step_phrase in prev_step_phrases:
+                phrase = prev_token + prev_step_phrase
+
+                prev_step_phrase_mapping[phrase] = prev_step_phrase
+
+                phrase_positions = phrases_positions.get(phrase, set[int]())
+                phrase_positions.add(prev_token_position)
+                phrases_positions[phrase] = phrase_positions
+
+                next_round_positions = phrases_next_round.get(phrase, set[int]())
+                next_round_positions.add(prev_token_position)
+
+                phrases_next_round[phrase] = next_round_positions
+            i -= 1
+
+        token_positions_next_round = set[int]()
+        for phrase in list(phrases_next_round.keys()):
+            phrase_positions = phrases_next_round[phrase]
+            if len(phrase_positions) <= 1:
+                del phrases_next_round[phrase]
+            else:
+                prev_step_phrase = prev_step_phrase_mapping.get(phrase)
+                positions = line_phrases.get(phrase, set[int]())
+
+                prev_step_phrase_positions = line_phrases.get(prev_step_phrase) if prev_step_phrase else None
+                expected_prev_step_phrase_positions = set[int]()
+                on_delete_prev_phrase_variants_on_position = dict[str, set[int]]()
+                for position in phrase_positions:
+                    prev_step_phrase_position = position + step
+                    expected_prev_step_phrase_positions.add(prev_step_phrase_position)
+
+                    token_positions_next_round.add(position)
+                    positions.add(position)
+
+                    prev_phrase_variants_on_position = line_phrases_back.get(position)
+                    if prev_phrase_variants_on_position:
+                        for prev_phrase_variant_on_position in list(prev_phrase_variants_on_position):
+                            if len(prev_phrase_variant_on_position) < len(phrase):
+                                prev_phrase_variant_all_positions = line_phrases.get(prev_phrase_variant_on_position)
+
+                                if prev_phrase_variant_all_positions and prev_phrase_variant_all_positions == phrase_positions:
+                                    on_delete_prev_phrase_variants_on_position[prev_phrase_variant_on_position] = set(prev_phrase_variant_all_positions)
+
+                                    # prev_phrase_variant_all_positions.remove(position)
+                                    # if len(prev_phrase_variant_all_positions) == 0:
+                                    #     del line_phrases[prev_phrase_variant_on_position]
+
+                                # prev_phrase_variants_on_position.remove(prev_phrase_variant_on_position)
+
+                        # del line_phrases_back[position]
+
+                    # if prev_step_phrase and prev_step_phrase_positions:
+                    #     prev_step_phrase_position = position + step
+                    #     if prev_step_phrase_position in prev_step_phrase_positions:
+                    #         prev_step_phrase_positions.remove(prev_step_phrase_position)
+                    #     if len(prev_step_phrase_positions) == 0:
+                    #         del line_phrases[prev_step_phrase]
+                    #     prev_step_phrases_on_position = line_phrases_back.get(prev_step_phrase_position, set[str]())
+                    #     prev_step_phrases_on_position.remove(prev_step_phrase)
+                    #     if len(prev_step_phrases_on_position) == 0:
+                    #         del line_phrases_back[prev_step_phrase_position]
+
+
+                    phrases_on_position = line_phrases_back.get(position, set[str]())
+                    phrases_on_position.add(phrase)
+                    line_phrases_back[position] = phrases_on_position
+
+                for on_del_phrase, on_del_positions in on_delete_prev_phrase_variants_on_position.items():
+                    del line_phrases[on_del_phrase]
+                    del_from_line_phrase_back(line_phrases_back, on_del_phrase, on_del_positions)
+
+                line_phrases[phrase] = positions
+
+
+                if prev_step_phrase and expected_prev_step_phrase_positions == prev_step_phrase_positions:
+                    del line_phrases[prev_step_phrase]
+                    del_from_line_phrase_back(line_phrases_back, prev_step_phrase, expected_prev_step_phrase_positions)
+
+
+        token_positions = list(token_positions_next_round)
+        for phrase, positions in phrases_next_round.items():
+            for position in positions:
+                p = phrases.get(position, set[str]())
+                p.add(phrase)
+                phrases[position] = p
+
+    return line
+
+
+def del_from_line_phrase_back(line_phrases_back: dict[int, set[str]], on_del_phrase: str, on_del_positions: set[int]):
+    for on_del_position in on_del_positions:
+        phrases_on_position = line_phrases_back.get(on_del_position)
+        if phrases_on_position:
+            phrases_on_position.remove(on_del_phrase)
+            if len(phrases_on_position) == 0:
+                del line_phrases_back[on_del_position]
+
+
+def updat_back_ref(back_ref: dict[int, set[int]], phrase: str, position: int):
+    i = position + len(phrase) - 1
+    while i >= position:
+        start_positions = back_ref.get(i, set[int]())
+        start_positions.add(position)
+        back_ref[i] = start_positions
+        i -= 1
+
+
+def get_prev_phrases(line: list[str], prev_phrase_starts: set[int] | list[Any], prev_token_position: int) -> dict[
+    str, int]:
+    return {"".join(line[prev_phrase_start:prev_token_position + 1]): prev_phrase_start for
+            i, prev_phrase_start in enumerate(prev_phrase_starts)}
 
 
 class Phrase:
@@ -158,7 +412,7 @@ class Phrase:
             current_line_tokens = self.current_line_tokens
             current_line = self.current_line
 
-            current_line = add_token_to_current_line(token, current_line, current_line_tokens)
+            current_line = add_token_to_line(token, current_line, current_line_tokens)
 
             self.current_line = current_line
             self.current_line_tokens = current_line_tokens
