@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from agent.inference.loop_error import LoopError
 
@@ -191,25 +191,40 @@ def filter_ranges(duplicate_ranges: dict[int, int], filter_leq: int | None = Non
     return duplicate_ranges
 
 
+def visualize_reversed_ranges(line: list[str], reversed_ranges: dict[int, int]) -> str:
+    duplicated_ranges = reverse(reversed_ranges)
+    return visualize_duplicate_parts(line, duplicated_ranges)
+
+
+def reverse(reversed_ranges: dict[int, int]) -> dict[int, int]:
+    duplicated_ranges = {start: end for end, start in reversed_ranges.items()}
+    return duplicated_ranges
+
+
 def visualize_duplicate_parts(line: list[str], duplicated_ranges: dict[int, int]) -> str:
     only_duplicates_line: list[str] = []
     i = 0
     while i < len(line):
-        amount = duplicated_ranges.get(i)
-        if not amount:
+        end = duplicated_ranges.get(i)
+        if not end:
             only_duplicates_line.append("-")
             i += 1
         else:
             only_duplicates_line.append(line[i])
-            end = i + amount
             i += 1
-            while i < end:
-                intersect_amount = duplicated_ranges.get(i)
-                if intersect_amount:
-                    intersect_end = i + intersect_amount
-                    end = max(end, intersect_end)
+            while i <= end:
                 only_duplicates_line.append(line[i])
                 i += 1
+
+    result = "".join(only_duplicates_line)
+    return result
+
+
+def visualize_duplicated_positions(line: list[str], is_in_duplicated: Callable[[int], bool]) -> str:
+    only_duplicates_line: list[str] = ["-"] * len(line)
+    for i, token in enumerate(line):
+        if is_in_duplicated(i):
+            only_duplicates_line[i] = token
 
     result = "".join(only_duplicates_line)
     return result
@@ -225,143 +240,102 @@ def get_duplicated_parts(line: list[str], duplicated_ranges: dict[int, int]) -> 
     return parts
 
 
-def add_token_to_line(token1: str, line: list[str], line_tokens: dict[str, list[int]],
-                      line_phrases: dict[str, set[int]], line_phrases_back: dict[int, set[str]]) -> list[str]:
-    line.append(token1)
-    token_positions = line_tokens.get(token1, [])
+def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[int]],
+                      reversed_ranges: dict[int, int | None], duplicated_positions: set[int]) -> list[str]:
+    line.append(token)
+    token_positions = line_tokens.get(token, [])
     token_positions.append(len(line) - 1)
-    line_tokens[token1] = token_positions
+    line_tokens[token] = token_positions
 
     if len(token_positions) <= 1:
         return line
 
-    phrases_positions = dict[str, set[int]]()
-    prev_step_phrase_mapping = dict[str, str]()
-
-    phrases = dict[int, set[str]]()
+    phrases = dict[str, int | None]()
+    duplicated_phrases = dict[str, set[int]]()
+    touched_positions = set[int]()
     for token_position in token_positions:
-        position_phrases = line_phrases_back.get(token_position)
-        if not position_phrases:
-            position_phrases = {token1}
-            line_phrases_back[token_position] = position_phrases
+        if token_position <= 0:
+            continue
 
-        phrases[token_position] = position_phrases
+        prev_token_position = token_position - 1
+        if prev_token_position < 0:
+            continue
 
-    step = 1
-    while token_positions:
-        i = len(token_positions) - 1
+        if prev_token_position in touched_positions:
+            # intersection
+            continue
 
-        phrases_next_round = dict[str, set[int]]()
-        while i >= 0:
-            token_position: int = token_positions[i]
-            prev_token_position = token_position - step
-            if prev_token_position < 0:
-                i -= 1
-                continue
+        current_token_phrase_position_start = reversed_ranges.get(token_position)
+        if not current_token_phrase_position_start is None:
+            current_token_phrase = "".join(line[current_token_phrase_position_start:token_position + 1])
+            phrases[current_token_phrase] = token_position
+            continue
 
-            token = line[token_position]
-            prev_token = line[prev_token_position]
-
-            pref_token_positions = line_tokens.get(prev_token, [])
-            if len(pref_token_positions) <= 1:
-                i -= 1
-                continue
-
-            prev_step_phrases = phrases.get(token_position)
-            for prev_step_phrase in prev_step_phrases:
-                phrase = prev_token + prev_step_phrase
-
-                prev_step_phrase_mapping[phrase] = prev_step_phrase
-
-                phrase_positions = phrases_positions.get(phrase, set[int]())
-                phrase_positions.add(prev_token_position)
-                phrases_positions[phrase] = phrase_positions
-
-                next_round_positions = phrases_next_round.get(phrase, set[int]())
-                next_round_positions.add(prev_token_position)
-
-                phrases_next_round[phrase] = next_round_positions
-            i -= 1
-
-        token_positions_next_round = set[int]()
-        for phrase in list(phrases_next_round.keys()):
-            phrase_positions = phrases_next_round[phrase]
-            if len(phrase_positions) <= 1:
-                del phrases_next_round[phrase]
+        prev_token_phrase_position_start = reversed_ranges.get(prev_token_position)
+        if prev_token_phrase_position_start is None:
+            prev_tokens_phrases = set(line[prev_token_position])
+            if len(phrases) > 0:
+                for phrase in phrases.keys():
+                    possible_start_position = token_position - (len(phrase) - 1)
+                    possible_phrase = "".join(line[possible_start_position:prev_token_position + 1])
+                    prev_tokens_phrases.add(possible_phrase)
+                pass
             else:
-                prev_step_phrase = prev_step_phrase_mapping.get(phrase)
-                positions = line_phrases.get(phrase, set[int]())
+                pass
+        else:
+            prev_tokens_phrase = "".join(line[prev_token_phrase_position_start:prev_token_position + 1])
+            prev_tokens_phrases = {prev_tokens_phrase}
 
-                prev_step_phrase_positions = line_phrases.get(prev_step_phrase) if prev_step_phrase else None
-                expected_prev_step_phrase_positions = set[int]()
-                on_delete_prev_phrase_variants_on_position = dict[str, set[int]]()
-                for position in phrase_positions:
-                    prev_step_phrase_position = position + step
-                    expected_prev_step_phrase_positions.add(prev_step_phrase_position)
+        # touched_positions.add(token_position)
 
-                    token_positions_next_round.add(position)
-                    positions.add(position)
+        # if token_position in duplicated_positions:
+        #     continue
 
-                    prev_phrase_variants_on_position = line_phrases_back.get(position)
-                    if prev_phrase_variants_on_position:
-                        for prev_phrase_variant_on_position in list(prev_phrase_variants_on_position):
-                            if len(prev_phrase_variant_on_position) < len(phrase):
-                                prev_phrase_variant_all_positions = line_phrases.get(prev_phrase_variant_on_position)
+        for prev_tokens_phrase in prev_tokens_phrases:
+            current_step_phrase = prev_tokens_phrase + token
+            already_set_position = phrases.get(current_step_phrase)
+            if already_set_position is None:
+                phrases[current_step_phrase] = token_position
+            else:
+                start = already_set_position - (len(current_step_phrase) - 1)
+                end = already_set_position
+                touched_positions.update(range(start, end + 1))
 
-                                if prev_phrase_variant_all_positions and prev_phrase_variant_all_positions == phrase_positions:
-                                    on_delete_prev_phrase_variants_on_position[prev_phrase_variant_on_position] = set(prev_phrase_variant_all_positions)
+                start2 = token_position - (len(current_step_phrase) - 1)
+                if not start2 in touched_positions:
+                    duplicated_phrase_positions = duplicated_phrases.setdefault(current_step_phrase, set())
+                    duplicated_phrase_positions.add(already_set_position)
+                    duplicated_phrase_positions.add(token_position)
+                else:
+                    # intersection
+                    pass
 
-                                    # prev_phrase_variant_all_positions.remove(position)
-                                    # if len(prev_phrase_variant_all_positions) == 0:
-                                    #     del line_phrases[prev_phrase_variant_on_position]
-
-                                # prev_phrase_variants_on_position.remove(prev_phrase_variant_on_position)
-
-                        # del line_phrases_back[position]
-
-                    # if prev_step_phrase and prev_step_phrase_positions:
-                    #     prev_step_phrase_position = position + step
-                    #     if prev_step_phrase_position in prev_step_phrase_positions:
-                    #         prev_step_phrase_positions.remove(prev_step_phrase_position)
-                    #     if len(prev_step_phrase_positions) == 0:
-                    #         del line_phrases[prev_step_phrase]
-                    #     prev_step_phrases_on_position = line_phrases_back.get(prev_step_phrase_position, set[str]())
-                    #     prev_step_phrases_on_position.remove(prev_step_phrase)
-                    #     if len(prev_step_phrases_on_position) == 0:
-                    #         del line_phrases_back[prev_step_phrase_position]
-
-
-                    phrases_on_position = line_phrases_back.get(position, set[str]())
-                    phrases_on_position.add(phrase)
-                    line_phrases_back[position] = phrases_on_position
-
-                for on_del_phrase, on_del_positions in on_delete_prev_phrase_variants_on_position.items():
-                    del line_phrases[on_del_phrase]
-                    del_from_line_phrase_back(line_phrases_back, on_del_phrase, on_del_positions)
-
-                line_phrases[phrase] = positions
-
-
-                if prev_step_phrase and expected_prev_step_phrase_positions == prev_step_phrase_positions:
-                    del line_phrases[prev_step_phrase]
-                    del_from_line_phrase_back(line_phrases_back, prev_step_phrase, expected_prev_step_phrase_positions)
-
-
-        token_positions = list(token_positions_next_round)
-        for phrase, positions in phrases_next_round.items():
-            for position in positions:
-                p = phrases.get(position, set[str]())
-                p.add(phrase)
-                phrases[position] = p
+    for phrase, end_phrase_positions in duplicated_phrases.items():
+        for end_phrase_position in end_phrase_positions:
+            prev_token_position = end_phrase_position - 1
+            start_phrase_position = end_phrase_position - (len(phrase) - 1)
+            prev_token_start = reversed_ranges.get(prev_token_position)
+            reversed_ranges[end_phrase_position] = start_phrase_position
+            phrase_new = "".join(line[start_phrase_position:end_phrase_position + 1])
+            if not prev_token_start is None:
+                phrase_old = "".join(line[prev_token_start:prev_token_position + 1])
+                del reversed_ranges[prev_token_position]
+            duplicated_positions.update(range(start_phrase_position, end_phrase_position + 1))
 
     return line
 
 
-def del_from_line_phrase_back(line_phrases_back: dict[int, set[str]], on_del_phrase: str, on_del_positions: set[int]):
-    for on_del_position in on_del_positions:
+def del_phrase(expected_prev_step_phrase_positions: set[int], line_phrases: dict[str, set[int]],
+               line_phrases_back: dict[int, set[str]], prev_step_phrase: str):
+    del line_phrases[prev_step_phrase]
+    del_from_line_phrase_back(prev_step_phrase, expected_prev_step_phrase_positions, line_phrases_back)
+
+
+def del_from_line_phrase_back(phrase: str, positions: set[int], line_phrases_back: dict[int, set[str]]):
+    for on_del_position in positions:
         phrases_on_position = line_phrases_back.get(on_del_position)
         if phrases_on_position:
-            phrases_on_position.remove(on_del_phrase)
+            phrases_on_position.remove(phrase)
             if len(phrases_on_position) == 0:
                 del line_phrases_back[on_del_position]
 
