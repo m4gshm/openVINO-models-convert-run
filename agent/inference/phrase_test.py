@@ -76,8 +76,8 @@ class PhraseTestCase(unittest.TestCase):
         loop_part1 = visualize_reversed_ranges(line, reversed_ranges)
         loop_part2 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
 
-        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part1)
-        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part2)
+        self.assertEqual('----imoim---oimport\\nimport\\nimportiiii-', loop_part1)
+        self.assertEqual('----imoim---oimport\\nimport\\nimportiiii-', loop_part2)
         # ----imoim-lloimport\nimport\nimportiiiii
         # ----im-im----import\nimport\nim----iiii-
         # ----11-11----222222222222222233----4444-
