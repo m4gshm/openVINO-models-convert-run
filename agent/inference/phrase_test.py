@@ -7,7 +7,7 @@ from typing import Any
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
     get_ranges_with_duplicates_started_by_token, visualize_duplicate_parts, get_duplicated_parts, \
-    add_token_to_line, visualize_reversed_ranges, visualize_duplicated_positions
+    add_token_to_line, visualize_reversed_ranges, visualize_duplicated_positions, reverse
 
 TEST_RESOURCES = "test_resources/phrase"
 
@@ -71,11 +71,13 @@ class PhraseTestCase(unittest.TestCase):
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats(10)  # Print the top 10 bottlenecks
 
+        parts = get_duplicated_parts(line, reverse(reversed_ranges))
+
         loop_part1 = visualize_reversed_ranges(line, reversed_ranges)
         loop_part2 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
 
-        self.assertEqual('----im-im----import\\nimport\\nim----iiii-', loop_part1)
-        self.assertEqual('----im-im----import\\nimport\\nim----iiii-', loop_part2)
+        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part1)
+        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part2)
         # ----imoim-lloimport\nimport\nimportiiiii
         # ----im-im----import\nimport\nim----iiii-
         # ----11-11----222222222222222233----4444-
@@ -104,13 +106,6 @@ class PhraseTestCase(unittest.TestCase):
         loop_part1 = visualize_reversed_ranges(line, reversed_ranges)
         loop_part2 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
 
-        # for i, token in enumerate(loop_messages):
-        # token = 'i'
-        # ranges = get_ranges_with_duplicates_started_by_token(token, line_tokens, line)
-        #
-        # result_ranges = merge(ranges)
-        # result = visualize_duplicate_parts(line, result_ranges)
-
         self.maxDiff = None
         self.assertEqual(loop_part2, loop_part1)
         self.assertEqual(loop_messages_expected_result, loop_part1)
@@ -133,15 +128,22 @@ class PhraseTestCase(unittest.TestCase):
 
         line = list[str]()
         line_tokens = dict[str, list[int]]()
+        reversed_ranges = dict[int, int]()
+        duplicated_positions = set[int]()
+
+        profiler = cProfile.Profile()
+        profiler.enable()
 
         for i, token in enumerate(loop_messages):
-            add_token_to_line(token, line, line_tokens)
+            add_token_to_line(token, line, line_tokens, reversed_ranges, duplicated_positions)
 
-        token = 'n'
-        ranges = get_ranges_with_duplicates_started_by_token(token, line_tokens, line)
+        # Format and display the statistics
+        stats = pstats.Stats(profiler).sort_stats('cumtime')
+        stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        parts = get_duplicated_parts(line, ranges)
-        result = visualize_duplicate_parts(line, ranges)
+        loop_part1 = visualize_reversed_ranges(line, reversed_ranges)
+        loop_part2 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
+
         pass
 
 
