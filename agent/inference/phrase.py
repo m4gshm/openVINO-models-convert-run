@@ -241,8 +241,7 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
                       duplicated_reversed_ranges: dict[int, int],
                       duplicated_ranges: dict[int, int],
                       duplicated_words: dict[str, set[int]],
-                      duplicated_positions: set[int],
-                      with_intersections=False) -> list[str]:
+                      duplicated_positions: set[int]) -> list[str]:
     line.append(token)
     token_positions = line_tokens.get(token, [])
     token_positions.append(len(line) - 1)
@@ -262,7 +261,7 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
         if not exists_phrase_start is None:
             phrase_exists = get_word(line, exists_phrase_start, token_position)
             exists_phrases[phrase_exists] = token_position
-            touched_positions.update(range(exists_phrase_start, token_position + 1))
+            # touched_positions.update(range(exists_phrase_start, token_position + 1))
             continue
 
         prev_token_position = token_position - 1
@@ -418,41 +417,40 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
                                         # error
                                         pass
                                     else:
-                                        delete_from_ranges(duplicated_ranges, duplicated_reversed_ranges, position_start,
+                                        delete_from_ranges(duplicated_ranges, duplicated_reversed_ranges,
+                                                           position_start,
                                                            position_end)
                             del duplicated_words[phrase_old]
                     else:
                         is_intersected = True
 
-                if with_intersections or not is_intersected:
-                    if exists_start_phrase_position is None or exists_start_phrase_position > start_position:
-                        exists_end_position = duplicated_ranges.get(start_position)
-                        update_positions = True
-                        if not exists_end_position is None:
-                            if exists_end_position < end_position:
-                                delete_from_ranges(duplicated_ranges, duplicated_reversed_ranges, start_position, exists_end_position)
-                                phrase_exists = get_word(line, start_position, exists_end_position)
-                                word_starts = duplicated_words.setdefault(phrase_exists, set())
-                                word_starts.remove(start_position)
-                                if len(word_starts) == 0:
-                                    del duplicated_words[phrase_exists]
-                            else:
-                                update_positions = False
-                                exists_start = duplicated_reversed_ranges[exists_end_position]
-                                if exists_start is None or exists_start != start_position:
-                                    pass
+                if exists_start_phrase_position is None or exists_start_phrase_position > start_position:
+                    exists_end_position = duplicated_ranges.get(start_position)
+                    update_positions = True
+                    if not exists_end_position is None:
+                        if exists_end_position < end_position:
+                            delete_from_ranges(duplicated_ranges, duplicated_reversed_ranges, start_position, exists_end_position)
+                            phrase_exists = get_word(line, start_position, exists_end_position)
+                            word_starts = duplicated_words.setdefault(phrase_exists, set())
+                            word_starts.remove(start_position)
+                            if len(word_starts) == 0:
+                                del duplicated_words[phrase_exists]
+                        else:
+                            update_positions = False
+                            exists_start = duplicated_reversed_ranges[exists_end_position]
+                            if exists_start is None or exists_start != start_position:
+                                pass
 
-                        if update_positions:
-                            duplicated_reversed_ranges[end_position] = start_position
-                            duplicated_ranges[start_position] = end_position
-                            duplicated_words.setdefault(phrase_new, set()).add(start_position)
-                    elif start_position == exists_start_phrase_position:
-                        pass
-                    else:
-                        # alarm, trying to erase long phrase by short or equals
-                        pass
-                else:
+                    if update_positions:
+                        duplicated_reversed_ranges[end_position] = start_position
+                        duplicated_ranges[start_position] = end_position
+                        duplicated_words.setdefault(phrase_new, set()).add(start_position)
+                elif start_position == exists_start_phrase_position:
                     pass
+                else:
+                    # alarm, trying to erase long phrase by short or equals
+                    pass
+
 
                 duplicated_positions.update(range(start_position, end_position + 1))
 

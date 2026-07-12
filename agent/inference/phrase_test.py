@@ -176,11 +176,63 @@ class PhraseTestCase(unittest.TestCase):
         loop_part3 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
 
         self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part1)
-        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part2)
-        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part3)
+        self.assertEqual(loop_part1, loop_part2)
+        self.assertEqual(loop_part1, loop_part3)
 
         self.assertEqual({'ii': [35, 37], 'im': [7, 4, 29], 'import\\n': [13, 21], 'mport': [14, 22, 30]}, parts)
         self.assertEqual({'iiii': [35], 'im': [7, 4], 'import': [29], 'import\\nimport\\n': [13]}, merged_parts)
+
+    def test_loop_in_one_line4_repeated_consonants(self):
+        loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line4.txt")
+        loop_messages = loop_messages_file.read_text(encoding="utf-8")
+
+        line = list[str]()
+        line_tokens = dict[str, list[int]]()
+        duplicated_reversed_ranges = dict[int, int]()
+        duplicated_ranges = dict[int, int]()
+        duplicated_positions = set[int]()
+        duplicated_words = dict[str, set[int]]()
+
+        profiler = cProfile.Profile()
+        profiler.enable()
+
+        for i, token in enumerate(loop_messages):
+            add_token_to_line(token, line, line_tokens, duplicated_reversed_ranges, duplicated_ranges, duplicated_words,
+                              duplicated_positions)
+
+        # Format and display the statistics
+        stats = pstats.Stats(profiler).sort_stats('cumtime')
+        stats.print_stats(10)  # Print the top 10 bottlenecks
+
+        merged_ranges = merge_word(line, duplicated_ranges, duplicated_words)
+
+        parts = get_duplicated_parts(line, duplicated_ranges)
+        merged_parts = get_duplicated_parts(line, merged_ranges)
+
+        loop_part1 = visualize_duplicated_parts(line, duplicated_ranges)
+        loop_part2 = visualize_duplicated_parts(line, merged_ranges)
+        loop_part3 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
+
+        self.assertEqual(
+            'ribute;At;PersistenceUnitXmlAttribute;PersistenceUnitXmlAttribute;PersistenceUnitXmlAttribute;',
+            loop_part1)
+        self.assertEqual(loop_part1, loop_part2)
+        self.assertEqual(loop_part1, loop_part3)
+
+        self.assertEqual({';PersistenceUnitXml': [9, 37, 65],
+                          'At': [7],
+                          'Att': [56, 28, 84],
+                          'Per': [38, 10, 66],
+                          'Un': [49, 21, 77],
+                          'ce': [47, 19, 75],
+                          'itX': [79, 23, 51],
+                          'ribu': [31, 0, 59, 87],
+                          'sis': [41, 13, 69],
+                          'te;': [35, 4, 63, 91],
+                          'ten': [16, 44, 72]}, parts)
+        self.assertEqual({';PersistenceUnitXmlAttribute;': [37, 65, 9],
+                          'At;PersistenceUnitXml': [7],
+                          'ribute;': [0]}, merged_parts)
 
     def test_loop_in_one_line2(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
