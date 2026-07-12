@@ -6,7 +6,7 @@ from typing import Any
 
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
-    get_ranges_with_duplicates_started_by_token, visualize_duplicate_parts, get_duplicated_parts, \
+    get_duplicated_parts, \
     add_token_to_line, visualize_reversed_ranges, visualize_duplicated_positions, reverse
 
 TEST_RESOURCES = "test_resources/phrase"
@@ -60,12 +60,13 @@ class PhraseTestCase(unittest.TestCase):
         line_tokens = dict[str, list[int]]()
         reversed_ranges = dict[int, int]()
         duplicated_positions = set[int]()
+        duplicated_words = dict[str, set[int]]()
 
         profiler = cProfile.Profile()
         profiler.enable()
 
         for i, token in enumerate(loop_messages):
-            add_token_to_line(token, line, line_tokens, reversed_ranges, duplicated_positions)
+            add_token_to_line(token, line, line_tokens, reversed_ranges, duplicated_words, duplicated_positions)
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
@@ -76,11 +77,8 @@ class PhraseTestCase(unittest.TestCase):
         loop_part1 = visualize_reversed_ranges(line, reversed_ranges)
         loop_part2 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
 
-        self.assertEqual('----imoim---oimport\\nimport\\nimportiiii-', loop_part1)
-        self.assertEqual('----imoim---oimport\\nimport\\nimportiiii-', loop_part2)
-        # ----imoim-lloimport\nimport\nimportiiiii
-        # ----im-im----import\nimport\nim----iiii-
-        # ----11-11----222222222222222233----4444-
+        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part1)
+        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part2)
 
     def test_loop_in_one_line2(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
@@ -92,12 +90,23 @@ class PhraseTestCase(unittest.TestCase):
         line_tokens = dict[str, list[int]]()
         reversed_ranges = dict[int, int]()
         duplicated_positions = set[int]()
+        duplicated_words = dict[str, set[int]]()
 
         profiler = cProfile.Profile()
         profiler.enable()
 
         for i, token in enumerate(loop_messages):
-            add_token_to_line(token, line, line_tokens, reversed_ranges, duplicated_positions)
+            add_token_to_line(token, line, line_tokens, reversed_ranges, duplicated_words, duplicated_positions)
+
+        # for word in list(duplicated_words.keys()):
+        #     ends = duplicated_words[word]
+        #     if len(ends) == 1:
+        #         print("remove "+word)
+        #         del duplicated_words[word]
+        #         for end in ends:
+        #             del reversed_ranges[end]
+
+
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')

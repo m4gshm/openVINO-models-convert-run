@@ -240,7 +240,8 @@ def get_duplicated_parts(line: list[str], duplicated_ranges: dict[int, int]) -> 
 
 
 def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[int]],
-                      reversed_ranges: dict[int, int | None], duplicated_positions: set[int],
+                      duplicated_reversed_ranges: dict[int, int | None], duplicated_words: dict[str, set[int]],
+                      duplicated_positions: set[int],
                       with_intersections=False) -> list[str]:
     line.append(token)
     token_positions = line_tokens.get(token, [])
@@ -260,7 +261,7 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
         if token_position <= 0:
             continue
 
-        exists_phrase_start = reversed_ranges.get(token_position)
+        exists_phrase_start = duplicated_reversed_ranges.get(token_position)
         if not exists_phrase_start is None:
             exists_phrase = "".join(line[exists_phrase_start:token_position + 1])
             exists_phrases[exists_phrase] = token_position
@@ -268,6 +269,7 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
             continue
 
         prev_token_position = token_position - 1
+        next_token_position = token_position + 1
         current_token_phrase = token
 
         if prev_token_position < 0:
@@ -298,7 +300,15 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
                 duplicated_phrase_positions.add(token_position)
                 continue
 
-        prev_phrase_start = reversed_ranges.get(prev_token_position)
+        next_phrase_start = duplicated_reversed_ranges.get(next_token_position)
+        if not next_phrase_start is None:
+            next_prase_len = next_token_position - next_phrase_start + 1
+            if next_prase_len > 1:
+                next_phrase = "".join(line[next_phrase_start:next_prase_len + 1])
+                # already inside another word, skip
+                continue
+
+        prev_phrase_start = duplicated_reversed_ranges.get(prev_token_position)
         phrase_expected_default = "".join(line[prev_token_position:token_position + 1])
         expected_phrase_by_prev_step_position = {phrase_expected_default: None}
         if not prev_phrase_start is None:
@@ -365,12 +375,12 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
                 phrase_start_position = phrase_end_position - (len(phrase) - 1)
                 prev_phrase_end = new_phrases_prev_step_position.get(phrase_end_position)
 
-                prev_step_phrase_start_position = reversed_ranges.get(
+                prev_step_phrase_start_position = duplicated_reversed_ranges.get(
                     prev_phrase_end) if not prev_phrase_end is None else None
 
                 phrase_new = "".join(line[phrase_start_position:phrase_end_position + 1])
 
-                exists_start_phrase_position = reversed_ranges.get(phrase_end_position)
+                exists_start_phrase_position = duplicated_reversed_ranges.get(phrase_end_position)
 
                 is_intersected = False
                 if not prev_step_phrase_start_position is None:
@@ -378,13 +388,31 @@ def add_token_to_line(token: str, line: list[str], line_tokens: dict[str, list[i
                         phrase_old = "".join(line[prev_step_phrase_start_position:prev_phrase_end + 1])
                         # new phrase must full include old phrase for deleting the last one
                         if phrase_start_position <= prev_step_phrase_start_position and phrase_end_position > prev_phrase_end:
-                            del reversed_ranges[prev_phrase_end]
+                            del duplicated_reversed_ranges[prev_phrase_end]
+                            word_position_ends = duplicated_words.get(phrase_old, set())
+                            if word_position_ends:
+                                word_position_ends.remove(prev_phrase_end)
+                            if len(word_position_ends) <= 1:
+                                for position_end  in word_position_ends:
+                                    positions_start = duplicated_reversed_ranges.get(position_end)
+                                    if positions_start is None:
+                                        # error
+                                        pass
+                                    else:
+                                        phrase_no_more_duplicated = "".join(line[positions_start:position_end + 1])
+                                        if phrase_no_more_duplicated != phrase_old:
+                                            # error
+                                            pass
+                                        else:
+                                            del duplicated_reversed_ranges[position_end]
+                                del duplicated_words[phrase_old]
                         else:
                             is_intersected = True
 
                 if with_intersections or not is_intersected:
                     if exists_start_phrase_position is None or exists_start_phrase_position > phrase_start_position:
-                        reversed_ranges[phrase_end_position] = phrase_start_position
+                        duplicated_reversed_ranges[phrase_end_position] = phrase_start_position
+                        duplicated_words.setdefault(phrase_new, set()).add(phrase_end_position)
                     elif phrase_start_position == exists_start_phrase_position:
                         pass
                     else:
