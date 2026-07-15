@@ -6,9 +6,9 @@ from typing import Any
 
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
-    get_duplicated_parts, \
-    register_to_check_duplicates, visualize_duplicated_positions, visualize_duplicated_parts, add_token, \
-    add_check_duplicate_tokens
+    process_duplicate_pairs, visualize_ranges, add_token, \
+    add_check_duplicate_tokens, visualize_reversed_ranges, visualize_tokens, visualize_islands_reversed, \
+    layout_last_island
 
 TEST_RESOURCES = "test_resources/phrase"
 
@@ -23,9 +23,9 @@ def merge(ranges: dict[int, int]) -> dict[Any, Any]:
     return result_ranges
 
 
-def merge_word(line: list[str], duplicated_ranges: dict[int, int], duplicated_words: dict[str, set[int]]) -> dict[
+def merge_word(line: list[str], duplicate_ranges: dict[int, int], duplicated_words: dict[str, set[int]]) -> dict[
     int, int]:
-    merged_ranges = duplicated_ranges.copy()
+    merged_ranges = duplicate_ranges.copy()
     merged_reversed_ranges = dict[int, int]()
     merged_token_positions = set[int]()
     for token_position, token in enumerate(line):
@@ -117,6 +117,24 @@ def update_merged_by_max(merged_word_on_position: dict[int, str], merged_word: s
     return False
 
 
+def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
+    dict[int, int], dict[int, int], dict[int, int], list[str], dict[str, set[int]]]:
+    line = list[str]()
+    line_tokens = dict[str, set[int]]()
+    duplicate_reversed_ranges = dict[int, int]()
+    duplicate_ranges = dict[int, int]()
+    duplicated_words = dict[str, set[int]]()
+    islands = dict[int, int]()
+    duplicates_islands_reversed = dict[int, int]()
+    for i, token in enumerate(loop_messages):
+        add_token(token, line)
+        add_check_duplicate_tokens(line_tokens, token, i)
+        process_duplicate_pairs(token, line, line_tokens, duplicate_reversed_ranges, duplicate_ranges,
+                                duplicated_words, islands, duplicates_islands_reversed)
+
+    return duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens
+
+
 class PhraseTestCase(unittest.TestCase):
     def test_loop_tokens(self):
         repeated_string = "a" + ("b" * DUPLICATED_TOKENS_LIMIT)
@@ -154,198 +172,206 @@ class PhraseTestCase(unittest.TestCase):
             for token in loop_messages:
                 phrase.add_token(token)
 
-        self.assertEqual('', context.exception.payload)
-        self.assertEqual('', context.exception.message)
+        self.assertEqual(('tion;\\nimport io.github.m4gshm.idempotent.consumer.MessageImpl;\\nimport '
+                          'io.github.m4gshm.idempotent.consumer.storage.tables.InputMessages;\\nimport '
+                          'io.r2dbc.postgresql.api.ClientOptions;\\nimport '
+                          'io.r2dbc.postgresql.client.PoolConfig;\\nimport '
+                          'io.r2dbc.postgresql.client.R2DBCClient;\\nimport '
+                          'io.r2dbc.postgresql.codec.CodecRegistry;\\nimport '
+                          'io.r2dbc.postgresql.pgsql96.PgSqlParameterSource;\\nimport '
+                          'org.junit.jupiter.api.BeforeEach;\\nimport '
+                          'org.junit.jupiter.api.Test;\\nimport '
+                          'org.springframework.data.convert.JsonCodec;\\nimport '
+                          'reactor.core.publisher.Flux;\\nimport reactor.core.publisher.Mono;\\nimport '
+                          'reactor.core.scheduler.Schedulers;\\nimport '
+                          'reactor.test.StepVerifier;\\nimport '
+                          'r2dbc.jdbc.JdbcConnectionFactory;\\nimport '
+                          'r2dbc.jdbc.JdbcConnectionPool;\\nimport '
+                          'r2dbc.jdbc.JdbcDatabaseClient;\\nimport '
+                          'r2dbc.jdbc.JdbcTransactionManager;\\nimport '
+                          'r2dbc.jdbc.TransactionDefinition;\\nimport javax.sql.DataSource;\\nimport '
+                          'org.springframework.jdbc.datasource.DriverManagerDataSource;\\nimport '
+                          'org.springframework.jdbc.core.JdbcTemplate;\\nimport '
+                          'org.springframework.transaction.reactive.TransactionalOperator;\\nimport '
+                          'org.springframework.transaction.annotation.EnableTransactionManagement;\\nimport '
+                          'org.springframework.transaction.annotation.Transactional;\\nimport '
+                          'org.springframework.context.annotation.Configuration;\\nimport '
+                          'org.springframework.stereotype.Component;\\nimport '
+                          'org.springframework.boot.autoconfigure.SpringBootApplication;\\nimport '
+                          'org.springframework.boot.SpringApplication;\\nimport '
+                          'org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;\\nimport '
+                          'org.springframework.boot.autoconfigure.security.servlet.SecurityServletAutoConfiguration;\\nimport '
+                          'org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguration;\\nimport '
+                          'org.springframework.data.jpa.repository.JpaRepository;\\nimport '
+                          'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;\\nimport '
+                          'org.springframework.orm.jpa.vendor.DatabasePlatform;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitManager;\\nimport '
+                          'org.springframework.orm.jpa.metamodel.MappingModelGeneratorProcessor;\\nimport '
+                          'org.springframework.orm.jpa.support.EntityManagerCreator;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.DefaultPersistenceUnitManager;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitInfo;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitReader;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlReader;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlWriter;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNodeList;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitNodeVisitor;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNodeList;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitNodeVisitor;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
+                          'org.springf'), context.exception.payload)
+        self.assertEqual('Looks like generating infinity loop', context.exception.message)
 
+    def test_no_loop_but_has_duplicates(self):
+        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line3_success_case.txt").read_text(
+            encoding="utf-8")
+
+        phrase = Phrase()
+        for token in loop_messages:
+            # no error
+            phrase.add_token(token)
+
+        line = phrase.current_line[phrase.in_line_duplicates_detect_start_amount:]
+        unused_tokens_as_end_of_phrase = visualize_tokens(line, phrase.current_line_has_no_pair_tokens)
+        loop_part1 = visualize_reversed_ranges(line, phrase.duplicate_ranges_reversed)
+        loop_part2 = visualize_ranges(line, phrase.duplicate_ranges)
+        visual_islands = visualize_islands_reversed(line, phrase.duplicates_islands_reversed)
+
+        self.assertEqual(('----re\\")\\n\\n    implementation(\\"org.jooq:jooq\\")\\n    '
+                          'implementation(\\"org.jooq:jooq-postgres-extensions\\")\\n}-- "----text": '
+                          '"plugins {\\n    ---------ra---\\n}\\nappl-(plugin '
+                          '--\\"io.-pring.dependenc----nagement\\")\\n\\ndependenc-es {\\n    '
+                          'api(project(\\":-dempotent-cons-me-\\"))\\n    '
+                          'api(project(\\":storage-api-reacti-e\\"))\\n    '
+                          'api(project(\\":postgres-----\\"))\\n\\n    '
+                          'implementation(\\"io.projectreactor-reactor-core\\")\\n'),
+                         loop_part1)
+        self.assertEqual(('    '
+                          '---------------------------------------------------------------------------------- '
+                          '*************************  **    ~~~~~~~~~~~~~~~~~~~~~~~         &&   '
+                          '&&&&&&&&& ++++++++  &&&&& ###############    ++++++++++++++++++++++++ '
+                          '************************* ~~~~~~~~~~~~~~ -- ################################ '
+                          '~~~ ++++++ -----------------------------------    '
+                          '############################################## -----------------'), visual_islands)
+        self.assertEqual((
+                             'figur------------------------------------------\\---------------------------------------p--------e-----i---\\-----", '
+                             '-new_t---"- -p--------------`java-libr-ry`\\--\\---p-y(-------= '
+                             '\\----sp-i-g-d--------y-man-------\\---------------ie------------------------id----t--------um-r\\------------------------s-------a---r-----ve-------------------------p--------jdbc\\-------------------------------p------r------:r----------------'),
+                         unused_tokens_as_end_of_phrase)
+        self.assertEqual(loop_part1, loop_part2)
 
     def test_duplicated_parts_simple(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line.txt")
         loop_messages = loop_messages_file.read_text(encoding="utf-8")
 
-        line = list[str]()
-        line_tokens = dict[str, list[int]]()
-        duplicated_reversed_ranges = dict[int, int]()
-        duplicated_ranges = dict[int, int]()
-        duplicated_positions = set[int]()
-        duplicated_words = dict[str, set[int]]()
-
         profiler = cProfile.Profile()
         profiler.enable()
 
-        for i, token in enumerate(loop_messages):
-            add_token(token, line)
-            add_check_duplicate_tokens(line_tokens, line, token)
-            register_to_check_duplicates(token, line, line_tokens, duplicated_reversed_ranges, duplicated_ranges,
-                                         duplicated_words, duplicated_positions)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
+            loop_messages)
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        merged_ranges = merge_word(line, duplicated_ranges, duplicated_words)
+        unused_tokens_as_end_of_phrase = visualize_tokens(line, line_tokens)
+        loop_part1 = visualize_reversed_ranges(line, duplicate_reversed_ranges)
+        loop_part2 = visualize_ranges(line, duplicate_ranges)
+        visual_islands = visualize_islands_reversed(line, duplicates_islands_reversed)
 
-        parts = get_duplicated_parts(line, duplicated_ranges)
-        merged_parts = get_duplicated_parts(line, merged_ranges)
-
-        loop_part1 = visualize_duplicated_parts(line, duplicated_ranges)
-        loop_part2 = visualize_duplicated_parts(line, merged_ranges)
-        loop_part3 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
-
-        self.assertEqual('----im-im----import\\nimport\\nimportiiii-', loop_part1)
+        self.assertEqual('----imoim---oimport\\nimport\\nimportiiiii', loop_part1)
+        self.assertEqual('    -----   ****************************', visual_islands)
+        self.assertEqual('ilhei-o--allo----------------------i----', unused_tokens_as_end_of_phrase)
         self.assertEqual(loop_part1, loop_part2)
-        self.assertEqual(loop_part1, loop_part3)
-
-        self.assertEqual({'ii': [35, 37], 'im': [7, 4, 29], 'import\\n': [13, 21], 'mport': [14, 22, 30]}, parts)
-        self.assertEqual({'iiii': [35], 'im': [7, 4], 'import': [29], 'import\\nimport\\n': [13]}, merged_parts)
 
     def test_duplicated_parts_repeated_consonants(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line4.txt")
         loop_messages = loop_messages_file.read_text(encoding="utf-8")
 
-        line = list[str]()
-        line_tokens = dict[str, list[int]]()
-        duplicated_reversed_ranges = dict[int, int]()
-        duplicated_ranges = dict[int, int]()
-        duplicated_positions = set[int]()
-        duplicated_words = dict[str, set[int]]()
-
         profiler = cProfile.Profile()
         profiler.enable()
 
-        for i, token in enumerate(loop_messages):
-            add_token(token, line)
-            add_check_duplicate_tokens(line_tokens, line, token)
-            register_to_check_duplicates(token, line, line_tokens, duplicated_reversed_ranges, duplicated_ranges, duplicated_words,
-                                         duplicated_positions)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
+            loop_messages)
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        merged_ranges = merge_word(line, duplicated_ranges, duplicated_words)
-
-        parts = get_duplicated_parts(line, duplicated_ranges)
-        merged_parts = get_duplicated_parts(line, merged_ranges)
-
-        loop_part1 = visualize_duplicated_parts(line, duplicated_ranges)
-        loop_part2 = visualize_duplicated_parts(line, merged_ranges)
-        loop_part3 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
+        unused_tokens_as_end_of_phrase = visualize_tokens(line, line_tokens)
+        loop_part1 = visualize_reversed_ranges(line, duplicate_reversed_ranges)
+        loop_part2 = visualize_ranges(line, duplicate_ranges)
+        visual_islands = visualize_islands_reversed(line, duplicates_islands_reversed)
 
         self.assertEqual(
             'ribute;At;PersistenceUnitXmlAttribute;PersistenceUnitXmlAttribute;PersistenceUnitXmlAttribute;',
             loop_part1)
         self.assertEqual(loop_part1, loop_part2)
-        # self.assertEqual(loop_part1, loop_part3)
-
-        self.assertEqual({';PersistenceUnitXml': [9, 37, 65],
-                          'At': [7],
-                          'Att': [56, 28, 84],
-                          'Per': [38, 10, 66],
-                          'Un': [49, 21, 77],
-                          'ce': [47, 19, 75],
-                          'itX': [79, 23, 51],
-                          'ribu': [31, 0, 59, 87],
-                          'sis': [41, 13, 69],
-                          'te;': [35, 4, 63, 91],
-                          'ten': [16, 44, 72]}, parts)
-        self.assertEqual({';PersistenceUnitXmlAttribute;': [37, 65, 9],
-                          'At;PersistenceUnitXml': [7],
-                          'ribute;': [0]}, merged_parts)
+        self.assertEqual(
+            '----------------------------------------------------------------------------------------------',
+            visual_islands)
+        self.assertEqual(
+            'r------A-;------------------------------------------------------------------------------------',
+            unused_tokens_as_end_of_phrase)
 
     def test_duplicated_parts_big(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
         loop_messages_expected_result = files(__package__).joinpath(TEST_RESOURCES,
                                                                     "loop_in_line2_result.txt").read_text(
             encoding="utf-8")
-        loop_messages_expected_touched_result = files(__package__).joinpath(TEST_RESOURCES,
-                                                                            "loop_in_line2_result2.txt").read_text(
-            encoding="utf-8")
 
-        line = list[str]()
-        line_tokens = dict[str, list[int]]()
-        duplicated_reversed_ranges = dict[int, int]()
-        duplicated_ranges = dict[int, int]()
-        duplicated_positions = set[int]()
-        duplicated_words = dict[str, set[int]]()
+        loop_messages_expected_islands = files(__package__).joinpath(TEST_RESOURCES,
+                                                                     "loop_in_line2_islands.txt").read_text(
+            encoding="utf-8")
 
         profiler = cProfile.Profile()
         profiler.enable()
 
-        for i, token in enumerate(loop_messages):
-            add_token(token, line)
-            add_check_duplicate_tokens(line_tokens, line, token)
-            register_to_check_duplicates(token, line, line_tokens, duplicated_reversed_ranges, duplicated_ranges, duplicated_words,
-                                         duplicated_positions)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
+            loop_messages)
 
-        merged_ranges = merge_word(line, duplicated_ranges, duplicated_words)
+        last_part_islands_reversed = layout_last_island(line, duplicates_islands_reversed)
+        last_part_of_last_part_islands_reversed = layout_last_island(line, last_part_islands_reversed)
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        parts = get_duplicated_parts(line, duplicated_ranges)
-        merged_parts = get_duplicated_parts(line, merged_ranges)
+        island_loop_part1 = visualize_reversed_ranges(line, last_part_of_last_part_islands_reversed)
+        visual_last_island = visualize_islands_reversed(line, last_part_of_last_part_islands_reversed)
 
-        merged_ranges2 = merge_word(line, merged_ranges, {w: set(p) for w, p in merged_parts.items()})
-        merged_parts2 = get_duplicated_parts(line, merged_ranges2)
-
-        merged_ranges3 = merge_word(line, merged_ranges2, {w: set(p) for w, p in merged_parts2.items()})
-        merged_parts3 = get_duplicated_parts(line, merged_ranges3)
-
-        loop_part1 = visualize_duplicated_parts(line, duplicated_ranges)
-        loop_part2 = visualize_duplicated_parts(line, merged_ranges)
-        loop_part3 = visualize_duplicated_parts(line, merged_ranges2)
-        loop_part4 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
+        unused_tokens = visualize_tokens(line, line_tokens)
+        loop_part1 = visualize_reversed_ranges(line, duplicate_reversed_ranges)
+        loop_part2 = visualize_ranges(line, duplicate_ranges)
+        visual_islands = visualize_islands_reversed(line, duplicates_islands_reversed)
 
         self.maxDiff = None
         self.assertEqual(loop_messages_expected_result, loop_part1)
         self.assertEqual(loop_part1, loop_part2)
-        self.assertEqual(loop_part1, loop_part3)
-        self.assertEqual(loop_messages_expected_touched_result, loop_part4)
-
-        # total_tokens = len(loop_messages)
-        # total_in_duplicates = 0
-        # max_part_in_duplicates = 0
-        # for start, amount in result_ranges.items():
-        #     max_part_in_duplicates = max(max_part_in_duplicates, amount)
-        #     total_in_duplicates += amount
-        #
-        # duplicates_rate = total_in_duplicates / total_tokens
-        # max_part_rate = max_part_in_duplicates / total_tokens
-
-        pass
-
-    def test_loop_in_one_line3(self):
-        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line3_success_case.txt").read_text(
-            encoding="utf-8")
-
-        line = list[str]()
-        line_tokens = dict[str, list[int]]()
-        duplicated_reversed_ranges = dict[int, int]()
-        duplicated_ranges = dict[int, int]()
-        duplicated_positions = set[int]()
-        duplicated_words = dict[str, set[int]]()
-
-        profiler = cProfile.Profile()
-        profiler.enable()
-
-        for i, token in enumerate(loop_messages):
-            add_token(token, line)
-            register_to_check_duplicates(token, line, line_tokens, duplicated_reversed_ranges, duplicated_ranges, duplicated_words,
-                                         duplicated_positions)
-
-        merged_ranges = merge_word(line, duplicated_ranges, duplicated_words)
-
-        # Format and display the statistics
-        stats = pstats.Stats(profiler).sort_stats('cumtime')
-        stats.print_stats(10)  # Print the top 10 bottlenecks
-
-        parts = get_duplicated_parts(line, duplicated_ranges)
-        merged_parts = get_duplicated_parts(line, merged_ranges)
-
-        loop_part1 = visualize_duplicated_parts(line, duplicated_ranges)
-        loop_part2 = visualize_duplicated_parts(line, merged_ranges)
-        loop_part3 = visualize_duplicated_positions(line, lambda i: i in duplicated_positions)
+        self.assertEqual(loop_messages_expected_islands, visual_islands)
 
         pass
 
