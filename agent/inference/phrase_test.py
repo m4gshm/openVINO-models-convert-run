@@ -8,7 +8,7 @@ from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
     process_duplicate_pairs, visualize_ranges, add_token, \
     add_check_duplicate_tokens, visualize_reversed_ranges, visualize_tokens, visualize_islands_reversed, \
-    layout_last_island
+    get_last_part_border, layout_last_island
 
 TEST_RESOURCES = "test_resources/phrase"
 
@@ -353,8 +353,10 @@ class PhraseTestCase(unittest.TestCase):
         duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
             loop_messages)
 
-        last_part_islands_reversed = layout_last_island(line, duplicates_islands_reversed)
-        last_part_of_last_part_islands_reversed = layout_last_island(line, last_part_islands_reversed)
+        start, end = get_last_part_border(line, duplicates_islands_reversed)
+        last_part_islands_reversed = layout_last_island(line, start, end)
+        start, end = get_last_part_border(line, last_part_islands_reversed)
+        last_part_of_last_part_islands_reversed = layout_last_island(line, start, end)
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')

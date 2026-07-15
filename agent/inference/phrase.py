@@ -1,5 +1,4 @@
 import logging
-from typing import Callable
 
 from agent.inference.loop_error import LoopError
 
@@ -64,23 +63,6 @@ def visualize_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> str:
     return "".join(result)
 
 
-def visualize_duplicated_positions(line: list[str], is_in_duplicated: Callable[[int], bool]) -> str:
-    result: list[str] = ["-"] * len(line)
-    for i, token in enumerate(line):
-        if is_in_duplicated(i):
-            result[i] = token
-
-    return "".join(result)
-
-
-def get_duplicated_parts(line: list[str], duplicate_ranges: dict[int, int]) -> dict[str, list[int]]:
-    parts = dict[str, list[int]]()
-    for start, end in duplicate_ranges.items():
-        part = "".join(line[start:end + 1])
-        parts.setdefault(part, list[int]()).append(start)
-    return parts
-
-
 def process_duplicate_pairs(token: str,
                             line: list[str],
                             single_tokens: dict[str, set[int]],
@@ -116,16 +98,7 @@ def process_duplicate_pairs(token: str,
     return
 
 
-def layout_last_island(line: list[str], line_duplicates_islands_reversed: dict[int, int]) -> dict[int, int] | None:
-    last_part_start, last_part_end = get_last_part_border(line, line_duplicates_islands_reversed)
-
-    if last_part_start is None or last_part_end is None:
-        return None
-
-    return layout_last_island2(line, last_part_start, last_part_end)
-
-
-def layout_last_island2(line: list[str], start: int, end: int) -> dict[int, int]:
+def layout_last_island(line: list[str], start: int, end: int) -> dict[int, int]:
     token_positions = dict[str, set[int]]()
     duplicate_reversed_ranges = dict[int, int]()
     duplicate_ranges = dict[int, int]()
@@ -386,7 +359,7 @@ class Phrase:
                 last_part_rate = last_part_size / total_tokens_amount
                 if last_part_rate > self.last_part_duplicates_rate and last_part_rate - self.last_island_rate > 0.01:
                     self.last_island_rate = last_part_rate
-                    last_sub_islands = layout_last_island2(duplicates_check_tail, last_part_start, last_part_end)
+                    last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
                     # sub_island_sizes = get_island_sizes(last_sub_islands)
 
                     last_subpart_start, last_subpart_end = get_last_part_border(duplicates_check_tail, last_sub_islands)
