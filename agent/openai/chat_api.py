@@ -39,7 +39,7 @@ def new_delta(role: str | None, content: str | None = None, thinking: bool = Fal
 
 
 def new_stop_response(response_id: str | None = None, model: str | None = None,
-                      finish_reason: Literal["stop", "length", "tool_calls"] = "stop",
+                      finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop",
                       content: str | None = None) -> CompletionResponse:
     return new_response(response_id=response_id, model=model, finish_reason=finish_reason,
                         message=new_message(content=content))
@@ -48,7 +48,7 @@ def new_stop_response(response_id: str | None = None, model: str | None = None,
 def new_response(message: ChatCompletionMessage,
                  stream: bool = True,
                  response_id: str | None = None,
-                 finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None,
+                 finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None,
                  model: str | None = None) -> CompletionResponse:
     if not response_id:
         response_id = str(uuid.uuid4())
@@ -61,7 +61,7 @@ def new_response(message: ChatCompletionMessage,
 def new_chunk_response(role: str | None, response_id: str | None = None, content: str | None = None,
                        thinking: bool = False,
                        tool_calls: Optional[List[ToolCall]] = None,
-                       finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None,
+                       finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None,
                        model: str | None = None) -> CompletionResponse:
     delta = new_delta(role=role, content=content, thinking=thinking, tool_calls=tool_calls)
     return new_response(message=delta, stream=True, response_id=response_id,
@@ -81,7 +81,7 @@ def generate_tool_call_id(func_name: str, ts: int | None = None) -> str:
 
 
 def new_chat_completion_choice(message: ChatCompletionMessage,
-                               finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None,
+                               finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None,
                                stream: bool | None = True) -> ChatCompletionChoice:
     is_stream = stream == True
     return ChatCompletionChoice(delta=(message if is_stream else None),

@@ -13,6 +13,7 @@ __pycache__
 !*.pbtxt
 agent/build/
 build
+bin/
 src_models/venv*
 src_models/Qwen
 src_models/microsoft

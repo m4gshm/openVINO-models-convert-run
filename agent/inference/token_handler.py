@@ -8,6 +8,7 @@ from typing import Sequence, SupportsInt, Callable, List, Literal
 from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason
 from pydantic import TypeAdapter, BaseModel
 
+from agent import inference
 from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.common.roles import ROLE_ASSISTANT
@@ -19,6 +20,7 @@ from agent.openai.chat_completions_api import FunctionDefinition, CompletionResp
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
+log_inference_generated = logging.getLogger(inference.log.name + ".generated")
 
 
 class TokenHandlerConfig(BaseModel):
@@ -116,10 +118,12 @@ def now() -> float:
 
 class TokenHandler:
     def __clean_phrase(self):
+        log_inference_generated.debug(self.phrase.full)
         self.phrase = Phrase()
         self.phrase_tick = None
 
     def __clean_tool_call_phrase(self):
+        log_inference_generated.debug(self.tool_call_phrase.full)
         self.tool_call_phrase = Phrase()
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None

@@ -119,7 +119,7 @@ class ChatCompletionChoice(BaseModel):
     index: int = 0
     delta: ChatCompletionMessage | None = None
     message: ChatCompletionMessage | None = None
-    finish_reason: Optional[Literal["stop", "length", "tool_calls"]] = None
+    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None
     logprobs: Optional[ChoiceLogprobs] = None
 
 

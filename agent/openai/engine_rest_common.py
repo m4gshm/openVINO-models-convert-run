@@ -61,7 +61,6 @@ class BaseController(ABC):
         self.tokenizer = tokenizer
         self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
-        self.log_inference_generated = logging.getLogger(inference.log.name + ".generated")
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
 
@@ -289,11 +288,11 @@ class BaseController(ABC):
 
 
 def make_union(chunk_generator: Generator[CompletionResponse, None, None]) -> tuple[
-    Literal["stop", "length", "tool_calls"], str, str, list[ToolCall]]:
+    Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ToolCall]]:
     full_content = ""
     full_reasoning_content = ""
     full_tool_calls: list[ToolCall] = []
-    finish_reason: Literal["stop", "length", "tool_calls"] = "stop"
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
     for chunk_data in chunk_generator:
         choices = chunk_data.choices

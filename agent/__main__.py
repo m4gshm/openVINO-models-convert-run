@@ -21,7 +21,7 @@ from .parser.qwen3 import Qwen3MoeParser
 
 default_device = "GPU"
 
-default_model = "OmniCoder-9B-int4-sym-g128"
+default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
 default_models_dir = f"./models"
 default_models_cache_dir = f"./models_cache"
 

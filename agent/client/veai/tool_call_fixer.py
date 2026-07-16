@@ -101,9 +101,19 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> 
         if not allow_multiple_matches:
             invalid = True
             allow_multiple_matches = True
+        # qwen3.5 case
+        if isinstance(edits, str):
+            log.debug(f"convert string edits to json object, function='{function.name}', edist='{edits}'")
+            try:
+                edits = json.loads(edits)
+            except json.decoder.JSONDecodeError as e:
+                log.info(f"bad json edits of function='{function.name}', edits='{edits}': {e}")
+                edit = json_repair.loads(str(edits))
+                log.info(f"repaired edits '{json.dumps(edit)}'")
+
         # qwen2 case
         if not isinstance(edits, list):
-            log.error(f"unexpected edits type, function '{function.name}', args '{edits}', type {type(edits)}")
+            log.error(f"unexpected edits type, function='{function.name}', type='{type(edits)}', edits='{edits}'")
         else:
             for i, edit in enumerate(edits):
                 if isinstance(edit, list):
@@ -124,14 +134,14 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> 
                     if edit_str is None:
                         edit = edits
                         log.error(
-                            f"unexpected edits element type, function '{function.name}', element {i} '{edit}', type {type(edit)}")
+                            f"unexpected edits element type, function='{function.name}', element_{i}='{edit}', type {type(edit)}")
                     else:
                         try:
                             edit = json.loads(edit_str)
                         except json.decoder.JSONDecodeError as e:
-                            log.info(f"bad edits of function '{function.name}', options: '{edit_str}': {e}")
+                            log.info(f"bad edits of function='{function.name}', element_{i}='{edit_str}': {e}")
                             edit = json_repair.loads(str(edit_str))
-                            log.info(f"repaired edits '{json.dumps(edit)}'")
+                            log.info(f"repaired element_{i}='{json.dumps(edit)}'")
 
                 edits[i] = edit
 
