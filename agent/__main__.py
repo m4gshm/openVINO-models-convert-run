@@ -53,7 +53,7 @@ class CachePrecision(Enum):
 
 class AttentionBackend(Enum):
     PA = 'PA'
-    SPDA = 'SPDA'
+    SDPA = 'SDPA'
 
 
 def main():

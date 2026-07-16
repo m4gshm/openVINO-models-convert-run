@@ -108,8 +108,8 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> 
                 edits = json.loads(edits)
             except json.decoder.JSONDecodeError as e:
                 log.info(f"bad json edits of function='{function.name}', edits='{edits}': {e}")
-                edit = json_repair.loads(str(edits))
-                log.info(f"repaired edits '{json.dumps(edit)}'")
+                edits = json_repair.loads(str(edits))
+                log.info(f"repaired edits type='{type(edits)}', payload='{json.dumps(edits)}'")
 
         # qwen2 case
         if not isinstance(edits, list):
