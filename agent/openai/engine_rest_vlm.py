@@ -220,6 +220,6 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
             return StreamingStatus.STOP
         elif stop_signal == StopSignal.TOOL_CALL:
             return StreamingStatus.TOOL_CALL_STOP
-        elif stop_signal == StreamingStatus.CANCEL:
+        elif stop_signal == StopSignal.CANCEL:
             return StreamingStatus.CANCEL
         return StreamingStatus.RUNNING
