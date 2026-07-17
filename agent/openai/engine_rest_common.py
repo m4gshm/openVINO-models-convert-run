@@ -50,7 +50,7 @@ class ControllerConfig(BaseModel):
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
+                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
         router.post("/v1/completions")(self.completions)
         router.post("/v1/chat/completions")(self.chat)
         router.get(path="/v1/models", response_model_exclude_none=True)(self.models)
@@ -63,6 +63,7 @@ class BaseController(ABC):
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
+        self.is_fix_tool_type = is_fix_tool_type
 
     def shutdown(self):
         pass
@@ -80,7 +81,7 @@ class BaseController(ABC):
                               max_completion_tokens: int | None,
                               top_p: float | None,
                               frequency_penalty: float | None,
-                              apply_chat_template: bool = True,
+                              apply_chat_template: bool = False,
                               logprobs: bool | None = None,
                               stop: list[str] | str | None = None,
                               ) -> GenerationConfig:
@@ -155,7 +156,7 @@ class BaseController(ABC):
         if invalid_reponse:
             return invalid_reponse
 
-        tools_raw, function_by_name = group_function_by_name(tools, is_veai)
+        tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.is_fix_tool_type)
 
         tokenizer = self.tokenizer
         extra_context = {}
@@ -332,12 +333,12 @@ def new_chat_history(messages: list[BaseModel], tools_raw: list[dict[str, Any]] 
     return chat_history
 
 
-def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool) -> tuple[
+def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is_fix_tool_type: bool = False) -> tuple[
     list[dict[str, Any]], dict[str, FunctionDefinition]]:
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
     for tool in (tools or []):
-        if is_veai:
+        if is_veai and is_fix_tool_type:
             fixed_tool = veai_fix_tool_definition_optional_property_as_null_type(tool)
             tools_raw.append(fixed_tool.model_dump())
         function = tool.function

@@ -29,8 +29,8 @@ log = logging.getLogger(__name__)
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
+                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
@@ -140,11 +140,12 @@ class VlmController(BaseController):
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
                     vlm_pipe: VLMPipeline = pipe
-                    generate_result = vlm_pipe.generate(history=chat_history, generation_config=generation_config,
+
+                    generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 elif isinstance(pipe, LLMPipeline):
                     llm_pipe: LLMPipeline = pipe
-                    generate_result = llm_pipe.generate(inputs=chat_history, generation_config=generation_config,
+                    generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 else:
                     raise NotImplementedError(f"unexpected pipe type {type(pipe)}")

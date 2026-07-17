@@ -39,8 +39,8 @@ def add_stop_signal(responses: list[CompletionResponse], stop_signal: StopSignal
 class ContinuousBatchingController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
                  handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
+                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
