@@ -1,0 +1,1 @@
+<|tool_call>call:write_file{allow_overwrite:true,content:<|"|>payload<|"|>,target_file:<|"|>C:/temp.txt<|"|>}<tool_call|>

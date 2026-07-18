@@ -337,10 +337,10 @@ def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is
     list[dict[str, Any]], dict[str, FunctionDefinition]]:
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
+    is_fix = is_veai and is_fix_tool_type
     for tool in (tools or []):
-        if is_veai and is_fix_tool_type:
-            fixed_tool = veai_fix_tool_definition_optional_property_as_null_type(tool)
-            tools_raw.append(fixed_tool.model_dump())
+        tool_ = veai_fix_tool_definition_optional_property_as_null_type(tool) if is_fix else tool
+        tools_raw.append(tool_.model_dump())
         function = tool.function
         function_by_name[function.name] = function
     return tools_raw, function_by_name

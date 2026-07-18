@@ -3,6 +3,7 @@ import json
 import logging.config
 import os
 import sys
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -104,7 +105,9 @@ def main():
         model_path = Path(f"{args.models_dir}/{model}")
 
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
-    base_log_config = logging_config(f"./logs/{model_name}")
+    logs_dir = f"./logs/{model_name}/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
+    base_log_config = logging_config(logs_dir)
+    log.info(f"logs dir {logs_dir}")
 
     # uvcorn_logs = uvicorn.config.LOGGING_CONFIG
     # uvcorn_logs["formatters"]["default"]["format"] = log_format_simple

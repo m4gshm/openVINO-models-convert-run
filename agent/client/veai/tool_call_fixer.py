@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 
 import json_repair
@@ -235,13 +236,18 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = No
     if not target_file:
         log.error(f"no target file for function '{function.name}'")
     else:
-        start_line = as_int_or_none(args.get("start_line"), "start_line")
-        end_line = as_int_or_none(args.get("end_line"), "end_line")
-        line_offset = as_int_or_none(args.get("line_offset"), "line_offset")
+        start_line, fixed = as_int_or_none(args.get("start_line"), "start_line")
+        invalid |= fixed
+        end_line, fixed = as_int_or_none(args.get("end_line"), "end_line")
+        invalid |= fixed
+        line_offset, fixed = as_int_or_none(args.get("line_offset"), "line_offset")
+        invalid |= fixed
 
-        if line_offset:
-            pass
-        else:
+        if line_offset and (start_line or end_line):
+            invalid = True
+            line_offset = None
+
+        if not line_offset:
             if not start_line:
                 invalid = True
                 start_line = 1
@@ -251,7 +257,7 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = No
         if invalid:
             log.info(
                 f"fix invalid {function.name}: target_file={target_file}, start_line={start_line}, "
-                f"end_line={end_line}")
+                f"end_line={end_line}, line_offset={line_offset}")
             new_function = ReadFile().new_call(target_file=target_file, start_line=start_line, end_line=end_line,
                                                line_offset=line_offset)
             return new_function
@@ -366,8 +372,15 @@ def get_args(function: ParsedFunctionCall) -> dict[str, Any]:
     return function.arguments or {}
 
 
-def as_int_or_none(val, name: str) -> int | None:
-    return as_type_or_none(int, val, name)
+def as_int_or_none(val, name: str) -> tuple[int | None, bool]:
+    result = as_type_or_none(int, val, name)
+    if result is not None:
+        return result, False
+    if isinstance(val, str):
+        match = re.search(r'-\d+|\d+', val)
+        return int(match.group()) if match else None, True
+    else:
+        return None, False
 
 
 def as_bool_or_none(val, name: str) -> bool | None:
@@ -379,7 +392,7 @@ def as_type_or_none[T](t: type[T], val, name: str) -> T | None:
         try:
             return t(val)
         except ValueError:
-            log.info(f"{name} is not an {t}: '{val}', '{t(val)}'")
+            log.warning(f"{name} is not an {t}: '{val}'")
     return None
 
 
