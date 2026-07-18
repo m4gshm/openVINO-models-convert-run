@@ -303,15 +303,17 @@ class Phrase:
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.0025):
         self.tokens: list[str] = []
         self.lines: list[str] = []
-        self.current_line: list[str] = []
-        self.current_line_has_no_pair_tokens: dict[str, set[int]] = {}
         self.lines_unique: dict[str, list[int]] = {}
         self.lines_duplicated_times: dict[int, set[str]] = {}
+
+        self.current_line: list[str] = []
+        self.current_line_has_no_pair_tokens: dict[str, set[int]] = {}
         self.duplicate_ranges_reversed = dict[int, int]()
         self.duplicate_ranges = dict[int, int]()
         self.duplicated_words = dict[str, set[int]]()
         self.duplicates_islands = dict[int, int]()
         self.duplicates_islands_reversed = dict[int, int]()
+
         self.last_island_rate = 0.0
         self.in_line_duplicates_detect_start_amount = strat_duplicates_detect_from
         self.last_part_duplicates_rate = last_part_duplicates_rate
@@ -464,3 +466,8 @@ class Phrase:
     def clean_current_line(self):
         self.current_line.clear()
         self.current_line_has_no_pair_tokens.clear()
+        self.duplicate_ranges_reversed.clear()
+        self.duplicate_ranges.clear()
+        self.duplicated_words.clear()
+        self.duplicates_islands.clear()
+        self.duplicates_islands_reversed.clear()

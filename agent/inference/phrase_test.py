@@ -2,7 +2,6 @@ import cProfile
 import pstats
 import unittest
 from importlib.resources import files
-from typing import Any
 
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
@@ -11,110 +10,6 @@ from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
     get_last_part_border, layout_last_island
 
 TEST_RESOURCES = "test_resources/phrase"
-
-
-def merge(ranges: dict[int, int]) -> dict[Any, Any]:
-    result_ranges = {}
-    if ranges:
-        for k, v in ranges.items():
-            get = result_ranges.get(k, 0)
-            s = max(get, v)
-            result_ranges[k] = s
-    return result_ranges
-
-
-def merge_word(line: list[str], duplicate_ranges: dict[int, int], duplicated_words: dict[str, set[int]]) -> dict[
-    int, int]:
-    merged_ranges = duplicate_ranges.copy()
-    merged_reversed_ranges = dict[int, int]()
-    merged_token_positions = set[int]()
-    for token_position, token in enumerate(line):
-        # if token_position in merged_token_positions:
-        #     continue
-        word_start = token_position
-        end = merged_ranges.get(word_start)
-        if not end is None:
-            word = "".join(line[word_start:end + 1])
-            word_starts = duplicated_words.get(word, set())
-
-            merged_word_on_position = dict[int, str]()
-            merged_next_word_starts_on_position = dict[int, set[int]]()
-            for i in range(1, len(word)):
-                for word_start in word_starts:
-                    word_end = word_start + len(word) - 1
-                    next_word_start = word_start + i
-                    is_merged = False
-                    while next_word_start <= (word_end + 1):
-                        next_word_end = merged_ranges.get(next_word_start)
-                        if not next_word_end is None:
-                            if next_word_end > word_end:
-                                # merge
-                                on_merge_word = "".join(line[next_word_start:next_word_end + 1])
-                                # counts = duplicated_words.get(on_merge_word)
-                                merged_word = "".join(line[word_start:next_word_end + 1])
-                                is_merged = update_merged_by_max(merged_word_on_position, merged_word, word_start)
-                                if is_merged:
-                                    merged_next_word_starts_on_position.setdefault(word_start, set()).add(
-                                        next_word_start)
-                            else:
-                                is_merged = True
-                                # del internal word
-                                del merged_ranges[next_word_start]
-                                if next_word_end in merged_reversed_ranges:
-                                    old_start = merged_reversed_ranges.get(next_word_end)
-                                    if not old_start is None and old_start == next_word_start:
-                                        del merged_reversed_ranges[next_word_end]
-                                # todo del duplicated_word
-                        next_word_start += 1
-                    if not is_merged:
-                        update_merged_by_max(merged_word_on_position, word, word_start)
-
-            merged_words = dict[str, set[int]]()
-            for word_start, word in merged_word_on_position.items():
-                merged_words.setdefault(word, set()).add(word_start)
-
-            for word, word_starts in merged_words.items():
-                # if len(word_starts) > 1:
-                for word_start in word_starts:
-                    end = word_start + len(word) - 1
-                    old_wold_end = merged_ranges.get(word_start)
-                    if old_wold_end is not None and old_wold_end >= end:
-                        pass
-                    else:
-                        prev_start = merged_reversed_ranges.get(end)
-                        if prev_start is not None and prev_start <= word_start:
-                            pass
-                        else:
-                            merged_reversed_ranges[end] = word_start
-                            merged_ranges[word_start] = end
-                            merged_words_starts = merged_next_word_starts_on_position.get(word_start)
-                            if merged_words_starts:
-                                for merged_word_start in list(merged_words_starts):
-                                    old_end = merged_ranges.get(merged_word_start)
-                                    if old_end is None:
-                                        # error
-                                        pass
-                                    else:
-                                        del merged_ranges[merged_word_start]
-                                        merged_words_starts.remove(merged_word_start)
-                                        old_start = merged_reversed_ranges.get(old_end)
-                                        if not old_start is None and old_start == merged_word_start:
-                                            del merged_reversed_ranges[old_end]
-
-                                        new_start_of_word_tail = end + 1
-                                        if new_start_of_word_tail <= old_end:
-                                            exists_end = merged_ranges.get(new_start_of_word_tail)
-                                            if exists_end is None or exists_end < old_end:
-                                                merged_ranges[new_start_of_word_tail] = old_end
-    return merged_ranges
-
-
-def update_merged_by_max(merged_word_on_position: dict[int, str], merged_word: str, start: int) -> bool:
-    merger_position_word = merged_word_on_position.get(start)
-    if merger_position_word is None or len(merger_position_word) < len(merged_word):
-        merged_word_on_position[start] = merged_word
-        return True
-    return False
 
 
 def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
@@ -245,6 +140,16 @@ class PhraseTestCase(unittest.TestCase):
                           'org.springf'), context.exception.payload)
         self.assertEqual('Looks like generating infinity loop', context.exception.message)
 
+        phrase.clean_current_line()
+
+        self.assertEqual([], phrase.current_line)
+        self.assertEqual({}, phrase.current_line_has_no_pair_tokens)
+        self.assertEqual({}, phrase.duplicate_ranges)
+        self.assertEqual({}, phrase.duplicate_ranges_reversed)
+        self.assertEqual({}, phrase.duplicated_words)
+        self.assertEqual({}, phrase.duplicates_islands)
+        self.assertEqual({}, phrase.duplicates_islands_reversed)
+
     def test_no_loop_but_has_duplicates(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line3_success_case.txt").read_text(
             encoding="utf-8")
@@ -277,10 +182,10 @@ class PhraseTestCase(unittest.TestCase):
                           '~~~ ++++++ -----------------------------------    '
                           '############################################## -----------------'), visual_islands)
         self.assertEqual((
-                             'figur------------------------------------------\\---------------------------------------p--------e-----i---\\-----", '
-                             '-new_t---"- -p--------------`java-libr-ry`\\--\\---p-y(-------= '
-                             '\\----sp-i-g-d--------y-man-------\\---------------ie------------------------id----t--------um-r\\------------------------s-------a---r-----ve-------------------------p--------jdbc\\-------------------------------p------r------:r----------------'),
-                         unused_tokens_as_end_of_phrase)
+            'figur------------------------------------------\\---------------------------------------p--------e-----i---\\-----", '
+            '-new_t---"- -p--------------`java-libr-ry`\\--\\---p-y(-------= '
+            '\\----sp-i-g-d--------y-man-------\\---------------ie------------------------id----t--------um-r\\------------------------s-------a---r-----ve-------------------------p--------jdbc\\-------------------------------p------r------:r----------------'),
+            unused_tokens_as_end_of_phrase)
         self.assertEqual(loop_part1, loop_part2)
 
     def test_duplicated_parts_simple(self):
