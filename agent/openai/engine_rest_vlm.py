@@ -157,6 +157,7 @@ class VlmController(BaseController):
                 stop_inference = False
                 while not stop_inference:
                     if is_stop():
+                        log.info("inference stopped by signal")
                         break
                     try:
                         chunk = chunk_queue.get(timeout=20)
@@ -205,7 +206,7 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
             log.debug("stream finished by stop signal")
             return StreamingStatus.STOP
 
-        responses, stop_signal = self.streamer.handle_token(tokens)
+        responses, stop_signal = self.streamer.handle_tokens(tokens)
         if stop_signal:
             add_stop_signal(responses, stop_signal)
 

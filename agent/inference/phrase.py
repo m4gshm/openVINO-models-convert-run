@@ -90,11 +90,13 @@ def process_duplicate_pairs(token: str,
             if exists_positions:
                 position_end = next(iter(position_ends))
                 add_duplicated_pair(line, single_tokens, duplicate_ranges, duplicated_ranges_reversed,
-                                    duplicated_words, islands, duplicates_islands_reversed, phrase, position_end)
+                                    duplicated_words, token_positions, islands, duplicates_islands_reversed, phrase,
+                                    position_end)
         else:
             for position_end in position_ends:
                 add_duplicated_pair(line, single_tokens, duplicate_ranges, duplicated_ranges_reversed,
-                                    duplicated_words, islands, duplicates_islands_reversed, phrase, position_end)
+                                    duplicated_words, token_positions, islands, duplicates_islands_reversed, phrase,
+                                    position_end)
     return
 
 
@@ -137,9 +139,14 @@ def get_island_sizes(line_islands_reversed: dict[int, int] | None) -> list[int]:
 
 def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], duplicate_ranges: dict[int, int],
                         duplicated_ranges_reversed: dict[int, int], duplicated_words: dict[str, set[int]],
+                        touched_positions: set[int],
                         islands: dict[int, int], duplicates_islands_reversed: dict[int, int], phrase: str,
                         phrase_end: int):
     phrase_start = phrase_end - (len(phrase) - 1)
+    phrase_end_old = duplicate_ranges.get(phrase_start)
+    if not phrase_end_old is None and phrase_end_old != phrase_end:
+        delete_from_ranges(duplicate_ranges, duplicated_ranges_reversed, duplicated_words, touched_positions, line,
+                           phrase_start, phrase_end_old)
     duplicated_ranges_reversed[phrase_end] = phrase_start
     duplicate_ranges[phrase_start] = phrase_end
     duplicated_words.setdefault(phrase, set[int]()).add(phrase_start)
@@ -313,8 +320,8 @@ class Phrase:
         self.duplicated_words = dict[str, set[int]]()
         self.duplicates_islands = dict[int, int]()
         self.duplicates_islands_reversed = dict[int, int]()
-
         self.last_island_rate = 0.0
+
         self.in_line_duplicates_detect_start_amount = strat_duplicates_detect_from
         self.last_part_duplicates_rate = last_part_duplicates_rate
         self.last_subpart_duplicates_rate = last_subpart_duplicates_rate
@@ -325,143 +332,151 @@ class Phrase:
         join = "".join(self.tokens)
         return join
 
-    def add_token(self, token: str) -> str | None:
-        self.tokens.append(token)
+    def add_token(self, token: str) -> list[str]:
+        added_lines = list[str]()
+        for letter in token:
+            self.tokens.append(letter)
 
-        prev_token = self.tokens[-1]
-        if prev_token == token:
-            i = 1
-            for prev_token in reversed(self.tokens[:-1]):
-                if prev_token != token:
-                    break
-                i += 1
-                if i >= DUPLICATED_TOKENS_LIMIT:
-                    raise LoopError(message="Duplicate token looks like the model is in a loop", payload=token)
+            prev_token = self.tokens[-1]
+            if prev_token == letter:
+                i = 1
+                for prev_token in reversed(self.tokens[:-1]):
+                    if prev_token != letter:
+                        break
+                    i += 1
+                    if i >= DUPLICATED_TOKENS_LIMIT:
+                        raise LoopError(message="Duplicate token looks like the model is in a loop", payload=letter)
 
-        if token != '\n':
-            add_token(token, self.current_line)
-            if len(self.current_line) > self.in_line_duplicates_detect_start_amount:
-                duplicates_check_tail = self.current_line[self.in_line_duplicates_detect_start_amount:]
-                token_positions = self.current_line_has_no_pair_tokens
-                add_check_duplicate_tokens(token_positions, token, len(duplicates_check_tail) - 1)
+            if letter != '\n':
+                add_token(letter, self.current_line)
+                if len(self.current_line) > self.in_line_duplicates_detect_start_amount:
+                    duplicates_check_tail = self.current_line[self.in_line_duplicates_detect_start_amount:]
+                    token_positions = self.current_line_has_no_pair_tokens
+                    add_check_duplicate_tokens(token_positions, letter, len(duplicates_check_tail) - 1)
 
-                process_duplicate_pairs(token, duplicates_check_tail,
-                                        token_positions,
-                                        self.duplicate_ranges_reversed,
-                                        self.duplicate_ranges,
-                                        self.duplicated_words,
-                                        self.duplicates_islands,
-                                        self.duplicates_islands_reversed)
+                    process_duplicate_pairs(letter, duplicates_check_tail,
+                                            token_positions,
+                                            self.duplicate_ranges_reversed,
+                                            self.duplicate_ranges,
+                                            self.duplicated_words,
+                                            self.duplicates_islands,
+                                            self.duplicates_islands_reversed)
 
-                last_part_start, last_part_end = get_last_part_border(duplicates_check_tail,
-                                                                      self.duplicates_islands_reversed)
-                last_part_size = (last_part_end + 1) - last_part_start if (not last_part_start is None and
-                                                                           not last_part_end is None) else 0
-                total_tokens_amount = len(duplicates_check_tail)
-                last_part_rate = last_part_size / total_tokens_amount
-                if last_part_rate > self.last_part_duplicates_rate and last_part_rate - self.last_island_rate > 0.01:
-                    self.last_island_rate = last_part_rate
-                    last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
-                    # sub_island_sizes = get_island_sizes(last_sub_islands)
-
-                    last_subpart_start, last_subpart_end = get_last_part_border(duplicates_check_tail, last_sub_islands)
-                    subpart_size = (last_subpart_end + 1) - last_subpart_start if (not last_subpart_start is None and
-                                                                                   not last_subpart_end is None) else 0
-
-                    delta = total_tokens_amount - last_subpart_end if subpart_size else total_tokens_amount
-                    delta_rate = delta / total_tokens_amount
+                    last_part_start, last_part_end = get_last_part_border(duplicates_check_tail,
+                                                                          self.duplicates_islands_reversed)
+                    last_part_size = (last_part_end + 1) - last_part_start if (not last_part_start is None and
+                                                                               not last_part_end is None) else 0
                     total_tokens_amount = len(duplicates_check_tail)
-                    last_part_rate2 = subpart_size / total_tokens_amount
-                    if delta_rate <= self.last_subpart_end_line_delta_rate and last_part_rate2 >= self.last_subpart_duplicates_rate:
-                        duplicated_payload = "".join(duplicates_check_tail)
-                        raise LoopError(message="Looks like generating infinity loop",
-                                        payload=duplicated_payload)
+                    last_part_rate = last_part_size / total_tokens_amount
+                    if last_part_rate > self.last_part_duplicates_rate and last_part_rate - self.last_island_rate > 0.01:
+                        log.debug(
+                            f"duplicates detector: last_part_rate={last_part_rate}, last_island_rate={self.last_island_rate}")
+                        self.last_island_rate = last_part_rate
+                        last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
+                        # sub_island_sizes = get_island_sizes(last_sub_islands)
 
-            return None
-        else:
-            current_line = self.current_line
-            current_line_str = "".join(current_line)
-            self.lines.append(current_line_str)
-            lines_amount = len(self.lines)
-            current_line_positions = self.lines_unique.get(current_line_str, [])
-            duplicated_amount = len(current_line_positions)
-            duplicated_time_lines: set[str] | None = self.lines_duplicated_times.get(
-                duplicated_amount) if duplicated_amount > 0 else None
-            if duplicated_time_lines is not None:
-                duplicated_time_lines.remove(current_line_str)
-                if len(duplicated_time_lines) > 0:
-                    self.lines_duplicated_times[duplicated_amount] = duplicated_time_lines
-                else:
-                    del self.lines_duplicated_times[duplicated_amount]
+                        last_subpart_start, last_subpart_end = get_last_part_border(duplicates_check_tail,
+                                                                                    last_sub_islands)
+                        subpart_size = (last_subpart_end + 1) - last_subpart_start if (
+                                not last_subpart_start is None and
+                                not last_subpart_end is None) else 0
 
-            current_line_positions.append(lines_amount)
-
-            duplicated = len(current_line_positions)
-            duplicated_time_lines: set[str] = self.lines_duplicated_times.get(duplicated) or set()
-            duplicated_time_lines.add(current_line_str)
-            self.lines_duplicated_times[duplicated] = duplicated_time_lines
-
-            self.lines_unique[current_line_str] = current_line_positions
-
-            positions = current_line_positions
-            duplicated_phrase_revert = [current_line_str]
-            if len(positions) >= DUPLICATED_LINES_THRESHOLD:
-                prev_lines_position_unique = dict[int, int]()
-                prev_line_step = 1
-                stop = False
-                touched_line_positions = set[int]()
-                cycle_start = None
-                cycle_end = None
-                while not stop:
-                    prev_lines_unique = set[str]()
-                    prev_lines = list[str]()
-                    prev_line_num = list[int]()
-
-                    for line_position in reversed(positions):
-                        touched_line_positions.add(line_position)
-                        prev_line_position = line_position - prev_line_step
-                        if prev_line_position <= 0:
-                            stop = True
-                            break
-
-                        prev_line = self.lines[prev_line_position - 1]
-                        prev_lines_position_unique[line_position] = prev_line_position
-
-                        if prev_line_position in touched_line_positions:
-                            stop = True
-                            cycle_start = prev_line_position
-                            cycle_end = line_position
-                            break
-
-                        touched_line_positions.add(prev_line_position)
-
-                        prev_line_num.append(len(prev_lines))
-                        if len(prev_lines) == 0 or not (prev_line in prev_lines_unique):
-                            prev_lines_unique.add(prev_line)
-                            prev_lines.append(prev_line)
-
-                    if len(prev_lines) == 1:
-                        # prev fully duplicated so
-                        duplicated_phrase_revert.append(prev_lines[0])
-                        prev_line_step += 2
+                        delta = total_tokens_amount - last_subpart_end if subpart_size else total_tokens_amount
+                        delta_rate = delta / total_tokens_amount
+                        total_tokens_amount = len(duplicates_check_tail)
+                        last_part_rate2 = subpart_size / total_tokens_amount
+                        log.debug(
+                            f"duplicates detector: delta_rate={delta_rate}, last_part_rate2={last_part_rate2}")
+                        if delta_rate <= self.last_subpart_end_line_delta_rate and last_part_rate2 >= self.last_subpart_duplicates_rate:
+                            duplicated_payload = "".join(duplicates_check_tail)
+                            raise LoopError(message="Looks like generating infinity loop",
+                                            payload=duplicated_payload)
+            else:
+                current_line = self.current_line
+                current_line_str = "".join(current_line)
+                self.lines.append(current_line_str)
+                lines_amount = len(self.lines)
+                current_line_positions = self.lines_unique.get(current_line_str, [])
+                duplicated_amount = len(current_line_positions)
+                duplicated_time_lines: set[str] | None = self.lines_duplicated_times.get(
+                    duplicated_amount) if duplicated_amount > 0 else None
+                if duplicated_time_lines is not None:
+                    duplicated_time_lines.remove(current_line_str)
+                    if len(duplicated_time_lines) > 0:
+                        self.lines_duplicated_times[duplicated_amount] = duplicated_time_lines
                     else:
-                        stop = True
+                        del self.lines_duplicated_times[duplicated_amount]
 
-                if cycle_start and cycle_end:
-                    cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
-                    raise LoopError(message="Cycled phrase looks like the model is in a loop", payload=cycled_phrase)
-                else:
-                    duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
-                    log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
+                current_line_positions.append(lines_amount)
 
-        duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
-        duplicated_rate = duplicated_lines_amount / lines_amount
-        if duplicated_rate >= DUPLICATED_LINES_RATE_LIMIT and duplicated_lines_amount >= DUPLICATED_LINES_LIMIT:
-            payload = "".join(list(self.lines_unique.keys()))
-            raise LoopError(message="Duplicate lines looks like the model is in a loop", payload=payload)
+                duplicated = len(current_line_positions)
+                duplicated_time_lines: set[str] = self.lines_duplicated_times.get(duplicated) or set()
+                duplicated_time_lines.add(current_line_str)
+                self.lines_duplicated_times[duplicated] = duplicated_time_lines
 
-        self.clean_current_line()
-        return current_line_str
+                self.lines_unique[current_line_str] = current_line_positions
+
+                positions = current_line_positions
+                duplicated_phrase_revert = [current_line_str]
+                if len(positions) >= DUPLICATED_LINES_THRESHOLD:
+                    prev_lines_position_unique = dict[int, int]()
+                    prev_line_step = 1
+                    stop = False
+                    touched_line_positions = set[int]()
+                    cycle_start = None
+                    cycle_end = None
+                    while not stop:
+                        prev_lines_unique = set[str]()
+                        prev_lines = list[str]()
+                        prev_line_num = list[int]()
+
+                        for line_position in reversed(positions):
+                            touched_line_positions.add(line_position)
+                            prev_line_position = line_position - prev_line_step
+                            if prev_line_position <= 0:
+                                stop = True
+                                break
+
+                            prev_line = self.lines[prev_line_position - 1]
+                            prev_lines_position_unique[line_position] = prev_line_position
+
+                            if prev_line_position in touched_line_positions:
+                                stop = True
+                                cycle_start = prev_line_position
+                                cycle_end = line_position
+                                break
+
+                            touched_line_positions.add(prev_line_position)
+
+                            prev_line_num.append(len(prev_lines))
+                            if len(prev_lines) == 0 or not (prev_line in prev_lines_unique):
+                                prev_lines_unique.add(prev_line)
+                                prev_lines.append(prev_line)
+
+                        if len(prev_lines) == 1:
+                            # prev fully duplicated so
+                            duplicated_phrase_revert.append(prev_lines[0])
+                            prev_line_step += 2
+                        else:
+                            stop = True
+
+                    if cycle_start and cycle_end:
+                        cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
+                        raise LoopError(message="Cycled phrase looks like the model is in a loop",
+                                        payload=cycled_phrase)
+                    else:
+                        duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
+                        log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
+
+                duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
+                duplicated_rate = duplicated_lines_amount / lines_amount
+                if duplicated_rate >= DUPLICATED_LINES_RATE_LIMIT and duplicated_lines_amount >= DUPLICATED_LINES_LIMIT:
+                    payload = "".join(list(self.lines_unique.keys()))
+                    raise LoopError(message="Duplicate lines looks like the model is in a loop", payload=payload)
+
+                self.clean_current_line()
+                added_lines.append(current_line_str)
+        return added_lines
 
     def clean_current_line(self):
         self.current_line.clear()
@@ -471,3 +486,4 @@ class Phrase:
         self.duplicated_words.clear()
         self.duplicates_islands.clear()
         self.duplicates_islands_reversed.clear()
+        self.last_island_rate = 0.0

@@ -57,6 +57,7 @@ class ContinuousBatchingController(BaseController):
             raise e
 
     def shutdown(self):
+        super().shutdown()
         with self.active_handles_lock:
             pipe = self.pipe
             if pipe is None:
@@ -197,7 +198,7 @@ class ContinuousBatchingController(BaseController):
                                                                            f"score={generation_output.score}, "
                                                                            f"log_probs={generation_output.generated_log_probs}")
 
-                                    responses, stop_signal = token_handler.handle_token(generated_ids)
+                                    responses, stop_signal = token_handler.handle_tokens(generated_ids)
 
                                     finish_reason = generation_output.finish_reason
                                     if not stop_signal and finish_reason and finish_reason != GenerationFinishReason.NONE:

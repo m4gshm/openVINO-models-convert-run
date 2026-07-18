@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -64,9 +65,10 @@ class BaseController(ABC):
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
         self.is_fix_tool_type = is_fix_tool_type
+        self.stop_flag = threading.Event()
 
     def shutdown(self):
-        pass
+        self.stop_flag.set()
 
     async def models(self) -> ModelsListResponse:
         current_time = int(time.time())
@@ -130,6 +132,8 @@ class BaseController(ABC):
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
         loop = asyncio.get_event_loop()
+        def is_stop():
+            return self.stop_flag.is_set() or is_disconnected(loop, request)
 
         # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
         #         body.model_config.get("reasoning") or True)
@@ -182,7 +186,7 @@ class BaseController(ABC):
 
         chunk_generator = self.chunk_generator(
             prompt=full_prompt, chat_history=chat_history, generation_config=generation_config, tokenizer=tokenizer,
-            init_chat_events=True, is_stop=lambda: is_disconnected(loop, request),
+            init_chat_events=True, is_stop=is_stop,
             is_veai=is_veai, user_context=user_context, function_by_name=function_by_name)
         if stream:
             return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")

@@ -80,6 +80,7 @@ def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: b
 
     async def lifespan(app: FastAPI):
         yield
+        log.info("controller is shutdown")
         controller.shutdown()
 
     app = FastAPI(lifespan=(asynccontextmanager(lifespan)))

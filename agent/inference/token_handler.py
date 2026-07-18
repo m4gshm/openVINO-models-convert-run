@@ -108,7 +108,7 @@ def markdown_json(value: str) -> str:
 
 
 def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> str | None:
-    return ((markdown_bold("WARNING:" + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
+    return ((markdown_bold("WARNING: " + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
         loop_error)
 
 
@@ -166,12 +166,12 @@ class TokenHandler:
         self.stop_inference = False
         self.token_counter = 0
 
-    def handle_token(self, tokens: collections.abc.Sequence[SupportsInt], stop_no_conversations=True) -> tuple[
+    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt], stop_no_conversations=True) -> tuple[
         list[CompletionResponse], StopSignal | None]:
 
         is_stop = self.is_stop
         if is_stop and is_stop():
-            log.info("stream finished by user disconnected")
+            log.info("handle tokens stopped by signal")
             return [], StopSignal.CANCEL
 
         decoded_tokens = decode(tokens, self.tokenizer)
@@ -181,8 +181,12 @@ class TokenHandler:
                        stop_no_conversations: bool = True, ) -> tuple[
         list[CompletionResponse], StopSignal | None]:
         result: list[CompletionResponse] = []
+        is_stop = self.is_stop
         try:
             for token in decoded_tokens:
+                if is_stop and is_stop():
+                    log.info("process tokens stopped by signal")
+                    return result, StopSignal.CANCEL
                 self.token_counter += 1
                 log.debug(f"token '{token}', num {self.token_counter}")
                 token_result, stop_signal = self.process_token(token, self.token_counter, state, parser,
@@ -264,7 +268,7 @@ class TokenHandler:
                     parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
                     if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
                         time = format_time(self.config.tool_call_parting_duration_warning)
-                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})")
+                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})") + "\n"
                         result.append(new_chunk_response(role=ROLE_ASSISTANT, content=warning_msg))
                         self.tool_call_parsing_long_time_warned = True
                     elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
@@ -280,9 +284,9 @@ class TokenHandler:
             else:
                 loop_error: str | None = None
                 try:
-                    prev_line = self.phrase.add_token(token)
+                    new_lines = self.phrase.add_token(token)
                 except LoopError as e:
-                    prev_line = None
+                    new_lines = None
                     log.error(f"tool call error: {e}")
                     loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
@@ -293,9 +297,8 @@ class TokenHandler:
                     if self.phrase_tick is None:
                         self.phrase_tick = now_time
 
-                    phrase_end = prev_line is not None
-                    if phrase_end:
-                        log.info(f"{state.role} phrase: '{prev_line}', last token num: {token_number}")
+                    if new_lines and len(new_lines) > 0:
+                        log.info(f"{state.role} phrase: '{"".join(new_lines)}', last token num: {token_number}")
 
                     if not self.is_chat_mode:
                         result.append(new_chunk_response(role=state.role, content=token))
@@ -431,6 +434,7 @@ class TokenHandler:
             except LoopError as e:
                 log.warning(f"loop at the end of tool call {self.tool_call_phrase.full}")
         log.debug(f"tool call end: {self.tool_call_phrase.full}")
+
         return self.handle_tool_call(state)
 
     def tool_call_start(self, state: ParserState, token: str):

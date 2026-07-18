@@ -1,4 +1,5 @@
 import cProfile
+import json
 import pstats
 import unittest
 from importlib.resources import files
@@ -10,24 +11,6 @@ from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
     get_last_part_border, layout_last_island
 
 TEST_RESOURCES = "test_resources/phrase"
-
-
-def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
-    dict[int, int], dict[int, int], dict[int, int], list[str], dict[str, set[int]]]:
-    line = list[str]()
-    line_tokens = dict[str, set[int]]()
-    duplicate_reversed_ranges = dict[int, int]()
-    duplicate_ranges = dict[int, int]()
-    duplicated_words = dict[str, set[int]]()
-    islands = dict[int, int]()
-    duplicates_islands_reversed = dict[int, int]()
-    for i, token in enumerate(loop_messages):
-        add_token(token, line)
-        add_check_duplicate_tokens(line_tokens, token, i)
-        process_duplicate_pairs(token, line, line_tokens, duplicate_reversed_ranges, duplicate_ranges,
-                                duplicated_words, islands, duplicates_islands_reversed)
-
-    return duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens
 
 
 class PhraseTestCase(unittest.TestCase):
@@ -281,6 +264,43 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual(loop_messages_expected_islands, visual_islands)
 
         pass
+
+    def test_duplicated_parts_case5(self):
+        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line5_success_case.json").read_text(
+            encoding="utf-8")
+
+        phrase = Phrase()
+        tokens = json.loads(loop_messages)
+        for token in tokens:
+            phrase.add_token(token)
+
+        line = phrase.current_line[phrase.in_line_duplicates_detect_start_amount:]
+        loop_part1 = visualize_reversed_ranges(line, phrase.duplicate_ranges_reversed)
+        visual_islands = visualize_islands_reversed(line, phrase.duplicate_ranges_reversed)
+
+        self.maxDiff = None
+        self.assertEqual((''), loop_part1)
+        self.assertEqual((''), visual_islands)
+
+        pass
+
+
+def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
+    dict[int, int], dict[int, int], dict[int, int], list[str], dict[str, set[int]]]:
+    line = list[str]()
+    line_tokens = dict[str, set[int]]()
+    duplicate_reversed_ranges = dict[int, int]()
+    duplicate_ranges = dict[int, int]()
+    duplicated_words = dict[str, set[int]]()
+    islands = dict[int, int]()
+    duplicates_islands_reversed = dict[int, int]()
+    for i, token in enumerate(loop_messages):
+        add_token(token, line)
+        add_check_duplicate_tokens(line_tokens, token, i)
+        process_duplicate_pairs(token, line, line_tokens, duplicate_reversed_ranges, duplicate_ranges,
+                                duplicated_words, islands, duplicates_islands_reversed)
+
+    return duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens
 
 
 if __name__ == '__main__':
