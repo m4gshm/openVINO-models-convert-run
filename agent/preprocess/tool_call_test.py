@@ -5,7 +5,7 @@ from pydantic import TypeAdapter
 
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
 from agent.preprocess.tool_call import PreprocessToolCall, new_function_call_result, \
-    find_tool_call_arguments
+    find_tool_call_function
 
 TEST_RESOURCES = "test_resources"
 
@@ -18,7 +18,7 @@ class PreprocessToolCallCase(unittest.TestCase):
         tool_call_text = tool_cal_file.read_text(encoding="utf-8")
         messages = self.adapter.validate_json(tool_call_text)
         preprocess_tool_call = PreprocessToolCall()
-        loop_call, count = preprocess_tool_call.check_loop_calls(messages)
+        loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
         self.assertIsNotNone(loop_call)
         self.assertEqual("search_file_by_name", loop_call.name)
         self.assertEqual('{"glob_pattern": "InputMessages.*", "search_directory": "test_dir"}', loop_call.arguments)
@@ -31,9 +31,9 @@ class PreprocessToolCallCase(unittest.TestCase):
         tool_call_md = tool_cal_file_expected.read_text(encoding="utf-8")
         messages = self.adapter.validate_json(tool_call_json)
 
-        tool_call = messages[-1]
-        arguments, i = find_tool_call_arguments(tool_call.tool_call_id, len(messages) - 1, messages)
-        markdown = new_function_call_result(tool_call, arguments).render_markdown()
+        tool_call_result = messages[-1]
+        function, i = find_tool_call_function(tool_call_result.tool_call_id, len(messages) - 1, messages)
+        markdown = new_function_call_result(function.name, function.arguments, tool_call_result.content).render_markdown()
         self.assertEqual(tool_call_md, markdown)
 
 

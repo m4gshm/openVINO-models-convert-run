@@ -203,7 +203,7 @@ class BaseController(ABC):
     def validate_messages(self, messages, tools) -> CompletionResponse | None:
         request_user_select = detect_select_options(tools)
         preprocess_tool_call = PreprocessToolCall()
-        looped_function, count = preprocess_tool_call.check_loop_calls(messages)
+        looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
         if looped_function:
             # log
             msg = looped_function.render_markdown()

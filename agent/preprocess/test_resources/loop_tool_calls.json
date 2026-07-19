@@ -16,7 +16,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783352902_34_search_file_by_name"
   },
   {
@@ -36,7 +35,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783352950_35_search_file_by_name"
   },
   {
@@ -56,7 +54,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783352975_36_search_file_by_name"
   },
   {
@@ -76,7 +73,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783353000_37_search_file_by_name"
   },
   {
@@ -96,7 +92,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783353026_38_search_file_by_name"
   },
   {
@@ -116,7 +111,6 @@
   {
     "content": "{\"result\":\"warning\",\"warning\":\"Directory does not exist: test_dir\"}",
     "role": "tool",
-    "name": "search_file_by_name",
     "tool_call_id": "call_1783353059_39_search_file_by_name"
   }
 ]

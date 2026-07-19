@@ -3,7 +3,7 @@ import logging
 
 from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick
-from agent.openai.chat_completions_api import ChatCompletionMessageParam
+from agent.openai.chat_completions_api import ChatCompletionMessageParam, FunctionCall
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ class FunctionCallResult:
                                                             f"Result: {function_results}"
 
 
-def find_tool_call_arguments(tool_call_id: str | None, start_from: int,
-                             messages: list[ChatCompletionMessageParam]) -> tuple[str | None, int]:
+def find_tool_call_function(tool_call_id: str | None, start_from: int,
+                            messages: list[ChatCompletionMessageParam]) -> tuple[FunctionCall, int] | tuple[None, int]:
     i = start_from
     while i >= 0:
         prev_message = messages[i]
@@ -47,52 +47,58 @@ def find_tool_call_arguments(tool_call_id: str | None, start_from: int,
             tool_calls = prev_message.tool_calls
             for tool_call in (tool_calls or []):
                 if tool_call_id and tool_call.id == tool_call_id:
-                    return tool_call.function.arguments, i
+                    return tool_call.function, i
         i -= 1
     return None, i
 
 
-def new_function_call_result(last_message: ChatCompletionMessageParam,
-                             last_tool_call_arguments: str | None) -> FunctionCallResult:
-    return FunctionCallResult(name=last_message.name, arguments=last_tool_call_arguments, result=last_message.content)
+def new_function_call_result(function_name: str, last_tool_call_arguments: str, result: str) -> FunctionCallResult:
+    return FunctionCallResult(name=function_name, arguments=last_tool_call_arguments, result=result)
 
 
 class PreprocessToolCall:
     max_repeated_tool_calls_with_the_same_result = 5
     max_messages_to_check = 5 * 4
 
-    def check_loop_calls(self, messages: list[ChatCompletionMessageParam]) -> tuple[FunctionCallResult | None, int]:
+    def check_loop_tool_calls(self, messages: list[ChatCompletionMessageParam]) -> tuple[
+        FunctionCallResult | None, int]:
         last_message = messages[-1] if messages else None
-        if last_message and last_message.role == ROLE_TOOL and last_message.name:
+        if last_message and last_message.role == ROLE_TOOL:
             last_tool_call_id = last_message.tool_call_id
-            last_tool_call_arguments, i = find_tool_call_arguments(last_tool_call_id, len(messages) - 2, messages)
-
-            repeated = 1
-            # reverse loop from prelast message
-            i -= 1
-            count = 0
-            while i >= 0:
-                count += 1
-                if count >= self.max_messages_to_check:
-                    break
-                message = messages[i]
-                if message.role != ROLE_TOOL:
-                    continue
-                name = message.name
-                result = message.content
-                tool_call_id = message.tool_call_id
-                if not name or not result:
-                    continue
-
-                tool_call_arguments, i = find_tool_call_arguments(tool_call_id, i - 1, messages)
-
-                is_equal = name == last_message.name and tool_call_arguments == last_tool_call_arguments and result == last_message.content
-                if is_equal:
-                    repeated += 1
-                else:
-                    break
-
-                if repeated >= self.max_repeated_tool_calls_with_the_same_result:
-                    return new_function_call_result(last_message, last_tool_call_arguments), repeated
+            last_tool_call_function, i = find_tool_call_function(last_tool_call_id, len(messages) - 2, messages)
+            if last_tool_call_function is None:
+                log.warning(
+                    f"cannot find function call for tool last_tool_call_id={last_tool_call_id},"
+                    f" tool call result={last_message}")
+            else:
+                last_tool_call_arguments = last_tool_call_function.arguments
+                repeated = 1
+                # reverse loop from prelast message
                 i -= 1
+                count = 0
+                while i >= 0:
+                    count += 1
+                    if count >= self.max_messages_to_check:
+                        break
+                    message = messages[i]
+                    if message.role != ROLE_TOOL:
+                        continue
+
+                    result = message.content
+                    tool_call_id = message.tool_call_id
+
+                    tool_call_function, i = find_tool_call_function(tool_call_id, i - 1, messages)
+                    tool_call_arguments = tool_call_function.arguments if tool_call_function else None
+
+                    is_equal = tool_call_arguments == last_tool_call_arguments and result == last_message.content
+                    if is_equal:
+                        repeated += 1
+                    else:
+                        break
+
+                    if repeated >= self.max_repeated_tool_calls_with_the_same_result:
+                        return new_function_call_result(last_tool_call_function.name,
+                                                        last_tool_call_arguments, result), repeated
+                    i -= 1
+
         return None, 0

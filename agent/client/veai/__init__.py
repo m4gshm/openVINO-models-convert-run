@@ -1,5 +1,6 @@
 from typing import Any
 
+from agent.client import is_agent
 from agent.client.user_context import UserContext
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
 
@@ -8,23 +9,7 @@ OS_INFO_ = "OS info:"
 
 
 def is_veai_agent(messages: list[ChatCompletionMessageParam]) -> bool:
-    def check(content: str) -> bool:
-        return "You are Veai Agent" in content
-
-    first_message = messages[0] if messages else None
-    if not first_message:
-        return False
-
-    content = first_message.content
-    if isinstance(content, str):
-        return check(content)
-    elif isinstance(content, list):
-        for message in content:
-            for k in message.keys():
-                if check(k):
-                    return True
-
-    return False
+    return is_agent(messages, "You are Veai Agent")
 
 
 def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext | None:
