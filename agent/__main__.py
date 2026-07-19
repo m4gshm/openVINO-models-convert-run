@@ -2,7 +2,10 @@ import argparse
 import json
 import logging.config
 import os
+import signal
 import sys
+import threading
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -21,7 +24,7 @@ from .parser.qwen3 import Qwen3MoeParser
 
 default_device = "GPU"
 
-default_model = "OmniCoder-9B-int4-sym-g128"
+default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
 default_models_dir = f"./models"
 default_models_cache_dir = f"./models_cache"
 
@@ -32,6 +35,7 @@ os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 
 log = logging.getLogger(__name__)
+
 
 class Pipe(Enum):
     CB = 'CB'
@@ -53,7 +57,24 @@ class CachePrecision(Enum):
 
 class AttentionBackend(Enum):
     PA = 'PA'
-    SPDA = 'SPDA'
+    SDPA = 'SDPA'
+
+
+class Turn(Enum):
+    on = 'on'
+    off = 'off'
+
+
+stop_signal = threading.Event()
+
+
+def handle_exit_signal(signum, frame):
+    log.info(f"handle signal {signum}")
+    stop_signal.set()
+
+
+signal.signal(signal.SIGINT, handle_exit_signal)
+signal.signal(signal.SIGTERM, handle_exit_signal)
 
 
 def main():
@@ -74,6 +95,8 @@ def main():
     args_parser.add_argument("--cache_precision", type=lambda c: CachePrecision[c], required=False,
                              default=None, choices=list(CachePrecision), help="%(default)s")
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--fix_tool_type", type=lambda c: Turn[c], required=False,
+                             default=None, choices=list(Turn), help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
                              help="%(default)s")
@@ -96,7 +119,9 @@ def main():
         model_path = Path(f"{args.models_dir}/{model}")
 
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
-    base_log_config = logging_config(f"./logs/{model_name}")
+    logs_dir = f"./logs/{model_name}/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
+    base_log_config = logging_config(logs_dir)
+    log.info(f"logs dir {logs_dir}")
 
     # uvcorn_logs = uvicorn.config.LOGGING_CONFIG
     # uvcorn_logs["formatters"]["default"]["format"] = log_format_simple
@@ -243,6 +268,13 @@ def main():
         log.error(f"need define --pipe for model architectures={model_architectures}")
         sys.exit(1)
 
+    if args.fix_tool_type == Turn.on:
+        is_fix_tool_type = True
+    elif args.fix_tool_type == Turn.off:
+        is_fix_tool_type = False
+    else:
+        is_fix_tool_type = parser_type == ParserType.gemma4 and len(chat_template) == 0
+
     model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
@@ -304,7 +336,9 @@ def main():
                                      generate_config=generate_opts,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
-                                     pipeline_properties=pipeline_properties)
+                                     pipeline_properties=pipeline_properties,
+                                     is_fix_tool_type=is_fix_tool_type,
+                                     stop_signal=stop_signal)
     else:
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
@@ -315,10 +349,26 @@ def main():
                                               scheduler_config=scheduler_config,
                                               pipeline_properties=pipeline_properties,
                                               chat_template=chat_template,
-                                              tokenizer_properties=tokenizer_properties)
+                                              tokenizer_properties=tokenizer_properties,
+                                              is_fix_tool_type=is_fix_tool_type,
+                                              stop_signal=stop_signal
+                                              )
 
     log.info(f"listening {args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, reload=False)
+
+    def handle():
+        uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
+
+    server_thread = threading.Thread(target=handle, daemon=True)
+    server_thread.start()
+    # handle()
+    try:
+        stopped = False
+        while not stopped:
+            stopped = stop_signal.wait(timeout=1)
+        log.debug(f"main thread finish")
+    except Exception as e:
+        log.debug(f"main thread finish with error: {e}")
 
 
 def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:

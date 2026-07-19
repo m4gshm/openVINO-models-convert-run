@@ -28,15 +28,16 @@ log = logging.getLogger(__name__)
 
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
-                 handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
+                 handler_config: TokenHandlerConfig, stop_signal: threading.Event,
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
         self.config = config
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
+        self.stop_signal = stop_signal
 
     def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
                         tokenizer: Tokenizer,
@@ -123,9 +124,6 @@ class VlmController(BaseController):
                     generate_cost = after_generate_mem - before_generate_mem
                     log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
 
-                    self.log_inference_generated.debug("".join(token_handler.phrase.full))
-                    self.log_inference_generated.debug("".join(token_handler.tool_call_phrase.full))
-
                     inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                     if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
                         self.log_inference.warning(f"inference finished by unexpected status {inference_finish_reason}")
@@ -143,11 +141,12 @@ class VlmController(BaseController):
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
                     vlm_pipe: VLMPipeline = pipe
-                    generate_result = vlm_pipe.generate(history=chat_history, generation_config=generation_config,
+
+                    generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 elif isinstance(pipe, LLMPipeline):
                     llm_pipe: LLMPipeline = pipe
-                    generate_result = llm_pipe.generate(inputs=chat_history, generation_config=generation_config,
+                    generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 else:
                     raise NotImplementedError(f"unexpected pipe type {type(pipe)}")
@@ -159,6 +158,7 @@ class VlmController(BaseController):
                 stop_inference = False
                 while not stop_inference:
                     if is_stop():
+                        log.info("inference stopped by signal")
                         break
                     try:
                         chunk = chunk_queue.get(timeout=20)
@@ -207,7 +207,7 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
             log.debug("stream finished by stop signal")
             return StreamingStatus.STOP
 
-        responses, stop_signal = self.streamer.handle_token(tokens)
+        responses, stop_signal = self.streamer.handle_tokens(tokens)
         if stop_signal:
             add_stop_signal(responses, stop_signal)
 
@@ -223,6 +223,6 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
             return StreamingStatus.STOP
         elif stop_signal == StopSignal.TOOL_CALL:
             return StreamingStatus.TOOL_CALL_STOP
-        elif stop_signal == StreamingStatus.CANCEL:
+        elif stop_signal == StopSignal.CANCEL:
             return StreamingStatus.CANCEL
         return StreamingStatus.RUNNING

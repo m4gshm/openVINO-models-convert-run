@@ -15,7 +15,7 @@
     <option name="DEBUG_JUST_MY_CODE" value="false" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq --pip CB --cache_precision u4" />
+    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq --pip CB --cache_precision u8" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

@@ -74,38 +74,16 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
     if arguments_block.endswith("}"):
         arguments_block = arguments_block[:-1]
 
-    delim = "<|\"|>"
     partial = is_block_partial
-    if delim in arguments_block:
-        pattern = r'(\w*):*(?:<\|"\|>(.*?)<\|"\|>|([^,}]*))'
-        kv_pairs = re.findall(pattern, arguments_block)
-        log.debug(f"delimited parameters parsing: result={kv_pairs}")
-        named_parameters = {}
-        anonymous_parameters = []
-        for k1, v1, v2 in kv_pairs:
-            k = k1
-            v = v1 or v2
-            if k:
-                named_parameters[k] = v
-            elif v:
-                anonymous_parameters.append(v)
-    else:
-        pattern = r'(?:"(\w+)"|(\w+))(:|=)(?:\s*"(.*?)"|([^,}]*))'
-        kv_pairs = re.findall(pattern, arguments_block)
-        log.debug(f"parameters parsing: result={kv_pairs}")
-        named_parameters: dict[str, Any] = {}
-        anonymous_parameters = []
-        for k1, k2, d1, v1, v2 in kv_pairs:
-            k = k1 or k2
-            v = v1 or v2
-            if k:
-                named_parameters[k] = v
-            else:
-                anonymous_parameters.append(v)
 
-    if len(arguments_block) > 0 and not (len(named_parameters) > 0 or len(anonymous_parameters) > 0):
+    value_tag_wrapper = "<|\"|>"
+
+    named_parameters = {}
+    anonymous_parameters = []
+
+    if arguments_block.startswith("{") and arguments_block.endswith("}"):
         log.debug(f"trying to parse as json: {arguments_block}")
-        possible_json_args = arguments_block.replace(delim, "\"")
+        possible_json_args = arguments_block.replace(value_tag_wrapper, "\"")
         try:
             arguments: dict[str, Any] = json.loads(possible_json_args)
         except json.decoder.JSONDecodeError as e:
@@ -118,10 +96,93 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
             log.error(f"unrepairable json arguments: {arguments_block}")
         else:
             named_parameters = arguments
-            partial = True
+    else:
+        expect_name = True
+        expect_end_delimiter = False
+        expect_kv_delim = False
+        word = ''
+        name: str | None = None
 
-    log.debug(f"tool call arguments parsed: src={arguments_block}, named_parameters={named_parameters}, partial={partial}"
-              f"anonymous_parameters={anonymous_parameters}")
+        valid_kv_delim = ','
+        valid_name_val_delim = ":"
+        invalid_but_possible_delim = "="
+
+        for i, token in enumerate(arguments_block):
+            if expect_name:
+                if token == valid_name_val_delim:
+                    if word.startswith(value_tag_wrapper):
+                        # wrapped anonymous arg
+                        expect_name = False
+                        expect_end_delimiter = True
+                        word = word[len(value_tag_wrapper):] + token
+                    else:
+                        word_parts = word.split(invalid_but_possible_delim)
+                        if len(word_parts) == 2:
+                            name = word_parts[0]
+                            word = word_parts[1] + token
+                            expect_name = False
+                        else:
+                            expect_name = False
+                            name = word
+                            word = ''
+
+                elif token == valid_kv_delim or i == len(arguments_block) - 1:
+                    if expect_kv_delim:
+                        expect_kv_delim = False
+                    else:
+                        word_parts = word.split(invalid_but_possible_delim)
+                        if len(word_parts) == 2:
+                            named_parameters[word_parts[0]] = word_parts[1]
+                        elif word:
+                            anonymous_parameters.append(word)
+                        name = ''
+                        word = ''
+                else:
+                    word += token
+            else:
+                # expected value
+                if not expect_end_delimiter and (token == valid_kv_delim or token == invalid_but_possible_delim):
+                    expect_name = True
+                    if name:
+                        named_parameters[name] = word
+                    elif word:
+                        anonymous_parameters.append(word)
+                    name = ''
+                    word = ''
+                else:
+                    word += token
+                    if word.endswith(value_tag_wrapper):
+                        if not expect_end_delimiter:
+                            expect_end_delimiter = True
+                            word = ''
+                        else:
+                            value = word[:len(word) - len(value_tag_wrapper)]
+                            if name:
+                                named_parameters[name] = value
+                            elif word:
+                                anonymous_parameters.append(value)
+                            name = ''
+                            word = ''
+                            expect_end_delimiter = False
+                            expect_name = True
+                            expect_kv_delim = True
+
+        if name:
+            named_parameters[name] = word
+        elif word:
+            anonymous_parameters.append(word)
+
+        for k, v in named_parameters.items():
+            if v and v.startswith("\"") and v.endswith("\""):
+                named_parameters[k] = v[1:-1]
+
+        for i, v in enumerate(anonymous_parameters):
+            if v and v.startswith("\"") and v.endswith("\""):
+                anonymous_parameters[i] = v[1:-1]
+
+    log.debug(
+        f"tool call arguments parsed: src={arguments_block}, named_parameters={named_parameters}, partial={partial}"
+        f"anonymous_parameters={anonymous_parameters}")
     return named_parameters, anonymous_parameters, partial
 
 

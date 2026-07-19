@@ -1,13 +1,12 @@
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
-from asyncio import AbstractEventLoop
 from datetime import timedelta
 from typing import Generator, Any, Callable, Literal
 
-from fastapi import APIRouter
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import GenerationConfig
@@ -50,23 +49,22 @@ class ControllerConfig(BaseModel):
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
-        router.post("/v1/completions")(self.completions)
-        router.post("/v1/chat/completions")(self.chat)
-        router.get(path="/v1/models", response_model_exclude_none=True)(self.models)
-        self.router = router
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, stop_signal: threading.Event,
+                 chat_template: str = ''):
         self.parser = parser
         self.generate_config = generate_config
         self.config = config
         self.tokenizer = tokenizer
         self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
-        self.log_inference_generated = logging.getLogger(inference.log.name + ".generated")
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
+        self.is_fix_tool_type = is_fix_tool_type
+        self.closed = threading.Event()
+        self.stop_signal = stop_signal
 
     def shutdown(self):
-        pass
+        self.closed.set()
 
     async def models(self) -> ModelsListResponse:
         current_time = int(time.time())
@@ -81,7 +79,7 @@ class BaseController(ABC):
                               max_completion_tokens: int | None,
                               top_p: float | None,
                               frequency_penalty: float | None,
-                              apply_chat_template: bool = True,
+                              apply_chat_template: bool = False,
                               logprobs: bool | None = None,
                               stop: list[str] | str | None = None,
                               ) -> GenerationConfig:
@@ -129,7 +127,8 @@ class BaseController(ABC):
         log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
-        loop = asyncio.get_event_loop()
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
         # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
         #         body.model_config.get("reasoning") or True)
@@ -156,7 +155,7 @@ class BaseController(ABC):
         if invalid_reponse:
             return invalid_reponse
 
-        tools_raw, function_by_name = group_function_by_name(tools, is_veai)
+        tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.is_fix_tool_type)
 
         tokenizer = self.tokenizer
         extra_context = {}
@@ -182,7 +181,7 @@ class BaseController(ABC):
 
         chunk_generator = self.chunk_generator(
             prompt=full_prompt, chat_history=chat_history, generation_config=generation_config, tokenizer=tokenizer,
-            init_chat_events=True, is_stop=lambda: is_disconnected(loop, request),
+            init_chat_events=True, is_stop=is_stop,
             is_veai=is_veai, user_context=user_context, function_by_name=function_by_name)
         if stream:
             return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
@@ -213,7 +212,7 @@ class BaseController(ABC):
                 question = request_user_select.new_call(
                     msg +
                     "\n\n" +
-                    "Repeated: " + markdown_back_tick(str(count) + ("time" if count == 1 else "times")) +
+                    "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
                     "\n\n" + markdown_bold("What to do next?"),
                     [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
                 tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
@@ -225,8 +224,6 @@ class BaseController(ABC):
         return None
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
-        loop = asyncio.get_event_loop()
-
         prompt = body.prompt
         if not prompt:
             prompt = ""
@@ -246,10 +243,13 @@ class BaseController(ABC):
         if over_limit_response:
             return over_limit_response
 
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
+
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                                tokenizer=self.tokenizer, init_chat_events=False,
-                                               is_stop=lambda: is_disconnected(loop, request), is_veai=False)
+                                               is_stop=is_stop, is_veai=False)
 
         def chunk_converter(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[
             completions_api.CompletionResponse, None, None]:
@@ -289,11 +289,11 @@ class BaseController(ABC):
 
 
 def make_union(chunk_generator: Generator[CompletionResponse, None, None]) -> tuple[
-    Literal["stop", "length", "tool_calls"], str, str, list[ToolCall]]:
+    Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ToolCall]]:
     full_content = ""
     full_reasoning_content = ""
     full_tool_calls: list[ToolCall] = []
-    finish_reason: Literal["stop", "length", "tool_calls"] = "stop"
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
     for chunk_data in chunk_generator:
         choices = chunk_data.choices
@@ -313,9 +313,10 @@ def make_union(chunk_generator: Generator[CompletionResponse, None, None]) -> tu
     return finish_reason, full_content, full_reasoning_content, full_tool_calls
 
 
-def is_disconnected(loop: AbstractEventLoop, request: Request) -> bool:
+def is_disconnected(request: Request) -> bool:
     disconnected = False
     try:
+        loop = request.app.state.main_loop
         disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.5)
         if disconnected:
             log.debug(f"disconnected http request")
@@ -333,14 +334,14 @@ def new_chat_history(messages: list[BaseModel], tools_raw: list[dict[str, Any]] 
     return chat_history
 
 
-def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool) -> tuple[
+def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is_fix_tool_type: bool = False) -> tuple[
     list[dict[str, Any]], dict[str, FunctionDefinition]]:
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
+    is_fix = is_veai and is_fix_tool_type
     for tool in (tools or []):
-        if is_veai:
-            fixed_tool = veai_fix_tool_definition_optional_property_as_null_type(tool)
-            tools_raw.append(fixed_tool.model_dump())
+        tool_ = veai_fix_tool_definition_optional_property_as_null_type(tool) if is_fix else tool
+        tools_raw.append(tool_.model_dump())
         function = tool.function
         function_by_name[function.name] = function
     return tools_raw, function_by_name

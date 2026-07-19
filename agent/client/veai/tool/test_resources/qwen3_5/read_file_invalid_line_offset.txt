@@ -1,0 +1,17 @@
+ <tool_call>
+<function=read_file>
+<parameter=target_file>
+C:/test.txt
+</parameter>
+<parameter=start_line>
+1
+</parameter>
+<parameter=end_line>
+100
+</parameter>
+<parameter=line_offset>
+0
+</partition_id>
+</parameter>
+</function>
+</tool_call>

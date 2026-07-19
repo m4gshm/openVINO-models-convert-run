@@ -1,0 +1,7 @@
+<tool_call>
+<function=edit_file>
+<parameter=target_file>
+C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/build.gradle.kts
+</parameter>
+<parameter=edits>
+[{"old_text": "plugins {\n    `java-library`\n}\napply(plugin = \"io.spring.dependency-management\")\n\ndependencies {\n    api(project(\":idempotent-consumer\"))\n    api(project(\":storage-api-reactive\"))\n    api(project(\":postgres-jdbc\"))\n\n    implementation(\"io.projectreactor:reactor-core\")\n\n    implementation(\"org.postgresql:postgresql\")\n\n    implementation(\"org.springframework.boot:spring-boot-starter-jooq\")\n    implementation(\"org.springframework.boot:spring-boot-autoconfigure\")\n\n    implementation(\"org.jooq:jooq\")\n    implementation(\"org.jooq:jooq-postgres-extensions\")\n}", "new_text": "plugins {\n    `java-library`\n}\napply(plugin = \"io.spring.dependency-management\")\n\ndependencies {\n    api(project(\":idempotent-consumer\"))\n    api(project(\":storage-api-reactive\"))\n    api(project(\":postgres-jdbc\"))\n\n    implementation(\"io.projectreactor:reactor-core\")\n

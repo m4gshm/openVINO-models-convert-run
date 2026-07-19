@@ -16,7 +16,7 @@ from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
     markdown_bold, get_finish_str, StopSignal
 from agent.openai import GenerateOpts
-from agent.openai.chat_api import new_stop_response, EMPTY_CONTENT
+from agent.openai.chat_api import new_stop_response
 from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser, StateEvent
@@ -38,9 +38,9 @@ def add_stop_signal(responses: list[CompletionResponse], stop_signal: StopSignal
 
 class ContinuousBatchingController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
-                 handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, chat_template)
+                 handler_config: TokenHandlerConfig, stop_signal: threading.Event,
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
@@ -48,6 +48,7 @@ class ContinuousBatchingController(BaseController):
         self.executor = ThreadPoolExecutor()
         self.active_handles_lock = threading.Lock()
         self.active_handles: dict[int, GenerationHandle] = {}
+        self.stop_signal = stop_signal
 
     def step(self):
         try:
@@ -57,8 +58,14 @@ class ContinuousBatchingController(BaseController):
             raise e
 
     def shutdown(self):
+        super().shutdown()
         with self.active_handles_lock:
+            pipe = self.pipe
+            if pipe is None:
+                log.info("pipe already closed")
+                return
             active_ids = list(self.active_handles.keys())
+            log.info(f"canceling of active requests {active_ids}")
             for req_id in active_ids:
                 handle = self.active_handles.get(req_id)
                 if handle:
@@ -66,8 +73,10 @@ class ContinuousBatchingController(BaseController):
                         # log
                         handle.cancel()
                     except Exception as e:
-                        # log
+                        log.error(f"error on pipe handle cancelling: {e}")
                         pass
+            self.pipe = None
+            del pipe
 
     def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
                         tokenizer: Tokenizer,
@@ -190,7 +199,7 @@ class ContinuousBatchingController(BaseController):
                                                                            f"score={generation_output.score}, "
                                                                            f"log_probs={generation_output.generated_log_probs}")
 
-                                    responses, stop_signal = token_handler.handle_token(generated_ids)
+                                    responses, stop_signal = token_handler.handle_tokens(generated_ids)
 
                                     finish_reason = generation_output.finish_reason
                                     if not stop_signal and finish_reason and finish_reason != GenerationFinishReason.NONE:
@@ -233,7 +242,6 @@ class ContinuousBatchingController(BaseController):
                                     f"requests={metrics.requests}, "
                                     f"scheduled_requests={metrics.scheduled_requests}"
                                     )
-            self.log_inference_generated.debug(token_handler.phrase.full + token_handler.tool_call_phrase.full)
         except Exception as e:
             self.log_inference.error(f"inference error: {e}", exc_info=e)
             msg = f"{e.args}"

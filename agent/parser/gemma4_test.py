@@ -31,7 +31,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("file_function", first.name)
-        self.assertEqual({"file_path": "dir/dir2/Foo.txt", "start_at": "1"}, first.arguments)
+        self.assertEqual({'file_path': 'dir/dir2/Foo.txt', 'start_at': 1}, first.arguments)
         self.assertFalse(partial)
 
     def test_read_file_windows_path_parse(self):
@@ -55,6 +55,17 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual("read_file", first.name)
         self.assertEqual({}, first.arguments)
         self.assertEqual(["C:/src/MessageStorageImpl.java"], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_write_file_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        self.assertEqual("write_file", first.name)
+        self.assertEqual({'allow_overwrite': 'true', 'content': 'payload', 'target_file': 'C:/temp.txt'}, first.arguments)
+        self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
 

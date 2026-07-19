@@ -2,8 +2,8 @@
     "model_config_list": [
         {
             "config": {
-                "name": "OmniCoder-9B",
-                "base_path": "./models/OmniCoder-9B-int8-asym",
+                "name": "OmniCoder-9B-int4-sym-g128-se-awq",
+                "base_path": "./models/OmniCoder-9B-int4-sym-g128-se-awq",
                 "graph_path": "graph.pbtxt",
                 "low_latency_transformation": true,
                 "stateful": true

@@ -8,6 +8,7 @@ from typing import Sequence, SupportsInt, Callable, List, Literal
 from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason
 from pydantic import TypeAdapter, BaseModel
 
+from agent import inference
 from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.common.roles import ROLE_ASSISTANT
@@ -19,6 +20,7 @@ from agent.openai.chat_completions_api import FunctionDefinition, CompletionResp
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
+log_inference_generated = logging.getLogger(inference.log.name + ".generated")
 
 
 class TokenHandlerConfig(BaseModel):
@@ -89,15 +91,15 @@ def to_openai_tool_call(function: ParsedFunctionCall) -> ToolCall:
     return new_tool_call(function.to_openai_function_call())
 
 
-def markdown_bold(value: str) -> str:
-    return "**" + value + "**"
+def markdown_bold(value) -> str:
+    return f"**{value}**"
 
 
-def markdown_back_tick(value: str) -> str:
-    return "`" + value + "`"
+def markdown_back_tick(value) -> str:
+    return f"`{value}`"
 
 
-def markdown_file_content(value: str, mime: str = "") -> str:
+def markdown_file_content(value, mime: str = "") -> str:
     return f"```{mime}\n{value}\n```"
 
 
@@ -106,7 +108,7 @@ def markdown_json(value: str) -> str:
 
 
 def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> str | None:
-    return (markdown_bold("Tool call error: " + loop_cause) + "\n") if loop_cause else "" + markdown_file_content(
+    return ((markdown_bold("WARNING: " + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
         loop_error)
 
 
@@ -116,10 +118,12 @@ def now() -> float:
 
 class TokenHandler:
     def __clean_phrase(self):
+        log_inference_generated.debug(self.phrase.full)
         self.phrase = Phrase()
         self.phrase_tick = None
 
     def __clean_tool_call_phrase(self):
+        log_inference_generated.debug(self.tool_call_phrase.full)
         self.tool_call_phrase = Phrase()
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
@@ -162,12 +166,12 @@ class TokenHandler:
         self.stop_inference = False
         self.token_counter = 0
 
-    def handle_token(self, tokens: collections.abc.Sequence[SupportsInt], stop_no_conversations=True) -> tuple[
+    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt], stop_no_conversations=True) -> tuple[
         list[CompletionResponse], StopSignal | None]:
 
         is_stop = self.is_stop
         if is_stop and is_stop():
-            log.info("stream finished by user disconnected")
+            log.info("handle tokens is stopped")
             return [], StopSignal.CANCEL
 
         decoded_tokens = decode(tokens, self.tokenizer)
@@ -260,7 +264,7 @@ class TokenHandler:
                     parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
                     if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
                         time = format_time(self.config.tool_call_parting_duration_warning)
-                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})")
+                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})") + "\n"
                         result.append(new_chunk_response(role=ROLE_ASSISTANT, content=warning_msg))
                         self.tool_call_parsing_long_time_warned = True
                     elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
@@ -276,9 +280,9 @@ class TokenHandler:
             else:
                 loop_error: str | None = None
                 try:
-                    prev_line = self.phrase.add_token(token)
+                    new_lines = self.phrase.add_token(token)
                 except LoopError as e:
-                    prev_line = None
+                    new_lines = None
                     log.error(f"tool call error: {e}")
                     loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
@@ -289,9 +293,8 @@ class TokenHandler:
                     if self.phrase_tick is None:
                         self.phrase_tick = now_time
 
-                    phrase_end = prev_line is not None
-                    if phrase_end:
-                        log.info(f"{state.role} phrase: '{prev_line}', last token num: {token_number}")
+                    if new_lines and len(new_lines) > 0:
+                        log.info(f"{state.role} phrase: '{"".join(new_lines)}', last token num: {token_number}")
 
                     if not self.is_chat_mode:
                         result.append(new_chunk_response(role=state.role, content=token))
@@ -427,6 +430,7 @@ class TokenHandler:
             except LoopError as e:
                 log.warning(f"loop at the end of tool call {self.tool_call_phrase.full}")
         log.debug(f"tool call end: {self.tool_call_phrase.full}")
+
         return self.handle_tool_call(state)
 
     def tool_call_start(self, state: ParserState, token: str):

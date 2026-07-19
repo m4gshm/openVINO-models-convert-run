@@ -1,5 +1,5 @@
 {
-  "temperature": 1.1,
+  "temperature": 1.0,
   "top_p": 0.95,
   "top_k": 80,
   "min_p": 0.05,
