@@ -59,20 +59,26 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
 
             param_value_norm = param_tail_norm.strip()
 
-            expected_property: dict[str, Any] = expected_properties.get(param_name_norm, {})
-            expected_type = expected_property.get(EXPECTED_PROPERTY_TYPE, 'string')
-            if expected_type == 'array' or expected_type == 'object':
+            is_like_json = param_value_norm.startswith("[") or param_value_norm.startswith("{")
+            if is_like_json:
                 try:
-                    structured_parameter = json.loads(param_value_norm)
+                    result_parameter = json.loads(param_value_norm)
                 except json.decoder.JSONDecodeError as e:
                     log.debug(
-                        f"function parameter parsing error, parameter '{param_name}', value '{param_value_norm}', "
-                        f"expected_type '{expected_type}': {e}")
-                    structured_parameter = json_repair.loads(param_value_norm)
-                    log.debug(f"repaired parameter value '{structured_parameter}'")
-                arguments[param_name_norm] = structured_parameter
+                        f"function parameter parsing error, parameter='{param_name}', value='{param_value_norm}', "
+                        f"type '{type(param_value_norm)}': {e}")
+                    try:
+                        result_parameter = json_repair.loads(param_value_norm)
+                        log.debug(f"repaired parameter value '{result_parameter}'")
+                    except Exception as e:
+                        log.debug(
+                            f"fail to repaired parameter value, parameter='{param_name}', value='{param_value_norm}', "
+                            f"type '{type(param_value_norm)}': {e}")
+                        result_parameter = param_value_norm
+                arguments[param_name_norm] = result_parameter
             else:
                 arguments[param_name_norm] = param_value_norm
+
     return arguments, partial
 
 

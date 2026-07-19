@@ -91,15 +91,15 @@ def to_openai_tool_call(function: ParsedFunctionCall) -> ToolCall:
     return new_tool_call(function.to_openai_function_call())
 
 
-def markdown_bold(value: str) -> str:
-    return "**" + value + "**"
+def markdown_bold(value) -> str:
+    return f"**{value}**"
 
 
-def markdown_back_tick(value: str) -> str:
-    return "`" + value + "`"
+def markdown_back_tick(value) -> str:
+    return f"`{value}`"
 
 
-def markdown_file_content(value: str, mime: str = "") -> str:
+def markdown_file_content(value, mime: str = "") -> str:
     return f"```{mime}\n{value}\n```"
 
 
@@ -171,7 +171,7 @@ class TokenHandler:
 
         is_stop = self.is_stop
         if is_stop and is_stop():
-            log.info("handle tokens stopped by signal")
+            log.info("handle tokens is stopped")
             return [], StopSignal.CANCEL
 
         decoded_tokens = decode(tokens, self.tokenizer)
@@ -181,12 +181,8 @@ class TokenHandler:
                        stop_no_conversations: bool = True, ) -> tuple[
         list[CompletionResponse], StopSignal | None]:
         result: list[CompletionResponse] = []
-        is_stop = self.is_stop
         try:
             for token in decoded_tokens:
-                if is_stop and is_stop():
-                    log.info("process tokens stopped by signal")
-                    return result, StopSignal.CANCEL
                 self.token_counter += 1
                 log.debug(f"token '{token}', num {self.token_counter}")
                 token_result, stop_signal = self.process_token(token, self.token_counter, state, parser,

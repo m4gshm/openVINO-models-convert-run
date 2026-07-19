@@ -2,7 +2,7 @@
   "max_num_seqs": 4,
 
   "dynamic_split_fuse": true,
-  "max_num_batched_tokens": 1024,
+  "max_num_batched_tokens": 2048,
 
   "enable_prefix_caching": true
 }

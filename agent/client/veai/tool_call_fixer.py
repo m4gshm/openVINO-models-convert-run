@@ -7,12 +7,13 @@ import json_repair
 
 from agent.client.user_context import UserContext
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
-    search_file_by_name, file_structure, run_command
+    search_file_by_name, file_structure, run_command, run_configuration
 from agent.client.veai.tool.edit_file import EditFile
 from agent.client.veai.tool.file_structure import FileStructure
 from agent.client.veai.tool.list_dir import ListDir
 from agent.client.veai.tool.read_file import ReadFile
 from agent.client.veai.tool.run_command import RunCommand
+from agent.client.veai.tool.run_configuration import RunConfiguration
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
@@ -44,6 +45,8 @@ def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
         return fix_search_file_by_name(function, user_context)
     elif ask_user_with_options.function_name == function.name:
         return fix_ask_user_with_options(function, user_context)
+    elif run_configuration.function_name == function.name:
+        return fix_run_configuration(function, user_context)
     return function
 
 
@@ -438,3 +441,33 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
                                                                                                    prop_name)
 
     return properties
+
+
+def fix_run_configuration(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
+    args = get_args(function)
+    target_file, invalid = get_target_file(args, context)
+    configuration_name = args.get("configuration_name")
+    if target_file and configuration_name:
+        line_number, fixed = as_int_or_none(args.get("line_number"), "line_number")
+        invalid |= fixed
+        if line_number is None:
+            line_number = 0
+            invalid = True
+
+        timeout, fixed = as_int_or_none(args.get("timeout"), "timeout")
+        invalid |= fixed
+
+        if invalid:
+            configuration_run_arguments = args.get("configuration_run_arguments")
+            configuration_environment_variables = args.get("configuration_environment_variables")
+            files_to_collect_coverage = args.get("files_to_collect_coverage")
+            new_function = RunConfiguration().new_call(target_file=target_file, configuration_name=configuration_name,
+                                                       line_number=line_number, timeout=timeout,
+                                                       configuration_run_arguments=configuration_run_arguments,
+                                                       configuration_environment_variables=configuration_environment_variables,
+                                                       files_to_collect_coverage=files_to_collect_coverage)
+            return new_function
+    else:
+        log.error(f"no required args for function {function.name}, args={args}, "
+                  f"required args = ['target_file', 'configuration_name']")
+    return function

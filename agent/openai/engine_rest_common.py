@@ -4,11 +4,9 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
-from asyncio import AbstractEventLoop
 from datetime import timedelta
 from typing import Generator, Any, Callable, Literal
 
-from fastapi import APIRouter
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import GenerationConfig
@@ -51,11 +49,8 @@ class ControllerConfig(BaseModel):
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
-        router.post("/v1/completions")(self.completions)
-        router.post("/v1/chat/completions")(self.chat)
-        router.get(path="/v1/models", response_model_exclude_none=True)(self.models)
-        self.router = router
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, stop_signal: threading.Event,
+                 chat_template: str = ''):
         self.parser = parser
         self.generate_config = generate_config
         self.config = config
@@ -65,10 +60,11 @@ class BaseController(ABC):
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
         self.is_fix_tool_type = is_fix_tool_type
-        self.stop_flag = threading.Event()
+        self.closed = threading.Event()
+        self.stop_signal = stop_signal
 
     def shutdown(self):
-        self.stop_flag.set()
+        self.closed.set()
 
     async def models(self) -> ModelsListResponse:
         current_time = int(time.time())
@@ -131,9 +127,8 @@ class BaseController(ABC):
         log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
-        loop = asyncio.get_event_loop()
         def is_stop():
-            return self.stop_flag.is_set() or is_disconnected(loop, request)
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
         # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
         #         body.model_config.get("reasoning") or True)
@@ -229,8 +224,6 @@ class BaseController(ABC):
         return None
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
-        loop = asyncio.get_event_loop()
-
         prompt = body.prompt
         if not prompt:
             prompt = ""
@@ -250,10 +243,13 @@ class BaseController(ABC):
         if over_limit_response:
             return over_limit_response
 
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
+
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                                tokenizer=self.tokenizer, init_chat_events=False,
-                                               is_stop=lambda: is_disconnected(loop, request), is_veai=False)
+                                               is_stop=is_stop, is_veai=False)
 
         def chunk_converter(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[
             completions_api.CompletionResponse, None, None]:
@@ -317,9 +313,10 @@ def make_union(chunk_generator: Generator[CompletionResponse, None, None]) -> tu
     return finish_reason, full_content, full_reasoning_content, full_tool_calls
 
 
-def is_disconnected(loop: AbstractEventLoop, request: Request) -> bool:
+def is_disconnected(request: Request) -> bool:
     disconnected = False
     try:
+        loop = request.app.state.main_loop
         disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.5)
         if disconnected:
             log.debug(f"disconnected http request")

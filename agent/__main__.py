@@ -2,7 +2,9 @@ import argparse
 import json
 import logging.config
 import os
+import signal
 import sys
+import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -61,6 +63,18 @@ class AttentionBackend(Enum):
 class Turn(Enum):
     on = 'on'
     off = 'off'
+
+
+stop_signal = threading.Event()
+
+
+def handle_exit_signal(signum, frame):
+    log.info(f"handle signal {signum}")
+    stop_signal.set()
+
+
+signal.signal(signal.SIGINT, handle_exit_signal)
+signal.signal(signal.SIGTERM, handle_exit_signal)
 
 
 def main():
@@ -322,7 +336,9 @@ def main():
                                      generate_config=generate_opts,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
-                                     pipeline_properties=pipeline_properties, is_fix_tool_type=is_fix_tool_type)
+                                     pipeline_properties=pipeline_properties,
+                                     is_fix_tool_type=is_fix_tool_type,
+                                     stop_signal=stop_signal)
     else:
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
@@ -334,10 +350,25 @@ def main():
                                               pipeline_properties=pipeline_properties,
                                               chat_template=chat_template,
                                               tokenizer_properties=tokenizer_properties,
-                                              is_fix_tool_type=is_fix_tool_type)
+                                              is_fix_tool_type=is_fix_tool_type,
+                                              stop_signal=stop_signal
+                                              )
 
     log.info(f"listening {args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, reload=False)
+
+    def handle():
+        uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
+
+    server_thread = threading.Thread(target=handle, daemon=True)
+    server_thread.start()
+    # handle()
+    try:
+        stopped = False
+        while not stopped:
+            stopped = stop_signal.wait(timeout=1)
+        log.debug(f"main thread finish")
+    except Exception as e:
+        log.debug(f"main thread finish with error: {e}")
 
 
 def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:

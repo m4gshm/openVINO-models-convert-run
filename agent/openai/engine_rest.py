@@ -38,9 +38,9 @@ def add_stop_signal(responses: list[CompletionResponse], stop_signal: StopSignal
 
 class ContinuousBatchingController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
-                 handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, is_fix_tool_type, chat_template)
+                 handler_config: TokenHandlerConfig, stop_signal: threading.Event,
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
@@ -48,6 +48,7 @@ class ContinuousBatchingController(BaseController):
         self.executor = ThreadPoolExecutor()
         self.active_handles_lock = threading.Lock()
         self.active_handles: dict[int, GenerationHandle] = {}
+        self.stop_signal = stop_signal
 
     def step(self):
         try:

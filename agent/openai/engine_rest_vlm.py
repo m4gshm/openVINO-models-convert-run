@@ -28,15 +28,16 @@ log = logging.getLogger(__name__)
 
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
-                 handler_config: TokenHandlerConfig,
-                 generate_config: GenerateOpts, router: APIRouter, is_fix_tool_type: bool, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, router, is_fix_tool_type, chat_template)
+                 handler_config: TokenHandlerConfig, stop_signal: threading.Event,
+                 generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
         self.config = config
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
+        self.stop_signal = stop_signal
 
     def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
                         tokenizer: Tokenizer,
