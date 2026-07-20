@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Generator, Any, Callable, Literal
+from typing import Generator, Any, Callable, Literal, Iterable
 
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
@@ -19,7 +19,7 @@ from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
-from agent.common.roles import ROLE_TOOL
+from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.inference.token_handler import markdown_bold, markdown_back_tick
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import new_response, new_message, new_tool_call, new_stop_response
@@ -45,6 +45,17 @@ MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 class ControllerConfig(BaseModel):
     model_name: str
     response_timeout: timedelta = timedelta(minutes=20)
+
+
+def new_http_response(stream: bool,
+                      chunk_generator: Iterable[CompletionResponse]) -> StreamingResponse | CompletionResponse:
+    if stream:
+        return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
+    else:
+        finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
+        return new_response(
+            message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content, full_tool_calls),
+            finish_reason=finish_reason, stream=False)
 
 
 class BaseController(ABC):
@@ -127,33 +138,27 @@ class BaseController(ABC):
         log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
-        def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
-
-        # is_reasoning_enabled: bool = self.generate_config.reasoning_supported and (
-        #         body.model_config.get("reasoning") or True)
+        stream = body.stream == True
 
         messages = body.messages
+        tools = body.tools
+
+        log.info(f"inbound history messages {len(messages)}")
 
         is_veai = is_veai_agent(messages)
         user_context = get_veai_context(messages) if is_veai else None
 
         last_message = messages[-1] if messages else None
 
-        stream = body.stream == True
-        if last_message:
-            if is_middleware_checkpoint(last_message):
-                if USER_SELECT_INTERRUPT in str(last_message.content).lower():
-                    return new_response(
-                        message=new_message(content="Interrupted"),
-                        stream=stream, finish_reason="stop")
+        if last_message and is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
+                last_message.content).lower():
+            return new_http_response(stream, [new_response(
+                message=new_message(role=ROLE_ASSISTANT, content="Interrupted"),
+                stream=stream, finish_reason="stop")])
 
-        log.info(f"inbound history messages {len(messages)}")
-
-        tools = body.tools
-        invalid_reponse = self.validate_messages(messages, tools)
-        if invalid_reponse:
-            return invalid_reponse
+        invalid_response = self.validate_messages(messages, tools)
+        if invalid_response:
+            return new_http_response(stream,[invalid_response])
 
         tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.is_fix_tool_type)
 
@@ -168,36 +173,28 @@ class BaseController(ABC):
                                                     extra_context=extra_context,
                                                     chat_template=self.chat_template)
 
-        # if self.generate_config.preprocess_prompt_by_parser:
-        #     full_prompt = self.parser.process_chat_prompt(full_prompt)
-
         self.log_inference_prompt.debug(full_prompt)
 
-        generation_config = self.new_generation_config(temperature=body.temperature,
-                                                       max_tokens=body.max_tokens,
-                                                       max_completion_tokens=body.max_completion_tokens,
-                                                       top_p=body.top_p, frequency_penalty=body.frequency_penalty,
-                                                       logprobs=body.logprobs, stop=body.stop)
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
         chunk_generator = self.chunk_generator(
-            prompt=full_prompt, chat_history=chat_history, generation_config=generation_config, tokenizer=tokenizer,
+            prompt=full_prompt, chat_history=chat_history, generation_config=(
+                self.new_generation_config(temperature=body.temperature,
+                                           max_tokens=body.max_tokens,
+                                           max_completion_tokens=body.max_completion_tokens,
+                                           top_p=body.top_p, frequency_penalty=body.frequency_penalty,
+                                           logprobs=body.logprobs, stop=body.stop)), tokenizer=tokenizer,
             init_chat_events=True, is_stop=is_stop,
             is_veai=is_veai, user_context=user_context, function_by_name=function_by_name)
-        if stream:
-            return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
-        else:
-            finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
-            return new_response(
-                message=new_message(full_content, full_reasoning_content, full_tool_calls),
-                finish_reason=finish_reason, stream=False)
+        return new_http_response(stream, chunk_generator)
 
     @abstractmethod
     def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
-                        tokenizer: Tokenizer,
-                        init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
+                        tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None,
                         user_context: UserContext | None = None,
-                        ) -> Generator[CompletionResponse, None, None]:
+                        ) -> Iterable[CompletionResponse]:
         pass
 
     def validate_messages(self, messages, tools) -> CompletionResponse | None:
@@ -272,7 +269,8 @@ class BaseController(ABC):
         else:
             finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_converter)
             return new_response(response_id=response_id,
-                                message=new_message(full_content, full_reasoning_content, full_tool_calls),
+                                message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content,
+                                                    full_tool_calls),
                                 finish_reason=finish_reason, stream=False)
 
     def check_prompt_limit(self, max_length: int, encode_size: int,
@@ -288,7 +286,7 @@ class BaseController(ABC):
         return encode_size
 
 
-def make_union(chunk_generator: Generator[CompletionResponse, None, None]) -> tuple[
+def make_union(chunk_generator: Iterable[CompletionResponse]) -> tuple[
     Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ToolCall]]:
     full_content = ""
     full_reasoning_content = ""
@@ -347,9 +345,9 @@ def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is
     return tools_raw, function_by_name
 
 
-def stream_generator(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[str, None, None]:
+def stream_generator(chunk_generator: Iterable[CompletionResponse]) -> Iterable[str]:
     for chunk in chunk_generator:
-        yield f"data: {chunk.model_dump_json()}\n\n"
+        yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
 
 def is_middleware_checkpoint(last_message: ChatCompletionMessageParam) -> str | None | bool:

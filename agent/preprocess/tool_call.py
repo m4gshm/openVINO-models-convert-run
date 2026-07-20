@@ -9,10 +9,11 @@ log = logging.getLogger(__name__)
 
 
 class FunctionCallResult:
-    def __init__(self, name: str, arguments: str, result: str):
+    def __init__(self, name: str, arguments: str, result: str, repeats: int):
         self.name = name
         self.arguments = arguments
         self.result = result
+        self.repeats = repeats
 
     def render_markdown(self) -> str:
         function_name = markdown_back_tick(self.name)
@@ -32,10 +33,13 @@ class FunctionCallResult:
             function_arguments = "\n" + markdown_json(self.arguments)
 
         function_results = "\n" + markdown_json(self.result) if self.result else "NO_RESULT"
-        return markdown_bold("WARNING: Tool calls loop.") + "\n\n" \
-                                                            f"Tool name: {function_name}\n\n" \
-                                                            f"Arguments: {function_arguments}\n\n" \
-                                                            f"Result: {function_results}"
+        return markdown_bold(
+            f"WARNING: Tool calls loop "
+            f"({self.repeats} repeat{"s" if self.repeats != 1 else ""})."
+        ) + "\n\n" \
+            f"Tool name: {function_name}\n\n" \
+            f"Arguments: {function_arguments}\n\n" \
+            f"Result: {function_results}"
 
 
 def find_tool_call_function(tool_call_id: str | None, start_from: int,
@@ -52,8 +56,9 @@ def find_tool_call_function(tool_call_id: str | None, start_from: int,
     return None, i
 
 
-def new_function_call_result(function_name: str, last_tool_call_arguments: str, result: str) -> FunctionCallResult:
-    return FunctionCallResult(name=function_name, arguments=last_tool_call_arguments, result=result)
+def new_function_call_result(function_name: str, last_tool_call_arguments: str, result: str,
+                             repeats: int) -> FunctionCallResult:
+    return FunctionCallResult(name=function_name, arguments=last_tool_call_arguments, result=result, repeats=repeats)
 
 
 class PreprocessToolCall:
@@ -98,7 +103,7 @@ class PreprocessToolCall:
 
                     if repeated >= self.max_repeated_tool_calls_with_the_same_result:
                         return new_function_call_result(last_tool_call_function.name,
-                                                        last_tool_call_arguments, result), repeated
+                                                        last_tool_call_arguments, result, repeated), repeated
                     i -= 1
 
         return None, 0

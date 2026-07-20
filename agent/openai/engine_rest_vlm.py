@@ -4,11 +4,9 @@ import threading
 import uuid
 from collections import abc
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
-from typing import Generator
+from typing import Callable, Iterable
 from typing import SupportsInt, Literal
 
-from fastapi.routing import APIRouter
 from openvino_genai import ChatHistory
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
@@ -30,21 +28,18 @@ class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event,
                  generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, chat_template)
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, stop_signal, chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
         self.config = config
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
-        self.stop_signal = stop_signal
 
     def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
-                        tokenizer: Tokenizer,
-                        init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
+                        tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
-                        ) -> Generator[
-        CompletionResponse, None, None]:
+                        ) -> Iterable[CompletionResponse]:
 
         response_id = str(uuid.uuid4())
         encode_size = self.get_tokens_size(prompt)
@@ -211,12 +206,8 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
         if stop_signal:
             add_stop_signal(responses, stop_signal)
 
-        finish_reason = None
         if responses:
             for response in responses:
-                for choice in response.choices:
-                    if not finish_reason:
-                        finish_reason = choice.finish_reason
                 self.chunk_queue.put_nowait(response)
 
         if stop_signal == StopSignal.STOP:

@@ -345,7 +345,7 @@ class Phrase:
                         break
                     i += 1
                     if i >= DUPLICATED_TOKENS_LIMIT:
-                        raise LoopError(message="Duplicate token looks like the model is in a loop", payload=letter)
+                        raise LoopError(payload=letter)
 
             if letter != '\n':
                 add_token(letter, self.current_line)
@@ -389,8 +389,7 @@ class Phrase:
                             f"duplicates detector: delta_rate={delta_rate}, last_part_rate2={last_part_rate2}")
                         if delta_rate <= self.last_subpart_end_line_delta_rate and last_part_rate2 >= self.last_subpart_duplicates_rate:
                             duplicated_payload = "".join(duplicates_check_tail)
-                            raise LoopError(message="Looks like generating infinity loop",
-                                            payload=duplicated_payload)
+                            raise LoopError(payload=duplicated_payload)
             else:
                 current_line = self.current_line
                 current_line_str = "".join(current_line)
@@ -462,8 +461,7 @@ class Phrase:
 
                     if cycle_start and cycle_end:
                         cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
-                        raise LoopError(message="Cycled phrase looks like the model is in a loop",
-                                        payload=cycled_phrase)
+                        raise LoopError(payload=cycled_phrase)
                     else:
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
                         log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
@@ -472,7 +470,7 @@ class Phrase:
                 duplicated_rate = duplicated_lines_amount / lines_amount
                 if duplicated_rate >= DUPLICATED_LINES_RATE_LIMIT and duplicated_lines_amount >= DUPLICATED_LINES_LIMIT:
                     payload = "".join(list(self.lines_unique.keys()))
-                    raise LoopError(message="Duplicate lines looks like the model is in a loop", payload=payload)
+                    raise LoopError(payload=payload)
 
                 self.clean_current_line()
                 added_lines.append(current_line_str)

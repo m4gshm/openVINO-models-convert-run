@@ -74,8 +74,8 @@ def new_app(controller: BaseController) -> FastAPI:
     app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
     app_router = app.router
     app_router.route_class = LoggingRoute
-    app_router.post("/v1/completions")(controller.completions)
-    app_router.post("/v1/chat/completions")(controller.chat)
+    app_router.post("/v1/completions", response_model_exclude_none=True)(controller.completions)
+    app_router.post("/v1/chat/completions", response_model_exclude_none=True)(controller.chat)
     app_router.get(path="/v1/models", response_model_exclude_none=True)(controller.models)
     return app
 

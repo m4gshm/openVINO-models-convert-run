@@ -3,7 +3,6 @@ import time
 import uuid
 from typing import Optional, List, Literal
 
-from agent.common.roles import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import ChatCompletionMessage, ToolCall, CHAT_COMPLETION_CHUNK, \
     CompletionResponse, CHAT_COMPLETION, FunctionCall, ChatCompletionChoice
 
@@ -12,19 +11,19 @@ EMPTY_CONTENT = ' '
 tool_call_counter = itertools.count(start=0)
 
 
-def new_message(content: str | None = None, reasoning_content: str | None = None,
+def new_message(role: str | None = None, content: str | None = None, reasoning_content: str | None = None,
                 tool_calls: list[ToolCall] | None = None) -> ChatCompletionMessage:
     if not content or reasoning_content or tool_calls:
         content = EMPTY_CONTENT
     message = ChatCompletionMessage()
-    message.role = ROLE_ASSISTANT
+    message.role = role
     message.content = content
     message.reasoning_content = reasoning_content
     message.tool_calls = tool_calls
     return message
 
 
-def new_delta(role: str | None, content: str | None = None, thinking: bool = False,
+def new_delta(role: str | None = None, content: str | None = None, thinking: bool = False,
               tool_calls: list[ToolCall] | None = None) -> ChatCompletionMessage:
     delta = ChatCompletionMessage()
     delta.role = role
@@ -38,11 +37,11 @@ def new_delta(role: str | None, content: str | None = None, thinking: bool = Fal
     return delta
 
 
-def new_stop_response(response_id: str | None = None, model: str | None = None,
+def new_stop_response(response_id: str | None = None, role: str | None = None, model: str | None = None,
                       finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop",
                       content: str | None = None) -> CompletionResponse:
     return new_response(response_id=response_id, model=model, finish_reason=finish_reason,
-                        message=new_message(content=content))
+                        message=new_message(role=role, content=content))
 
 
 def new_response(message: ChatCompletionMessage,
@@ -58,7 +57,7 @@ def new_response(message: ChatCompletionMessage,
                                                                                finish_reason, stream)])
 
 
-def new_chunk_response(role: str | None, response_id: str | None = None, content: str | None = None,
+def new_chunk_response(role: str | None = None, response_id: str | None = None, content: str | None = None,
                        thinking: bool = False,
                        tool_calls: Optional[List[ToolCall]] = None,
                        finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None,
@@ -81,7 +80,8 @@ def generate_tool_call_id(func_name: str, ts: int | None = None) -> str:
 
 
 def new_chat_completion_choice(message: ChatCompletionMessage,
-                               finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None,
+                               finish_reason: Optional[
+                                   Literal["stop", "length", "tool_calls", "content_filter"]] = None,
                                stream: bool | None = True) -> ChatCompletionChoice:
     is_stream = stream == True
     return ChatCompletionChoice(delta=(message if is_stream else None),
