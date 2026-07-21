@@ -187,8 +187,8 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
-    def new_state(self, init_chat_events=True) -> ParserState:
-        state = super().new_state()
+    def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
+        state = super().new_state(prompt, init_chat_events)
         return state
 
     def process_chat_prompt(self, prompt: str) -> str:

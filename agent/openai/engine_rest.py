@@ -77,7 +77,7 @@ class ContinuousBatchingController(BaseController):
             self.pipe = None
             del pipe
 
-    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
                         ) -> Iterable[CompletionResponse]:
@@ -112,6 +112,7 @@ class ContinuousBatchingController(BaseController):
             self.log_inference.info(f"inference start: request={request_id}")
 
         token_handler = TokenHandler(tokenizer=tokenizer,
+                                     prompt=prompt,
                                      parser=self.parser,
                                      init_chat_events=init_chat_events,
                                      is_stop=is_stop,
@@ -212,6 +213,11 @@ class ContinuousBatchingController(BaseController):
                                         response.model = model_name
                                         yield response
                                     if stop_signal:
+                                        generation_handle.stop(
+                                            GenerationFinishReason.STOP if stop_signal == StopSignal.STOP else
+                                            GenerationFinishReason.TOOL_CALL if stop_signal == StopSignal.TOOL_CALL else
+                                            GenerationFinishReason.LENGTH if stop_signal == StopSignal.LENGTH else
+                                            GenerationFinishReason.NONE)
                                         return
                         elif started:
                             self.log_inference.debug("no more reads")
@@ -231,7 +237,7 @@ class ContinuousBatchingController(BaseController):
             metrics = self.pipe.get_metrics()
 
             self.log_inference.info(f"inference finished: "
-                                    f"reason={generation_handle.get_status()}, "
+                                    f"status={generation_handle.get_status()}, "
                                     f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024 / 1024:.2f}MB, "
                                     f"cache_size={metrics.cache_size_in_bytes / 1024 / 1024:.2f}MB "
                                     f"cache_usage={metrics.cache_usage}, "

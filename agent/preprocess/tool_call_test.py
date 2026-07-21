@@ -24,6 +24,17 @@ class PreprocessToolCallCase(unittest.TestCase):
         self.assertEqual('{"glob_pattern": "InputMessages.*", "search_directory": "test_dir"}', loop_call.arguments)
         self.assertEqual('{"result":"warning","warning":"Directory does not exist: test_dir"}', loop_call.result)
 
+    def test_check_loop_multitools_calls(self):
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls_multiple.json")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        messages = self.adapter.validate_json(tool_call_text)
+        preprocess_tool_call = PreprocessToolCall()
+        loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
+        self.assertIsNotNone(loop_call)
+        self.assertEqual("search_file_by_name", loop_call.name)
+        self.assertEqual('{"glob_pattern": "*.java", "search_directory": "/tmp"}', loop_call.arguments)
+        self.assertEqual('{"result":"success with json content","content":{"results":[]}}', loop_call.result)
+
     def test_markdown_render(self):
         tool_cal_file_src = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.json")
         tool_cal_file_expected = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.md")
@@ -33,7 +44,8 @@ class PreprocessToolCallCase(unittest.TestCase):
 
         tool_call_result = messages[-1]
         function, i = find_tool_call_function(tool_call_result.tool_call_id, len(messages) - 1, messages)
-        markdown = new_function_call_result(function.name, function.arguments, tool_call_result.content).render_markdown()
+        markdown = new_function_call_result(function.name, function.arguments, tool_call_result.content,
+                                            5).render_markdown()
         self.assertEqual(tool_call_md, markdown)
 
 

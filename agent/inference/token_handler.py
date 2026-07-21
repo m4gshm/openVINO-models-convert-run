@@ -120,6 +120,7 @@ class TokenHandler:
     def __clean_phrase(self):
         log_inference_generated.debug(self.phrase.full)
         self.phrase = Phrase()
+        self.empty_conversation_counter = 0
         self.phrase_tick = None
 
     def __clean_tool_call_phrase(self):
@@ -130,6 +131,7 @@ class TokenHandler:
 
     def __init__(self,
                  tokenizer: Tokenizer,
+                 prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
                  is_stop: Callable[[], bool] | None,
@@ -143,10 +145,11 @@ class TokenHandler:
 
         self.tokenizer = tokenizer
         self.parser = parser
-        state = parser.new_state(init_chat_events)
+        state = parser.new_state(prompt, init_chat_events)
         if state:
             state.supported_functions = supported_functions if supported_functions else {}
         self.state = state
+        self.is_prefill_out = False
         self.is_chat_mode = init_chat_events
         self.is_stop = is_stop
         self.config = config
@@ -161,8 +164,6 @@ class TokenHandler:
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
         self.empty_conversation_counter = 0
-        self.no_conversation_counter = 0
-        self.no_conversation_counter_erased = 0
         self.stop_inference = False
         self.token_counter = 0
         self.role_initialized = False
@@ -176,6 +177,14 @@ class TokenHandler:
             return [], StopSignal.CANCEL
 
         decoded_tokens = decode(tokens, self.tokenizer)
+        prefill_tokens = self.state.prefill_tokens
+        if not self.is_prefill_out and prefill_tokens:
+            all_tokens = []
+            all_tokens.extend(prefill_tokens)
+            all_tokens.extend(decoded_tokens)
+            decoded_tokens = all_tokens
+            self.is_prefill_out = True
+
         return self.process_tokens(decoded_tokens, self.state, self.parser, stop_no_conversations)
 
     def process_tokens(self, decoded_tokens: list[str], state: ParserState, parser: Parser,
@@ -241,7 +250,6 @@ class TokenHandler:
                 result.append(tool_call)
             else:
                 self.tool_call_start(state, token)
-
         elif parser.is_tool_call_end(state, token):
             tool_call, stop_signal = self.tool_call_end(state, token)
             result.append(tool_call)
@@ -307,41 +315,22 @@ class TokenHandler:
 
                     if not self.is_chat_mode:
                         result.append(new_chunk_response(content=token))
-                    if not current_event and stop_no_conversations:
-                        if parser.is_erase(state, token):
-                            self.no_conversation_counter_erased += 1
-                        elif not token.rstrip():
-                            # empty or new line
-                            self.no_conversation_counter_erased += 1
+
+                    erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
+                    is_assistant = ROLE_ASSISTANT == self.state.role
+                    if not is_assistant:
+                        log.warning(f"unexpected role {state.role}")
+                    if is_assistant or not self.config.prevent_no_assistant_inference_output:
+                        if not erase:
+                            chunk = new_chunk_response(content=token,
+                                                       thinking=state.has_event(StateEvent.THINK))
+                            result.append(chunk)
                         else:
-                            log.debug("no more conversations")
-                            self.no_conversation_counter += 1
-                        if self.no_conversation_counter_erased > self.config.no_conversation_counter_erased_max:
-                            warning_msg = f"empty conversations (erased) limits exceed ({self.no_conversation_counter_erased}), abort inference"
-                            log.debug(warning_msg)
-                            result.append(new_chunk_response(content=markdown_bold(warning_msg)))
-                            stop_signal = StopSignal.CANCEL
-                        elif self.no_conversation_counter > self.config.no_conversation_counter_max:
-                            warning_msg = f"empty conversations limits exceed ({self.no_conversation_counter}), abort inference"
-                            log.warning(warning_msg)
-                            result.append(new_chunk_response(content=markdown_bold(warning_msg)))
-                            stop_signal = StopSignal.CANCEL
+                            log.debug(f"erase token: {token}")
+                            pass
                     else:
-                        erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
-                        is_assistant = ROLE_ASSISTANT == self.state.role
-                        if not is_assistant:
-                            log.warning(f"unexpected role {state.role}")
-                        if is_assistant or not self.config.prevent_no_assistant_inference_output:
-                            if not erase:
-                                chunk = new_chunk_response(content=token,
-                                                           thinking=state.has_event(StateEvent.THINK))
-                                result.append(chunk)
-                            else:
-                                log.debug(f"erase token: {token}")
-                                pass
-                        else:
-                            log.warning(
-                                f"prevent generating by unexpected role {state.role}, token '{token}'")
+                        log.warning(
+                            f"prevent generating by unexpected role {state.role}, token '{token}'")
         state.finalize(token)
         return result, stop_signal
 
@@ -356,7 +345,7 @@ class TokenHandler:
     def conversation_end(self, state: ParserState, token_number: int) -> tuple[
         list[CompletionResponse], StopSignal | None]:
         result: list[CompletionResponse] = []
-        stop_signal: Literal[StopSignal.TOOL_CALL, StopSignal.CANCEL] | None = None
+        stop_signal: Literal[StopSignal.STOP, StopSignal.TOOL_CALL, StopSignal.CANCEL]
         if state.get_current_event() == StateEvent.TOOL_CALL:
             # sometimes Qwen3.5 ends tool call by end conversation token
             if log.isEnabledFor(logging.DEBUG):
@@ -367,6 +356,9 @@ class TokenHandler:
             state.finish_current_event(StateEvent.TOOL_CALL)
             resp, stop_signal = self.handle_tool_call(state)
             result.append(resp)
+        else:
+            stop_signal = StopSignal.STOP
+
         if state.get_current_event() == StateEvent.THINK:
             # The generated text is returned as a normal response because it was already sent as a thought,
             # but the model did not end it with a thought end marker.

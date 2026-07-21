@@ -334,6 +334,9 @@ class Phrase:
 
     def add_token(self, token: str) -> list[str]:
         added_lines = list[str]()
+        if token == "":
+            log.error(f"empty token")
+            token = " "
         for letter in token:
             self.tokens.append(letter)
 
@@ -464,7 +467,8 @@ class Phrase:
                         raise LoopError(payload=cycled_phrase)
                     else:
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
-                        log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
+                        if len(duplicated_phrase.strip()) > 0:
+                            log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
 
                 duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
                 duplicated_rate = duplicated_lines_amount / lines_amount

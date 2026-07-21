@@ -2,7 +2,7 @@ import json
 import logging
 
 from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
-from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick
+from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick, markdown_file_content
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, FunctionCall
 
 log = logging.getLogger(__name__)
@@ -32,7 +32,11 @@ class FunctionCallResult:
             log.debug(f"function arguments parsing error: {e}")
             function_arguments = "\n" + markdown_json(self.arguments)
 
-        function_results = "\n" + markdown_json(self.result) if self.result else "NO_RESULT"
+        result = self.result
+        result_strip = result.strip()
+        is_looks_like_json = result_strip.startswith("{") or result_strip.startswith("[")
+        function_results = "\n" + markdown_file_content(result,
+                                                        "json" if is_looks_like_json else "") if result else "NO_RESULT"
         return markdown_bold(
             f"WARNING: Tool calls loop "
             f"({self.repeats} repeat{"s" if self.repeats != 1 else ""})."
@@ -67,43 +71,42 @@ class PreprocessToolCall:
 
     def check_loop_tool_calls(self, messages: list[ChatCompletionMessageParam]) -> tuple[
         FunctionCallResult | None, int]:
-        last_message = messages[-1] if messages else None
-        if last_message and last_message.role == ROLE_TOOL:
-            last_tool_call_id = last_message.tool_call_id
-            last_tool_call_function, i = find_tool_call_function(last_tool_call_id, len(messages) - 2, messages)
-            if last_tool_call_function is None:
-                log.warning(
-                    f"cannot find function call for tool last_tool_call_id={last_tool_call_id},"
-                    f" tool call result={last_message}")
-            else:
-                last_tool_call_arguments = last_tool_call_function.arguments
-                repeated = 1
-                # reverse loop from prelast message
-                i -= 1
-                count = 0
-                while i >= 0:
-                    count += 1
-                    if count >= self.max_messages_to_check:
-                        break
-                    message = messages[i]
-                    if message.role != ROLE_TOOL:
-                        continue
+        if not messages:
+            return None, 0
+        results = dict[str, str | None]()
+        function_call = dict[str, dict[str, dict[str, set[int]]]]()
+        over_all_messages = False
+        for i, message in enumerate(reversed(messages)):
+            if not over_all_messages and i >= self.max_messages_to_check - 1:
+                break
+            if message.role == ROLE_TOOL:
+                result_tool_call_id = message.tool_call_id
+                result = message.content
+                if result_tool_call_id:
+                    results[result_tool_call_id] = f"{result}"
+            elif message.role == ROLE_ASSISTANT:
+                for tool_call in message.tool_calls or []:
+                    function_tool_call_id = tool_call.id
+                    function = tool_call.function
+                    function_arguments = function_call.setdefault(function.name, dict[str, dict[str, set[int]]]())
+                    function_results = function_arguments.setdefault(function.arguments, dict[str, set[int]]())
+                    result = results.get(function_tool_call_id)
+                    if result:
+                        function_call_positions = function_results.setdefault(result, set())
+                        function_call_positions.add(i)
 
-                    result = message.content
-                    tool_call_id = message.tool_call_id
-
-                    tool_call_function, i = find_tool_call_function(tool_call_id, i - 1, messages)
-                    tool_call_arguments = tool_call_function.arguments if tool_call_function else None
-
-                    is_equal = tool_call_arguments == last_tool_call_arguments and result == last_message.content
-                    if is_equal:
-                        repeated += 1
+                        repeats = len(function_call_positions)
+                        if not over_all_messages and repeats > 2:
+                            over_all_messages = True
+                        if repeats >= self.max_repeated_tool_calls_with_the_same_result:
+                            return new_function_call_result(function.name,
+                                                            function.arguments, result, repeats), repeats
                     else:
-                        break
+                        log.warning(
+                            f"cannot find function call for tool last_tool_call_id={function_tool_call_id},"
+                            f" tool call result={message}")
 
-                    if repeated >= self.max_repeated_tool_calls_with_the_same_result:
-                        return new_function_call_result(last_tool_call_function.name,
-                                                        last_tool_call_arguments, result, repeated), repeated
-                    i -= 1
+            else:
+                break
 
         return None, 0

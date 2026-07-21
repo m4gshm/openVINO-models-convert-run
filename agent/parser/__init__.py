@@ -24,9 +24,8 @@ class ParserState:
         super().__init__()
         self.supported_functions = supported_functions if supported_functions else {}
         self.__events: list[StateEvent] = []
-        self.fim_middle_start = False
         self.role: str | None = None
-
+        self.prefill_tokens: list[str] | None = None
 
     def get_function_parameters(self, func_name: str) -> dict[str, Any] | dict[Any, Any]:
         supported_functions = self.supported_functions
@@ -75,7 +74,7 @@ class ParsedFunctionCall(BaseModel):
 
 
 class Parser[State: ParserState]():
-    def new_state(self, init_chat_events=True) -> State:
+    def new_state(self, prompt: str = "", init_chat_events=True) -> State:
         state = self._new_state()
         if init_chat_events:
             state.start_event(StateEvent.CONVERSATION)

@@ -36,7 +36,7 @@ class VlmController(BaseController):
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
 
-    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
                         ) -> Iterable[CompletionResponse]:
@@ -77,7 +77,9 @@ class VlmController(BaseController):
                     else:
                         self.log_inference.info(f"inference start")
 
-                    token_handler = TokenHandler(tokenizer=tokenizer, parser=self.parser,
+                    token_handler = TokenHandler(tokenizer=tokenizer,
+                                                 prompt=prompt,
+                                                 parser=self.parser,
                                                  init_chat_events=init_chat_events,
                                                  is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
                                                  supported_functions=function_by_name, user_context=user_context)

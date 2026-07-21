@@ -121,7 +121,7 @@ class PhraseTestCase(unittest.TestCase):
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
                           'org.springf'), context.exception.payload)
-        self.assertEqual('Looks like generating infinity loop', context.exception.message)
+        self.assertEqual('Generated content appears to be a loop', context.exception.message)
 
         phrase.clean_current_line()
 

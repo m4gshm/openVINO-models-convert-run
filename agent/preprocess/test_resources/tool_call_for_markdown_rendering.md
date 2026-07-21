@@ -1,4 +1,4 @@
-**WARNING: Tool calls loop.**
+**WARNING: Tool calls loop (5 repeats).**
 
 Tool name: `list_dir`
 
@@ -8,5 +8,5 @@ Arguments:
 
 Result: 
 ```json
-{"result":"warning","warning":"Directory does not exist: java/idempotent-consumer-jdbc/src/main/java/io/github/m4gshm/idempotent/consumer/storage"}
+{"result":"warning","warning":"Directory does not exist: /src"}
 ```

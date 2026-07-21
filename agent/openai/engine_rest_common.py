@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Generator, Any, Callable, Literal, Iterable
+from typing import Any, Callable, Literal, Iterable
 
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
@@ -88,8 +88,8 @@ class BaseController(ABC):
                               temperature: float | None,
                               max_tokens: int | None,
                               max_completion_tokens: int | None,
-                              top_p: float | None,
-                              frequency_penalty: float | None,
+                              top_p: float | None = None,
+                              frequency_penalty: float | None = None,
                               apply_chat_template: bool = False,
                               logprobs: bool | None = None,
                               stop: list[str] | str | None = None,
@@ -158,7 +158,7 @@ class BaseController(ABC):
 
         invalid_response = self.validate_messages(messages, tools)
         if invalid_response:
-            return new_http_response(stream,[invalid_response])
+            return new_http_response(stream, [invalid_response])
 
         tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.is_fix_tool_type)
 
@@ -179,7 +179,7 @@ class BaseController(ABC):
             return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
         chunk_generator = self.chunk_generator(
-            prompt=full_prompt, chat_history=chat_history, generation_config=(
+            prompt=full_prompt, generation_config=(
                 self.new_generation_config(temperature=body.temperature,
                                            max_tokens=body.max_tokens,
                                            max_completion_tokens=body.max_completion_tokens,
@@ -190,7 +190,7 @@ class BaseController(ABC):
         return new_http_response(stream, chunk_generator)
 
     @abstractmethod
-    def chunk_generator(self, prompt: str, chat_history: ChatHistory, generation_config: GenerationConfig,
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None,
                         user_context: UserContext | None = None,
@@ -228,10 +228,8 @@ class BaseController(ABC):
         self.log_inference_prompt.debug(prompt)
 
         generation_config = self.new_generation_config(temperature=body.temperature,
-                                                       max_tokens=None,
-                                                       max_completion_tokens=body.max_tokens,
-                                                       top_p=None, frequency_penalty=None,
-                                                       logprobs=None)
+                                                       max_tokens=body.max_tokens,
+                                                       max_completion_tokens=self.generate_config.max_new_tokens)
         response_id = str(uuid.uuid4())
 
         encode_size = self.get_tokens_size(prompt)
@@ -245,11 +243,11 @@ class BaseController(ABC):
 
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               tokenizer=self.tokenizer, init_chat_events=False,
+                                               tokenizer=self.tokenizer, init_chat_events=True,
                                                is_stop=is_stop, is_veai=False)
 
-        def chunk_converter(chunk_generator: Generator[CompletionResponse, None, None]) -> Generator[
-            completions_api.CompletionResponse, None, None]:
+        def chunk_converter(chunk_generator: Iterable[CompletionResponse]) -> Iterable[
+            completions_api.CompletionResponse]:
             def convert_response(r: CompletionResponse) -> completions_api.CompletionResponse:
                 return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
                     convert_choice(c) for c in r.choices])
