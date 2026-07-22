@@ -53,20 +53,20 @@ def logging_config(logs_dir: str):
                 "backupCount": 5,
                 "encoding": "utf8"
             },
-            # "file_http": {
-            #     "class": "logging.handlers.RotatingFileHandler",
-            #     "level": "DEBUG",
-            #     "formatter": "simple",
-            #     "filename": f"{logs_dir}/http.log",
-            #     "maxBytes": 10485760,  # 10MB
-            #     "backupCount": 5,
-            #     "encoding": "utf8"
-            # },
+            "file_http": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "DEBUG",
+                "formatter": "simple",
+                "filename": f"{logs_dir}/http.log",
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5,
+                "encoding": "utf8"
+            },
         },
         "loggers": {
             "http": {
                 "level": "DEBUG",
-                # "handlers": ["file_http"],
+                "handlers": ["file_http"],
                 "propagate": True,
             },
             "agent.inference": {

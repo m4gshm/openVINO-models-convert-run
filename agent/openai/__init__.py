@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 class GenerateOpts(BaseModel):
     max_new_tokens: int | None = None
-    max_tokens: int | None = None
+    max_prompt_tokens: int | None = None
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None

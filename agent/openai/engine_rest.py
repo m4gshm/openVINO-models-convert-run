@@ -9,9 +9,10 @@ from typing import Callable, Iterable
 from typing import Literal
 
 from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason, \
-    GenerationConfig, Tokenizer, GenerationStatus, ChatHistory
+    GenerationConfig, Tokenizer, GenerationStatus
 
 from agent.common.metric_mem import get_current_memory
+from agent.common.roles import ROLE_ASSISTANT
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
     markdown_bold, get_finish_str, StopSignal
 from agent.openai import GenerateOpts
@@ -85,12 +86,12 @@ class ContinuousBatchingController(BaseController):
         request_id = next(request_counter)
         response_id = str(uuid.uuid4())
         model_name = self.config.model_name
-
-        stop_response = new_stop_response(response_id, model_name)
+        stop_response = new_stop_response(response_id=response_id, model=model_name, role=ROLE_ASSISTANT)
 
         encode_size = self.get_tokens_size(prompt)
         max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length, encode_size, response_id)
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=encode_size,
+                                                      response_id=response_id)
         if over_limit_response:
             yield over_limit_response
             return
@@ -189,7 +190,7 @@ class ContinuousBatchingController(BaseController):
                                         self.log_inference.error("empty generation limits exceed")
                                         yield new_stop_response(content=markdown_bold(
                                             f"empty generation limits exceed: {empty_tokens_limit}"),
-                                            response_id=response_id, model=model_name)
+                                            response_id=response_id, model=model_name, role=ROLE_ASSISTANT)
                                         return
                                 for k, generation_output in items:
                                     generated_ids = generation_output.generated_ids
@@ -249,8 +250,8 @@ class ContinuousBatchingController(BaseController):
             self.log_inference.error(f"inference error: {e}", exc_info=e)
             msg = f"{e.args}"
             finish_reason: Literal["length", "stop"] = "length" if "max_length > prompt_len" in msg else "stop"
-            yield new_stop_response(finish_reason=finish_reason, response_id=response_id,
-                                    model=self.config.model_name, content=markdown_bold("ERROR: " + msg))
+            yield new_stop_response(finish_reason=finish_reason, response_id=response_id, role=ROLE_ASSISTANT,
+                                    model=model_name, content=markdown_bold("ERROR: " + msg))
 
         status = generation_handle.get_status()
         if status == GenerationStatus.RUNNING:

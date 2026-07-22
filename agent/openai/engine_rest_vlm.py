@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
 from typing import SupportsInt, Literal
 
-from openvino_genai import ChatHistory
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
     Tokenizer, VLMDecodedResults, GenerationConfig
@@ -28,7 +27,8 @@ class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event,
                  generate_config: GenerateOpts, is_fix_tool_type: bool, chat_template: str = ''):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, stop_signal, chat_template)
+        super().__init__(config, parser, pipe.get_tokenizer(), generate_config, is_fix_tool_type, stop_signal,
+                         chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
         self.generate_config = generate_config
@@ -44,7 +44,8 @@ class VlmController(BaseController):
         response_id = str(uuid.uuid4())
         encode_size = self.get_tokens_size(prompt)
         max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length, encode_size, response_id)
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=encode_size,
+                                                      response_id=response_id)
         if over_limit_response:
             yield over_limit_response
             return
@@ -131,7 +132,9 @@ class VlmController(BaseController):
                     err_str = str(e)
                     finish_reason: Literal[
                         "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
-                    chunk_queue.put_nowait(new_stop_response(content=err_str, finish_reason=finish_reason))
+                    chunk_queue.put_nowait(
+                        new_stop_response(content=err_str, finish_reason=finish_reason, model=model_name,
+                                          role=ROLE_ASSISTANT))
                     chunk_queue.put_nowait(None)
 
             def start_generate_result(streamer: StreamerWrapper) -> VLMDecodedResults:

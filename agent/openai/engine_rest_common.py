@@ -35,7 +35,7 @@ LENGTH: Literal["length"] = "length"
 
 log = logging.getLogger(__name__)
 
-WARN_GENERATION_IS_INTERRUPTED_ = "Generation is interrupted."
+WARN_GENERATION_IS_INTERRUPTED_ = "Generating is interrupted."
 
 USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
@@ -53,9 +53,8 @@ def new_http_response(stream: bool,
         return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
     else:
         finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
-        return new_response(
-            message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content, full_tool_calls),
-            finish_reason=finish_reason, stream=False)
+        return new_response(message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content, full_tool_calls),
+                            stream=False, finish_reason=finish_reason)
 
 
 class BaseController(ABC):
@@ -86,8 +85,8 @@ class BaseController(ABC):
 
     def new_generation_config(self,
                               temperature: float | None,
-                              max_tokens: int | None,
                               max_completion_tokens: int | None,
+                              max_prompt_tokens: int | None = None,
                               top_p: float | None = None,
                               frequency_penalty: float | None = None,
                               apply_chat_template: bool = False,
@@ -98,7 +97,7 @@ class BaseController(ABC):
         max_new_tokens = max_completion_tokens or self.generate_config.max_new_tokens
         if max_new_tokens:
             generation_config.max_new_tokens = max_new_tokens
-        max_length = max_tokens or self.generate_config.max_tokens
+        max_length = max_prompt_tokens or self.generate_config.max_prompt_tokens
         if max_length:
             generation_config.max_length = max_length
         generation_config.apply_chat_template = apply_chat_template
@@ -152,9 +151,9 @@ class BaseController(ABC):
 
         if last_message and is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
                 last_message.content).lower():
-            return new_http_response(stream, [new_response(
-                message=new_message(role=ROLE_ASSISTANT, content="Interrupted"),
-                stream=stream, finish_reason="stop")])
+            return new_http_response(stream, [
+                new_response(message=new_message(role=ROLE_ASSISTANT, content="Interrupted"), stream=stream,
+                             finish_reason="stop")])
 
         invalid_response = self.validate_messages(messages, tools)
         if invalid_response:
@@ -181,8 +180,7 @@ class BaseController(ABC):
         chunk_generator = self.chunk_generator(
             prompt=full_prompt, generation_config=(
                 self.new_generation_config(temperature=body.temperature,
-                                           max_tokens=body.max_tokens,
-                                           max_completion_tokens=body.max_completion_tokens,
+                                           max_completion_tokens=(body.max_tokens or body.max_completion_tokens),
                                            top_p=body.top_p, frequency_penalty=body.frequency_penalty,
                                            logprobs=body.logprobs, stop=body.stop)), tokenizer=tokenizer,
             init_chat_events=True, is_stop=is_stop,
@@ -216,7 +214,7 @@ class BaseController(ABC):
                                           function=question.to_openai_function_call())
                 completion_message = new_message(tool_calls=[tool_call])
             else:
-                completion_message = new_message(content=(msg + WARN_GENERATION_IS_INTERRUPTED_))
+                completion_message = new_message(content=(msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_))
             return new_response(message=completion_message, finish_reason=STOP)
         return None
 
@@ -228,15 +226,8 @@ class BaseController(ABC):
         self.log_inference_prompt.debug(prompt)
 
         generation_config = self.new_generation_config(temperature=body.temperature,
-                                                       max_tokens=body.max_tokens,
-                                                       max_completion_tokens=self.generate_config.max_new_tokens)
+                                                       max_completion_tokens=body.max_tokens)
         response_id = str(uuid.uuid4())
-
-        encode_size = self.get_tokens_size(prompt)
-        max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length, encode_size, response_id)
-        if over_limit_response:
-            return over_limit_response
 
         def is_stop():
             return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
@@ -266,16 +257,14 @@ class BaseController(ABC):
             return StreamingResponse(stream_generator(chunk_converter), media_type="text/event-stream")
         else:
             finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_converter)
-            return new_response(response_id=response_id,
-                                message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content,
-                                                    full_tool_calls),
-                                finish_reason=finish_reason, stream=False)
+            return new_response(message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content,
+                                                    full_tool_calls), stream=False, response_id=response_id,
+                                finish_reason=finish_reason)
 
-    def check_prompt_limit(self, max_length: int, encode_size: int,
-                           response_id: str) -> CompletionResponse | None:
-        model_name = self.config.model_name
+    def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> CompletionResponse | None:
         if encode_size >= max_length:
-            return new_stop_response(response_id, model_name, finish_reason=LENGTH,
+            return new_stop_response(response_id=response_id, role=ROLE_ASSISTANT,
+                                     model=self.config.model_name, finish_reason=LENGTH,
                                      content=f"prompt exceeds limit: {encode_size} >= {max_length}")
         return None
 

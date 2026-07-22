@@ -197,13 +197,13 @@ def main():
 
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
-        max_prompt_len = generate_opts.max_tokens or default_generate_opts.max_tokens
+        max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
     device = args.device
     is_device_npu = device == "NPU"
     if not max_prompt_len:
         max_prompt_len = max_position_embeddings
 
-    generate_opts.max_tokens = max_prompt_len
+    generate_opts.max_prompt_tokens = max_prompt_len
 
     scheduler_config = SchedulerConfig()
     dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts
