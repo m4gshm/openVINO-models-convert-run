@@ -1,9 +1,9 @@
 import json
 import logging
 
-from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
+from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
 from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick, markdown_file_content
-from agent.openai.chat_completions_api import ChatCompletionMessageParam, FunctionCall
+from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class FunctionCallResult:
 
 
 def find_tool_call_function(tool_call_id: str | None, start_from: int,
-                            messages: list[ChatCompletionMessageParam]) -> tuple[FunctionCall, int] | tuple[None, int]:
+                            messages: list[ChatCompletionMessageParam]) -> tuple[Function, int] | tuple[None, int]:
     i = start_from
     while i >= 0:
         prev_message = messages[i]

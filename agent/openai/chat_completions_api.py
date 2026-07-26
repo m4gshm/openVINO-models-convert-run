@@ -1,22 +1,23 @@
-from typing import List, Optional, Union, Dict, Any, Literal
+from typing import List, Optional, Union, Dict, Any
 
+from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionToolChoiceOptionParam
 from pydantic import BaseModel, ConfigDict, Field
 
 CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
 CHAT_COMPLETION = "chat.completion"
 
 
-class FunctionCall(BaseModel):
+class Function(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str
     arguments: str  # JSON string
 
 
-class ToolCall(BaseModel):
+class ChatCompletionMessageFunctionToolCallParam(BaseModel):
     model_config = ConfigDict(extra="allow")
     id: str
     type: str = "function"
-    function: FunctionCall
+    function: Function
 
 
 # --- Request Components ---
@@ -29,10 +30,10 @@ class ResponseFormat(BaseModel):
 class ChatCompletionMessageParam(BaseModel):
     model_config = ConfigDict(extra="allow")
     role: str  # "system", "user", "assistant", "tool", or "function"
-    content: Optional[Union[str, List[Dict[str, Any]]]] = None
+    content: Union[str, List[ChatCompletionContentPartTextParam]]
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
-    tool_calls: Optional[List[ToolCall]] = None
+    tool_calls: Optional[List[ChatCompletionMessageFunctionToolCallParam]] = None
 
 
 class FunctionDefinition(BaseModel):
@@ -42,7 +43,7 @@ class FunctionDefinition(BaseModel):
     parameters: Dict[str, Any]  # JSON Schema object
 
 
-class ToolDefinition(BaseModel):
+class ChatCompletionFunctionToolParam(BaseModel):
     model_config = ConfigDict(extra="allow")
     type: str = "function"
     function: FunctionDefinition
@@ -58,8 +59,8 @@ class StreamOptions(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    model: str
-    messages: List[ChatCompletionMessageParam]
+    model: str = ""
+    messages: List[ChatCompletionMessageParam] = []
 
     # Common Parameters
     frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
@@ -79,57 +80,7 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     user: Optional[str] = None
 
-    # Tools and Functions
-    tools: Optional[List[ToolDefinition]] = None
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    tools: List[ChatCompletionFunctionToolParam] = []
+    tool_choice: Optional[ChatCompletionToolChoiceOptionParam] = None
 
-    metadata: Optional[Dict[str, Any]] = None
-
-
-# --- Response Components ---
-
-class ChatCompletionMessage(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    role: Optional[str] = None
-    content: Optional[str] = None
-    refusal: Optional[str] = None
-    tool_calls: Optional[List[ToolCall]] = None
-    reasoning_content: Optional[str] = None
-
-
-class ChoiceLogprobs(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    content: Optional[List[Dict[str, Any]]] = None
-
-
-class CompletionUsage(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-    # Accounts for newer models containing reasoning or caching metrics
-    prompt_tokens_details: Optional[Dict[str, int]] = None
-    completion_tokens_details: Optional[Dict[str, int]] = None
-
-
-# --- Main Response Schema ---
-
-class ChatCompletionChoice(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    index: int = 0
-    delta: ChatCompletionMessage | None = None
-    message: ChatCompletionMessage | None = None
-    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None
-    logprobs: Optional[ChoiceLogprobs] = None
-
-
-class CompletionResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    object: str = CHAT_COMPLETION_CHUNK
-    id: str | None = None
-    created: int = None
-    model: str | None = None
-    usage: Optional[CompletionUsage] = None
-    system_fingerprint: Optional[str] = None
-    choices: List[ChatCompletionChoice]
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, str]] = None

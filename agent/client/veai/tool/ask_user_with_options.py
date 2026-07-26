@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from agent.client.tool_select_options import ToolSelectOptions
-from agent.openai.chat_completions_api import FunctionCall, ToolDefinition
+from agent.openai.chat_completions_api import Function, ChatCompletionFunctionToolParam
 from agent.parser import ParsedFunctionCall
 from . import Tool
 
@@ -24,7 +24,7 @@ class AskUserWithOptions(ToolSelectOptions, Tool):
         })
 
 
-def detect(tool_definition: ToolDefinition) -> AskUserWithOptions | None:
+def detect(tool_definition: ChatCompletionFunctionToolParam) -> AskUserWithOptions | None:
     if tool_definition.type == "function" and tool_definition.function.name == function_name:
         parameters = tool_definition.function.parameters
         type = parameters.get("type")

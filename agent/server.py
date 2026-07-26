@@ -7,6 +7,7 @@ from typing import Any
 
 import openvino_genai
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from openvino_genai import py_openvino_genai
 
 from agent.common.metric_mem import get_current_memory
@@ -77,6 +78,7 @@ def new_app(controller: BaseController) -> FastAPI:
     app_router.post("/v1/completions", response_model_exclude_none=True)(controller.completions)
     app_router.post("/v1/chat/completions", response_model_exclude_none=True)(controller.chat)
     app_router.get(path="/v1/models", response_model_exclude_none=True)(controller.models)
+    app.add_exception_handler(RequestValidationError, controller.validation_exception_handler)
     return app
 
 

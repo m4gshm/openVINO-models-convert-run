@@ -5,7 +5,7 @@ from typing import Any
 
 import json_repair
 
-from agent.common.roles import ROLE_ASSISTANT
+from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 

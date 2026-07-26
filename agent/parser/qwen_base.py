@@ -1,15 +1,11 @@
-from agent.common.roles import ROLE_ASSISTANT
-from agent.parser import ParserState, StateEvent, Parser, _is_conversation_start
-
-ROLE = ROLE_ASSISTANT
-
+from agent.openai.chat_api import ROLE_ASSISTANT
+from agent.parser import ParserState, Parser, _is_conversation_start
 
 CLOSE_TAG_PREF = "</"
 OPEN_TAG_SUF = ">"
 
 TOOL_CALL_START = "<tool_call>"
 TOOL_CALL_END = "</tool_call>"
-
 
 THINK_START = "<think>"
 THINK_END = "</think>"
@@ -42,8 +38,11 @@ class QwenBaseParser(Parser):
     def is_conversation_start(self, state: ParserState, token: str) -> tuple[bool, str]:
         return _is_conversation_start(IM_START, token)
 
-    def is_conversation_end(self, state: ParserState, token: str) -> bool:
+    def is_sequence_end(self, state: ParserState, token: str) -> bool:
         return IM_END == token.strip()
+
+    def is_text_end(self, state: ParserState, token: str) -> bool:
+        return False
 
     def is_tool_call_start(self, state: ParserState, token: str) -> bool:
         return TOOL_CALL_START == token.strip()
@@ -56,4 +55,4 @@ class QwenBaseParser(Parser):
             '\n') else prompt.endswith(THINK_START)
 
     def get_assistant_role_name(self) -> str:
-        return ROLE
+        return ROLE_ASSISTANT

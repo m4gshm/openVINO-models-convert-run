@@ -29,6 +29,7 @@ FUNCTION_START_PREF = "call:"
 
 TURN_START = "<|turn>"
 TURN_END = "<turn|>"
+EOS = "<eos>"
 
 spec = {CHANNEL_START, CHANNEL_END, TOOL_CALL_START, TOOL_CALL_END, TOOL_RESPONSE_START, TOOL_RESPONSE_END, TURN_START,
         TURN_END}
@@ -213,7 +214,10 @@ class Gemma4ChannelParser(Parser[ParserState]):
     def is_conversation_start(self, state: ParserState, token: str) -> tuple[bool, str]:
         return _is_conversation_start(TURN_START, token)
 
-    def is_conversation_end(self, state: ParserState, token: str) -> bool:
+    def is_sequence_end(self, state: ParserState, token: str) -> bool:
+        return EOS == token.strip()
+
+    def is_text_end(self, state: ParserState, token: str) -> bool:
         return TURN_END == token.strip()
 
     def is_tool_call_start(self, state: ParserState, token: str) -> bool:

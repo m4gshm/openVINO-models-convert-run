@@ -17,7 +17,7 @@ from agent.client.veai.tool.run_configuration import RunConfiguration
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
-from agent.openai.chat_completions_api import ToolDefinition
+from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam
 from agent.parser import ParsedFunctionCall
 
 ROOT = "."
@@ -403,7 +403,7 @@ def read_args_as_json(args: dict[str, Any]) -> Any:
     return args
 
 
-def veai_fix_tool_definition_optional_property_as_null_type(tool: ToolDefinition) -> ToolDefinition:
+def veai_fix_tool_definition_optional_property_as_null_type(tool: ChatCompletionFunctionToolParam) -> ChatCompletionFunctionToolParam:
     function = tool.function
     function.parameters = _fix_tool_definition_optional_property_as_null_type(function.parameters, function.name)
     return tool

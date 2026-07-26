@@ -84,7 +84,7 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
 
 class Qwen2Parser(QwenBaseParser):
 
-    def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
+    def parse_tool_calls(self, state: ParserState, tool_call_expression: str| None) -> tuple[list[ParsedFunctionCall], bool]:
         tool_call_expression = tool_call_expression.lstrip()
         tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
 

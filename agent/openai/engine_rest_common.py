@@ -7,25 +7,30 @@ from abc import ABC, abstractmethod
 from datetime import timedelta
 from typing import Any, Callable, Literal, Iterable
 
+from fastapi.exceptions import RequestValidationError
+from openai.types import FunctionDefinition
+from openai.types.chat import ChatCompletionChunk, ChatCompletion, ChatCompletionToolUnionParam
+from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import GenerationConfig
 from pydantic import BaseModel
+from starlette import status
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
+from starlette.responses import StreamingResponse, JSONResponse
 
 from agent import inference
 from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
-from agent.common.roles import ROLE_TOOL, ROLE_ASSISTANT
 from agent.inference.token_handler import markdown_bold, markdown_back_tick
 from agent.openai import GenerateOpts, completions_api
-from agent.openai.chat_api import new_response, new_message, new_tool_call, new_stop_response
-from agent.openai.chat_completions_api import CompletionResponse, ToolCall, ToolDefinition, FunctionDefinition, \
-    ChatCompletionMessageParam, ChatCompletionChoice, ChatCompletionRequest
-from agent.openai.completions_api import CompletionChoice
+from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
+from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
+from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam
+# from agent.openai.chat_completions_api import ToolDefinition, FunctionDefinition, \
+#     ChatCompletionMessageParam, ChatCompletionChoice, ChatCompletionRequest
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.tool_call import PreprocessToolCall
@@ -48,13 +53,16 @@ class ControllerConfig(BaseModel):
 
 
 def new_http_response(stream: bool,
-                      chunk_generator: Iterable[CompletionResponse]) -> StreamingResponse | CompletionResponse:
+                      chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
     if stream:
         return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
     else:
         finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
-        return new_response(message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content, full_tool_calls),
-                            stream=False, finish_reason=finish_reason)
+        return new_chat_completion(
+            finish_reason=finish_reason,
+            content=full_content,
+            reasoning_content=full_reasoning_content,
+            tool_calls=full_tool_calls)
 
 
 class BaseController(ABC):
@@ -82,6 +90,14 @@ class BaseController(ABC):
             id=self.config.model_name,
             created=current_time,
         )])
+
+    async def validation_exception_handler(self, request: Request, exc: RequestValidationError):
+        log.error(f"request validation error: {exc.errors()}")
+
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": exc.errors()},
+        )
 
     def new_generation_config(self,
                               temperature: float | None,
@@ -152,8 +168,7 @@ class BaseController(ABC):
         if last_message and is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
                 last_message.content).lower():
             return new_http_response(stream, [
-                new_response(message=new_message(role=ROLE_ASSISTANT, content="Interrupted"), stream=stream,
-                             finish_reason="stop")])
+                new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
 
         invalid_response = self.validate_messages(messages, tools)
         if invalid_response:
@@ -192,16 +207,18 @@ class BaseController(ABC):
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None,
                         user_context: UserContext | None = None,
-                        ) -> Iterable[CompletionResponse]:
+                        ) -> Iterable[ChatCompletionChunk]:
         pass
 
-    def validate_messages(self, messages, tools) -> CompletionResponse | None:
+    def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
         request_user_select = detect_select_options(tools)
         preprocess_tool_call = PreprocessToolCall()
         looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
         if looped_function:
             # log
             msg = looped_function.render_markdown()
+            tool_calls = []
+            content = ""
             if request_user_select:
                 # log
                 question = request_user_select.new_call(
@@ -212,10 +229,13 @@ class BaseController(ABC):
                     [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
                 tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
                                           function=question.to_openai_function_call())
-                completion_message = new_message(tool_calls=[tool_call])
+                tool_calls.append(tool_call)
             else:
-                completion_message = new_message(content=(msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_))
-            return new_response(message=completion_message, finish_reason=STOP)
+                content = (msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_)
+            return new_chat_completion_chunk(finish_reason=STOP,
+                                             role=ROLE_ASSISTANT,
+                                             content=content,
+                                             tool_calls=tool_calls)
         return None
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
@@ -237,35 +257,34 @@ class BaseController(ABC):
                                                tokenizer=self.tokenizer, init_chat_events=True,
                                                is_stop=is_stop, is_veai=False)
 
-        def chunk_converter(chunk_generator: Iterable[CompletionResponse]) -> Iterable[
+        def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
             completions_api.CompletionResponse]:
-            def convert_response(r: CompletionResponse) -> completions_api.CompletionResponse:
+            def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
                 return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
                     convert_choice(c) for c in r.choices])
 
-            def convert_choice(c: ChatCompletionChoice) -> CompletionChoice:
-                delta = c.delta
+            def convert_choice(chat_completion_choice: Choice) -> completions_api.CompletionChoice:
+                delta = chat_completion_choice.delta
                 content = delta.content if delta and delta.content else ""
-                reason: Literal["stop"] | None = "stop" if c.finish_reason else None
+                reason: Literal["stop"] | None = "stop" if chat_completion_choice.finish_reason else None
                 return completions_api.CompletionChoice(text=content, finish_reason=reason)
 
             for c in chunk_generator:
                 yield convert_response(c)
 
-        chunk_converter = chunk_converter(chunk_generator)
         if stream:
-            return StreamingResponse(stream_generator(chunk_converter), media_type="text/event-stream")
+            return StreamingResponse(stream_generator(chunk_converter(chunk_generator)), media_type="text/event-stream")
         else:
-            finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_converter)
-            return new_response(message=new_message(ROLE_ASSISTANT, full_content, full_reasoning_content,
-                                                    full_tool_calls), stream=False, response_id=response_id,
-                                finish_reason=finish_reason)
+            finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
+            return new_chat_completion(response_id=response_id,
+                                       finish_reason=finish_reason, content=full_content,
+                                       reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
 
-    def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> CompletionResponse | None:
+    def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         if encode_size >= max_length:
-            return new_stop_response(response_id=response_id, role=ROLE_ASSISTANT,
-                                     model=self.config.model_name, finish_reason=LENGTH,
-                                     content=f"prompt exceeds limit: {encode_size} >= {max_length}")
+            return new_chat_completion_chunk(response_id=response_id, role=ROLE_ASSISTANT,
+                                             model=self.config.model_name, finish_reason=LENGTH,
+                                             content=f"prompt exceeds limit: {encode_size} >= {max_length}")
         return None
 
     def get_tokens_size(self, prompt: str) -> int:
@@ -273,11 +292,11 @@ class BaseController(ABC):
         return encode_size
 
 
-def make_union(chunk_generator: Iterable[CompletionResponse]) -> tuple[
-    Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ToolCall]]:
+def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[
+    Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ChoiceDeltaToolCall]]:
     full_content = ""
     full_reasoning_content = ""
-    full_tool_calls: list[ToolCall] = []
+    full_tool_calls: list[ChoiceDeltaToolCall] = []
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
     for chunk_data in chunk_generator:
@@ -311,15 +330,20 @@ def is_disconnected(request: Request) -> bool:
     return disconnected
 
 
-def new_chat_history(messages: list[BaseModel], tools_raw: list[dict[str, Any]] | None = None) -> ChatHistory:
+def new_chat_history(messages: list[ChatCompletionMessageParam],
+                     tools_raw: list[dict[str, Any]] | None = None) -> ChatHistory:
     chat_history = ChatHistory()
-    chat_history.set_messages(list(map(BaseModel.model_dump, messages)) if messages else [])
+    history_messages = []
+    for message in messages:
+        history_messages.append(message.model_dump())
+    chat_history.set_messages(history_messages)
     if tools_raw:
         chat_history.set_tools(tools_raw)
     return chat_history
 
 
-def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is_fix_tool_type: bool = False) -> tuple[
+def group_function_by_name(tools: list[ChatCompletionToolUnionParam] | None, is_veai: bool,
+                           is_fix_tool_type: bool = False) -> tuple[
     list[dict[str, Any]], dict[str, FunctionDefinition]]:
     function_by_name: dict[str, FunctionDefinition] = {}
     tools_raw: list[dict[str, Any]] = []
@@ -332,7 +356,7 @@ def group_function_by_name(tools: list[ToolDefinition] | None, is_veai: bool, is
     return tools_raw, function_by_name
 
 
-def stream_generator(chunk_generator: Iterable[CompletionResponse]) -> Iterable[str]:
+def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:
     for chunk in chunk_generator:
         yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 

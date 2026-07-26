@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
 from typing import SupportsInt, Literal
 
+from openai.types.chat import ChatCompletionChunk
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
     Tokenizer, VLMDecodedResults, GenerationConfig
@@ -15,7 +16,7 @@ from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response
-from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
+from agent.openai.chat_completions_api import FunctionDefinition
 from agent.openai.engine_rest import add_stop_signal
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser
@@ -39,7 +40,7 @@ class VlmController(BaseController):
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
-                        ) -> Iterable[CompletionResponse]:
+                        ) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
         encode_size = self.get_tokens_size(prompt)
@@ -51,7 +52,7 @@ class VlmController(BaseController):
             return
 
         with self.request_lock:
-            chunk_queue: queue.Queue[CompletionResponse | None] = queue.Queue()
+            chunk_queue: queue.Queue[ChatCompletionChunk | None] = queue.Queue()
             stop_stream_handling: queue.Queue[bool] = queue.Queue()
             start_stream_handling: queue.Queue[bool] = queue.Queue()
             before_generate_mem = get_current_memory()
@@ -187,7 +188,7 @@ class VlmController(BaseController):
 
 
 class StreamerWrapper(py_openvino_genai.StreamerBase):
-    def __init__(self, streamer: TokenHandler, chunk_queue: queue.Queue[CompletionResponse | None],
+    def __init__(self, streamer: TokenHandler, chunk_queue: queue.Queue[ChatCompletionChunk | None],
                  stop_stream_handling: queue.Queue[bool], start_stream_handling: queue.Queue[bool]):
         super().__init__()
         self.streamer = streamer

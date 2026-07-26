@@ -1,12 +1,15 @@
 import json
 import logging
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
+from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from pydantic import BaseModel
 
-from agent.common.roles import ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition, FunctionCall
+from agent.openai.chat_api import ROLE_ASSISTANT
+from agent.openai.chat_completions_api import FunctionDefinition
+
+# from agent.openai.chat_completions_api import FunctionDefinition
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ class ParserState:
         super().__init__()
         self.supported_functions = supported_functions if supported_functions else {}
         self.__events: list[StateEvent] = []
-        self.role: str | None = None
+        self.role: Literal["developer", "system", "user", "assistant", "tool"] | None = None
         self.prefill_tokens: list[str] | None = None
 
     def get_function_parameters(self, func_name: str) -> dict[str, Any] | dict[Any, Any]:
@@ -69,8 +72,8 @@ class ParsedFunctionCall(BaseModel):
     arguments: dict[str, Any]
     anonymous_arguments: list[str] = []
 
-    def to_openai_function_call(self) -> FunctionCall:
-        return FunctionCall(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
+    def to_openai_function_call(self) -> ChoiceDeltaToolCallFunction:
+        return ChoiceDeltaToolCallFunction(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
 
 
 class Parser[State: ParserState]():
@@ -102,7 +105,10 @@ class Parser[State: ParserState]():
     def is_conversation_start(self, state: State, token: str) -> tuple[bool, str]:
         return False, token
 
-    def is_conversation_end(self, state: State, token: str) -> bool:
+    def is_sequence_end(self, state: State, token: str) -> bool:
+        return False
+
+    def is_text_end(self, state: State, token: str) -> bool:
         return False
 
     def is_tool_call_start(self, state: State, token: str) -> bool:
@@ -120,7 +126,7 @@ class Parser[State: ParserState]():
     def is_prompt_start_thinking(self, prompt: str) -> bool:
         pass
 
-    def parse_tool_calls(self, state: State, tool_call_expression: str | None) -> tuple[list[ParsedFunctionCall], bool]:
+    def parse_tool_calls(self, state: State, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
         return [], False
 
     def is_assistant(self, role):

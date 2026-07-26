@@ -8,16 +8,16 @@ from datetime import timedelta
 from typing import Callable, Iterable
 from typing import Literal
 
+from openai.types.chat import ChatCompletionChunk
 from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason, \
     GenerationConfig, Tokenizer, GenerationStatus
 
 from agent.common.metric_mem import get_current_memory
-from agent.common.roles import ROLE_ASSISTANT
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
     markdown_bold, get_finish_str, StopSignal
 from agent.openai import GenerateOpts
-from agent.openai.chat_api import new_stop_response
-from agent.openai.chat_completions_api import CompletionResponse, FunctionDefinition
+from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
+from agent.openai.chat_completions_api import FunctionDefinition
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 from agent.parser import Parser, StateEvent
 
@@ -26,13 +26,16 @@ log = logging.getLogger(__name__)
 request_counter = itertools.count(start=0)
 
 
-def add_stop_signal(responses: list[CompletionResponse], stop_signal: StopSignal):
+def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSignal):
     choices = responses[-1].choices if responses else None
     finish_reason = get_finish_str(stop_signal)
     if choices:
-        choices[-1].finish_reason = finish_reason
+        last_choice = choices[-1]
+        last_choice.finish_reason = finish_reason
+        log.debug(f"add finish_reason to the last choice, finish_reason={finish_reason}")
     else:
-        responses.append(new_stop_response(finish_reason=finish_reason))
+        log.debug(f"add stop message at the end, finish_reason={finish_reason}")
+        responses.append(new_stop_response(role=ROLE_ASSISTANT, finish_reason=finish_reason))
     return responses
 
 
@@ -81,7 +84,7 @@ class ContinuousBatchingController(BaseController):
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
                         function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
-                        ) -> Iterable[CompletionResponse]:
+                        ) -> Iterable[ChatCompletionChunk]:
         before_generate_mem = get_current_memory()
         request_id = next(request_counter)
         response_id = str(uuid.uuid4())

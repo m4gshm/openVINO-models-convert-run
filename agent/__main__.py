@@ -10,6 +10,7 @@ from enum import Enum
 from pathlib import Path
 
 import uvicorn
+from openai import OpenAI
 from openvino_genai.py_openvino_genai import SchedulerConfig
 from pydantic.json import pydantic_encoder
 
