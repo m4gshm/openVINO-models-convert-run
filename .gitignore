@@ -14,6 +14,7 @@ __pycache__
 !*.pbtxt
 agent/build/
 build
+bin/
 dev/
 src_models/venv*
 src_models/Qwen
