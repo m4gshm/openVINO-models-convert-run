@@ -1,0 +1,7 @@
+<tool_call>
+<function=edit_file>
+<parameter=target_file>
+C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/build.gradle.kts
+</parameter>
+<parameter=edits>
+[{"old_text": "// Configure integration test source set\r\nsourceSets {\r\n    integTest {\r\n        compileClasspath += main.output + test.output\r\n        runtimeClasspath += main.output + test.output\r\n    }\r\n}\r\n\r\n// Create integration test task\r\nval integTest by tasks.registering(Test::class) {\r\n    description = \"Runs integration tests\"\r\n    group = \"verification\"\r\n\r\n    testClassesDirs = sourceSets[\"integTest\"].output.classesDirs\r\n    classpath = sourceSets[\"integTest\"].runtimeClasspath\r\n    shouldRunAfter(test)\r\n}", "new_text": "// Configure integration test source set\r\nsourceSets {\r\n    integTest {\r\n        compileClasspath += sourceSets.main.get().output\r\n        runtimeClasspath += sourceSets.main.get().output\r\n        compileClasspath += sourceSets.test.get().output\r\n        runtimeClasspath += sourceSets.test.get().output\r\n    }\r\n}\rr
