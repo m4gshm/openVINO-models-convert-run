@@ -1,20 +1,20 @@
-@REM pip install --upgrade "transformers==5.2.0"
- 
-set MODEL_NAME=OmniCoder-9B
-set MODEL_DEVELOPER=Tesslate
+set MODEL_NAME=Qwen-AgentWorld-35B-A3B
+set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
 
-set WEIGHT_FORMAT=int8
+set GROUP_SIZE=128
+set WEIGHT_FORMAT=int4
 
 optimum-cli export openvino ^
   --model %MODEL_PATH% ^
   --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
-  --sym ^
+  --backup-precision int8_asym ^
+  --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%
 
 pause
 
@@ -22,16 +22,18 @@ pause
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
 @REM +===========================+=============================+========================================+
-@REM | int8_sym, per-channel     | 100% (273 / 273)            | 100% (273 / 273)                       |
+@REM | int8_asym, per-channel    | 1% (31 / 541)               | 0% (0 / 510)                           |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:01:50 • 0:00:00
+@REM | int4_asym, group size 128 | 99% (510 / 541)             | 100% (510 / 510)                       |
+@REM +---------------------------+-----------------------------+----------------------------------------+
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:04:28 • 0:00:00
 @REM INFO:nncf:Statistics of the bitwidth distribution:
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
 @REM +===========================+=============================+========================================+
 @REM | int8_sym, per-channel     | 100% (1 / 1)                | 100% (1 / 1)                           |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:06 • 0:00:00
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:02 • 0:00:00
 @REM INFO:nncf:Statistics of the bitwidth distribution:
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
@@ -45,7 +47,7 @@ pause
 @REM +===========================+=============================+========================================+
 @REM | int8_sym, per-channel     | 100% (110 / 110)            | 100% (110 / 110)                       |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:12 • 0:00:00
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:04 • 0:00:00
 @REM INFO:nncf:Statistics of the bitwidth distribution:
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |

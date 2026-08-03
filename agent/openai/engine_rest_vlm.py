@@ -15,7 +15,7 @@ from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanSt
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
 from agent.openai import GenerateOpts
-from agent.openai.chat_api import new_stop_response
+from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
 from agent.openai.chat_completions_api import FunctionDefinition
 from agent.openai.engine_rest import add_stop_signal
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
@@ -125,7 +125,7 @@ class VlmController(BaseController):
 
                     inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                     if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                        self.log_inference.warning(f"inference finished by unexpected status {inference_finish_reason}")
+                        log.info(f"inference finished by unexpected status {inference_finish_reason}")
 
                 except Exception as e:
                     start_stream_handling.put_nowait(True)
@@ -134,7 +134,7 @@ class VlmController(BaseController):
                     finish_reason: Literal[
                         "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
                     chunk_queue.put_nowait(
-                        new_stop_response(content=err_str, finish_reason=finish_reason, model=model_name,
+                        new_stop_response(content=err_str, finish_reason=finish_reason, model=self.config.model_name,
                                           role=ROLE_ASSISTANT))
                     chunk_queue.put_nowait(None)
 

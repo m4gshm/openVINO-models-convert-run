@@ -1,6 +1,9 @@
-set OPENVINO_DEV_PATH=openvino_genai_windows_2026.4.0.0.dev20260721_x86_64
-rem set OPENVINO_DEV_PATH=openvino_genai_windows_2026.3.0.0rc2_x86_64
-if not defined INTEL_OPENVINO_DIR (
-    call ./dev/%OPENVINO_DEV_PATH%/setupvars.bat
+IF not defined OPENVINO_DEV_NAME (
+    set OPENVINO_DEV_NAME=openvino_genai_windows_2026.4.0.0.dev20260730_x86_64
 )
-python agent.py %*
+
+if not defined INTEL_OPENVINO_DIR (
+    call bin/%OPENVINO_DEV_NAME%/setupvars.bat
+)
+
+.venv\Scripts\python agent.py %*

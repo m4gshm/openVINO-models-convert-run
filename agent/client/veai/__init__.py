@@ -51,13 +51,13 @@ def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext 
     return _get_context(content)
 
 
-def _get_context(content: str | list[dict[str, Any]] | None) -> UserContext | None:
-    if isinstance(content, str):
-        has_start = content.find("<project_information>")
-        has_end = content.find("</project_information>")
-        if has_start >= 0 and 0 <= has_end < len(content):
+def _get_context(system_prompt: str | list[dict[str, Any]] | None) -> UserContext | None:
+    if isinstance(system_prompt, str):
+        has_start = system_prompt.find("<project_information>")
+        has_end = system_prompt.find("</project_information>")
+        if has_start >= 0 and 0 <= has_end < len(system_prompt):
             context = UserContext()
-            project_info = content[has_start:has_end].splitlines()
+            project_info = system_prompt[has_start:has_end].splitlines()
             for line in project_info:
                 if line.startswith(OS_INFO_):
                     context.os = line[len(OS_INFO_):].strip()

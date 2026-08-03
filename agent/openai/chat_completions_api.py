@@ -1,6 +1,7 @@
 from typing import List, Optional, Union, Dict, Any
 
 from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionToolChoiceOptionParam
+from openai.types.chat.chat_completion_assistant_message_param import ContentArrayOfContentPart
 from pydantic import BaseModel, ConfigDict, Field
 
 CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
@@ -30,7 +31,7 @@ class ResponseFormat(BaseModel):
 class ChatCompletionMessageParam(BaseModel):
     model_config = ConfigDict(extra="allow")
     role: str  # "system", "user", "assistant", "tool", or "function"
-    content: Union[str, List[ChatCompletionContentPartTextParam]]
+    content: Optional[Union[str, List[ContentArrayOfContentPart]]] = None
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_calls: Optional[List[ChatCompletionMessageFunctionToolCallParam]] = None

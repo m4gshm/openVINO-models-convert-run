@@ -22,7 +22,8 @@ from agent.parser import Parser
 log = logging.getLogger(__name__)
 
 
-def init_continuous_batching_engine(model: str, model_path: str, device: str, parser: Parser,
+def init_continuous_batching_engine(model: str, model_path: str, model_architectures: set[str],
+                                    device: str, parser: Parser,
                                     is_fix_tool_type: bool, stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
                                     generate_config=GenerateOpts(), handler_config=TokenHandlerConfig(),
@@ -58,7 +59,9 @@ def init_continuous_batching_engine(model: str, model_path: str, device: str, pa
         log.error(f"instantiate pipeline error: {e}", exc_info=e)
         sys.exit(1)
 
-    return new_app(ContinuousBatchingController(config=ControllerConfig(model_name=model), parser=parser, pipe=pipe,
+    return new_app(ContinuousBatchingController(config=ControllerConfig(model_name=model,
+                                                                        model_architectures=model_architectures),
+                                                parser=parser, pipe=pipe,
                                                 chat_template=chat_template,
                                                 generate_config=generate_config, handler_config=handler_config,
                                                 is_fix_tool_type=is_fix_tool_type, stop_signal=stop_signal))
@@ -82,7 +85,8 @@ def new_app(controller: BaseController) -> FastAPI:
     return app
 
 
-def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: bool, parser: Parser,
+def init_sequential_engine(model_name: str, model_path: str, model_architectures: set[str],
+                           device: str, vlm: bool, parser: Parser,
                            is_fix_tool_type: bool, stop_signal: threading.Event,
                            generate_config=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
@@ -108,7 +112,9 @@ def init_sequential_engine(model_name: str, model_path: str, device: str, vlm: b
 
     log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
 
-    return new_app(VlmController(config=ControllerConfig(model_name=model_name), parser=parser, pipe=pipe,
+    return new_app(VlmController(config=ControllerConfig(model_name=model_name,
+                                                         model_architectures=model_architectures),
+                                 parser=parser, pipe=pipe,
                                  generate_config=generate_config, chat_template=chat_template,
                                  handler_config=handler_config, is_fix_tool_type=is_fix_tool_type,
                                  stop_signal=stop_signal))

@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+from json import JSONDecodeError
 from typing import Any
 
 import json_repair
@@ -17,8 +18,13 @@ from agent.client.veai.tool.run_configuration import RunConfiguration
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
+from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam
 from agent.parser import ParsedFunctionCall
+
+GEMMA_4 = "Gemma4ForConditionalGeneration"
+
+TARGET_FILE = "target_file"
 
 ROOT = "."
 
@@ -50,7 +56,7 @@ def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
     return function
 
 
-def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
     options_raw = args.get("options")
     is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
@@ -85,18 +91,18 @@ def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext
     return function
 
 
-def fix_file_structure(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_file_structure(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, function.name, context)
     if invalid:
         new_function = FileStructure().new_call(target_file)
         return new_function
     return function
 
 
-def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, function.name, context)
     if not target_file:
         log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
     edits = args.get("edits")
@@ -156,9 +162,9 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None) -> 
     return function
 
 
-def fix_write_file(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, function.name, context)
     content = args.get("content")
     if target_file and content:
         allow_overwrite = args.get("allow_overwrite")
@@ -177,7 +183,7 @@ def fix_write_file(function: ParsedFunctionCall, context: UserContext | None) ->
     return function
 
 
-def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_search_for_text(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
     text_snippet = args.get("text_snippet")
@@ -192,7 +198,7 @@ def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | Non
     return function
 
 
-def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
     glob_pattern = args.get("glob_pattern")
     invalid = not glob_pattern
@@ -227,9 +233,9 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext |
     return function
 
 
-def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
+def fix_read_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, function.name, context)
 
     anonymous_arguments = function.anonymous_arguments
     if not target_file and anonymous_arguments:
@@ -268,8 +274,8 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = No
     return function
 
 
-def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
-    target_file = args.get("target_file")
+def get_target_file(args, function_name: str, context: UserContext = UserContext()) -> tuple[str, bool]:
+    target_file = args.get(TARGET_FILE)
 
     invalid = not target_file
     if invalid:
@@ -290,10 +296,30 @@ def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
     if fixed:
         invalid = True
 
+    if not target_file and GEMMA_4 in context.model_architectures:
+        log.debug(f"no required target file, trying to get from previous cool call of '{function_name}'")
+        messages = context.messages
+        for i, message in enumerate(reversed(messages)):
+            if message.role == ROLE_ASSISTANT:
+                for tool_call in message.tool_calls or []:
+                    function = tool_call.function
+                    if function.name == function_name:
+                        try:
+                            arguments = json.loads(function.arguments)
+                        except JSONDecodeError as e:
+                            log.debug(f"error on function arguments parsing: tool_call.id={tool_call.id}, "
+                                      f"function.name={function.name}, arguments='{function.argumentsl}'")
+                            arguments = {}
+
+                        target_file = arguments.get(TARGET_FILE)
+                        if target_file:
+                            log.info(f"gets target file from previous tool call: tool_call.id={tool_call.id}, "
+                                     f"function.name={function.name}, target_file='{target_file}'")
+
     return target_file, invalid
 
 
-def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_list_dir(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
     directory_path = args.get("directory_path")
     invalid = False
@@ -331,7 +357,7 @@ def is_windows(context: UserContext | None):
     return "windows" in context.os.lower() if context and context.os else False
 
 
-def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_run_command(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
 
     working_directory = args.get("working_directory")
@@ -361,7 +387,7 @@ def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -
         return function
 
 
-def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any, bool]:
+def fix_windows_path(path: Any | None, context: UserContext = UserContext()) -> tuple[Any, bool]:
     fixed = False
     if path and isinstance(path, str) and is_windows(context):
         # SERA case
@@ -403,7 +429,8 @@ def read_args_as_json(args: dict[str, Any]) -> Any:
     return args
 
 
-def veai_fix_tool_definition_optional_property_as_null_type(tool: ChatCompletionFunctionToolParam) -> ChatCompletionFunctionToolParam:
+def veai_fix_tool_definition_optional_property_as_null_type(
+        tool: ChatCompletionFunctionToolParam) -> ChatCompletionFunctionToolParam:
     function = tool.function
     function.parameters = _fix_tool_definition_optional_property_as_null_type(function.parameters, function.name)
     return tool
@@ -443,9 +470,9 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
     return properties
 
 
-def fix_run_configuration(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
+def fix_run_configuration(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, function.name, context)
     configuration_name = args.get("configuration_name")
     if target_file and configuration_name:
         line_number, fixed = as_int_or_none(args.get("line_number"), "line_number")

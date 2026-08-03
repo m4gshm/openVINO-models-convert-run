@@ -13,8 +13,18 @@ optimum-cli export openvino ^
   --weight-format %WEIGHT_FORMAT% ^
   --backup-precision int8_asym ^
   --group-size %GROUP_SIZE% ^
+  --ratio 1.0 ^
   --trust-remote-code ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%
 
 pause
 
+@REM INFO:nncf:Statistics of the bitwidth distribution:
+@REM +---------------------------+-----------------------------+----------------------------------------+
+@REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
+@REM +===========================+=============================+========================================+
+@REM | int8_asym, per-channel    | 2% (2 / 386)                | 0% (0 / 384)                           |
+@REM +---------------------------+-----------------------------+----------------------------------------+
+@REM | int4_asym, group size 128 | 98% (384 / 386)             | 100% (384 / 384)                       |
+@REM +---------------------------+-----------------------------+----------------------------------------+
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:06:28 • 0:00:00

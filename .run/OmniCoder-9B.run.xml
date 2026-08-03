@@ -1,6 +1,5 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="OmniCoder-9B" type="PythonConfigurationType" factoryName="Python">
-    <module name="run-model" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
@@ -8,11 +7,12 @@
       <env name="PYTHONUNBUFFERED" value="1" />
     </envs>
     <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="Python 3.14 (openVINO-models-convert-run)" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-    <option name="IS_MODULE_SDK" value="true" />
+    <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
-    <option name="DEBUG_JUST_MY_CODE" value="false" />
+    <module name="" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
     <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq --pip CB --cache_precision u8" />

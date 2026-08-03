@@ -27,7 +27,10 @@ class PreprocessToolCallCase(unittest.TestCase):
     def test_check_loop_multitools_calls(self):
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls_multiple.json")
         tool_call_text = tool_cal_file.read_text(encoding="utf-8")
-        messages = self.adapter.validate_json(tool_call_text)
+        try:
+            messages = self.adapter.validate_json(tool_call_text)
+        except Exception as e:
+            raise e
         preprocess_tool_call = PreprocessToolCall()
         loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
         self.assertIsNotNone(loop_call)

@@ -1,17 +1,12 @@
 import logging
 
-from agent.inference.loop_error import LoopError
+from agent.inference.loop_error import LoopError, ERROR_APPEARS_TO_BE_A_LOOP
+
+DEFAULT_DUPLICATED_TOKENS_LIMIT = 100
 
 IGNORE_DUPLICATED_PARTS_SIZE = 10
 
 INIT_STEP = 1
-
-DUPLICATED_LINES_THRESHOLD = 5
-DUPLICATED_TOKEN_THRESHOLD = 10
-
-DUPLICATED_TOKENS_LIMIT = 100
-DUPLICATED_LINES_RATE_LIMIT = 0.5
-DUPLICATED_LINES_LIMIT = 50
 
 log = logging.getLogger(__name__)
 
@@ -305,9 +300,66 @@ def delete_word(duplicate_ranges: dict[int, int],
             del duplicated_words[phrase]
 
 
+def find_duplicated_with_longest_last(last_part_start: int | None, last_word: str, start_positions: list[int],
+                                      duplicates_check_tail: list[str], duplicated_ranges_reversed: dict[int, int],
+                                      duplicated_words: dict[str, set[int]]) -> tuple[str | None, list[int]]:
+    merged_word: str | None = None
+    end_positions = list[int]()
+    for start_position in start_positions:
+        prev_word_start = duplicated_ranges_reversed.get(start_position)
+        if prev_word_start and prev_word_start >= last_part_start:
+            prev_word = "".join(duplicates_check_tail[prev_word_start: start_position + 1])
+            if duplicated_words.get(prev_word):
+                end_position = start_position + len(last_word) - 1
+                join = "".join(duplicates_check_tail[prev_word_start: end_position + 1])
+                if merged_word is None:
+                    merged_word = join
+                    end_positions.append(end_position)
+                elif join == merged_word:
+                    end_positions.append(end_position)
+
+    while not merged_word is None and len(start_positions) > 1:
+        new_merged_word: str | None = None
+        new_end_positions = list[int]()
+        shift = (len(merged_word) - 1)
+        for end_position in end_positions:
+            start_position = end_position - shift
+            prev_word_start = duplicated_ranges_reversed.get(start_position)
+            if prev_word_start in end_positions:
+                # loop
+                break
+            elif prev_word_start and prev_word_start >= last_part_start:
+                prev_word = "".join(duplicates_check_tail[prev_word_start: start_position + 1])
+                if duplicated_words.get(prev_word):
+                    join = "".join(duplicates_check_tail[prev_word_start: end_position + 1])
+                    if not new_merged_word:
+                        new_merged_word = join
+                        new_end_positions.append(end_position)
+                    elif join == new_merged_word:
+                        new_end_positions.append(end_position)
+                    else:
+                        pass
+
+        if len(new_end_positions) > 1:
+            merged_word = new_merged_word
+            end_positions = new_end_positions
+        elif len(new_end_positions) == 0:
+            # loop
+            break
+        else:
+            merged_word = None
+            end_positions = []
+            break
+
+    return merged_word, end_positions
+
+
 class Phrase:
     def __init__(self, strat_duplicates_detect_from: int = 500, last_part_duplicates_rate: float = 0.5,
-                 last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.0025):
+                 last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.0025,
+                 duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
+                 duplicated_lines_limit=50,
+                 duplicated_lines_threshold=5):
         self.tokens: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}
@@ -326,6 +378,11 @@ class Phrase:
         self.last_part_duplicates_rate = last_part_duplicates_rate
         self.last_subpart_duplicates_rate = last_subpart_duplicates_rate
         self.last_subpart_end_line_delta_rate = last_subpart_end_line_delta_rate
+
+        self.duplicated_tokens_limit = duplicated_tokens_limit
+        self.duplicated_lines_rate_limit = duplicated_lines_rate_limit
+        self.duplicated_lines_limit = duplicated_lines_limit
+        self.duplicated_lines_threshold = duplicated_lines_threshold
 
     @property
     def full(self):
@@ -347,8 +404,8 @@ class Phrase:
                     if prev_token != letter:
                         break
                     i += 1
-                    if i >= DUPLICATED_TOKENS_LIMIT:
-                        raise LoopError(payload=letter)
+                    if i >= self.duplicated_tokens_limit:
+                        raise LoopError(payload=letter, message=f"Duplicated tokens (amount={i})")
 
             if letter != '\n':
                 add_token(letter, self.current_line)
@@ -391,8 +448,25 @@ class Phrase:
                         log.debug(
                             f"duplicates detector: delta_rate={delta_rate}, last_part_rate2={last_part_rate2}")
                         if delta_rate <= self.last_subpart_end_line_delta_rate and last_part_rate2 >= self.last_subpart_duplicates_rate:
-                            duplicated_payload = "".join(duplicates_check_tail)
-                            raise LoopError(payload=duplicated_payload)
+                            last_duplicated_range_start = self.duplicate_ranges_reversed[last_part_end]
+                            last_word = "".join(duplicates_check_tail[last_duplicated_range_start: last_part_end + 1])
+                            last_word_positions = self.duplicated_words[last_word]
+
+                            start_positions = list(last_word_positions)
+                            start_positions.sort(reverse=True)
+
+                            longest_last_duplicated_word, end_positions = find_duplicated_with_longest_last(
+                                last_part_start, last_word,
+                                start_positions,
+                                duplicates_check_tail,
+                                self.duplicate_ranges_reversed,
+                                self.duplicated_words)
+
+                            if not longest_last_duplicated_word is None and len(end_positions) > 1:
+                                duplicated_payload = "\n".join([longest_last_duplicated_word] * len(end_positions))
+                                raise LoopError(payload=duplicated_payload, message=ERROR_APPEARS_TO_BE_A_LOOP)
+                            else:
+                                pass
             else:
                 current_line = self.current_line
                 current_line_str = "".join(current_line)
@@ -418,9 +492,9 @@ class Phrase:
 
                 self.lines_unique[current_line_str] = current_line_positions
 
-                positions = current_line_positions
+                start_positions = current_line_positions
                 duplicated_phrase_revert = [current_line_str]
-                if len(positions) >= DUPLICATED_LINES_THRESHOLD:
+                if len(start_positions) >= self.duplicated_lines_threshold:
                     prev_lines_position_unique = dict[int, int]()
                     prev_line_step = 1
                     stop = False
@@ -432,7 +506,7 @@ class Phrase:
                         prev_lines = list[str]()
                         prev_line_num = list[int]()
 
-                        for line_position in reversed(positions):
+                        for line_position in reversed(start_positions):
                             touched_line_positions.add(line_position)
                             prev_line_position = line_position - prev_line_step
                             if prev_line_position <= 0:
@@ -464,17 +538,18 @@ class Phrase:
 
                     if cycle_start and cycle_end:
                         cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
-                        raise LoopError(payload=cycled_phrase)
+                        raise LoopError(payload=cycled_phrase, message="Cycled phrase detected")
                     else:
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
                         if len(duplicated_phrase.strip()) > 0:
-                            log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(positions)}")
+                            log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(start_positions)}")
 
                 duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
                 duplicated_rate = duplicated_lines_amount / lines_amount
-                if duplicated_rate >= DUPLICATED_LINES_RATE_LIMIT and duplicated_lines_amount >= DUPLICATED_LINES_LIMIT:
+                if duplicated_rate >= self.duplicated_lines_rate_limit and duplicated_lines_amount >= self.duplicated_lines_limit:
                     payload = "".join(list(self.lines_unique.keys()))
-                    raise LoopError(payload=payload)
+                    raise LoopError(payload=payload,
+                                    message=f"Duplicated lines detected (amount={duplicated_lines_amount})")
 
                 self.clean_current_line()
                 added_lines.append(current_line_str)

@@ -23,32 +23,6 @@ ROLE_ASSISTANT = "assistant"
 ROLE_USER = "user"
 
 
-def new_message(role: str | None = None, content: str | None = None, reasoning_content: str | None = None,
-                tool_calls: list[ChatCompletionMessageToolCallUnion] | None = None) -> ChatCompletionMessage:
-    if not content or reasoning_content or tool_calls:
-        content = EMPTY_CONTENT
-    message = ChatCompletionMessage(role=ROLE_ASSISTANT)
-    message.content = content
-    if reasoning_content:
-        message.model_extra["reasoning_content"] = reasoning_content
-    message.tool_calls = tool_calls
-    return message
-
-
-def new_delta(content: str = "", thinking: bool = False,
-              tool_calls: list[ChatCompletionMessageToolCallUnion] | None = None
-              ) -> ChatCompletionMessage:
-    message = ChatCompletionMessage(role=ROLE_ASSISTANT)
-    if thinking:
-        message.model_extra["reasoning_content"] = content
-    else:
-        message.content = content
-
-    if tool_calls:
-        message.tool_calls = tool_calls
-    return message
-
-
 def new_stop_response(role: Role | None, response_id: str | None = None, model: str = "",
                       finish_reason: FinishReason = "stop",
                       content: str | None = None) -> ChatCompletionChunk:
@@ -98,15 +72,21 @@ def generate_tool_call_id(func_name: str, ts: int | None = None) -> str:
     return f"call_{ts}_{next(tool_call_counter)}_{func_name}"
 
 
-def new_choice_delta(role: Optional[Role],
+def new_choice_delta(role: Role | None = None,
                      content: str | None = None,
                      reasoning_content: str | None = None,
                      tool_calls: Optional[List[ChoiceDeltaToolCall]] = None,
                      finish_reason: Optional[FinishReason] = None):
+    delta = new_delta(role, content, reasoning_content, tool_calls)
+    return openai.types.chat.chat_completion_chunk.Choice(delta=delta, finish_reason=finish_reason, index=0)
+
+
+def new_delta(role: Role | None, content: str | None,
+              reasoning_content: str | None, tool_calls: list[ChoiceDeltaToolCall] | None) -> ChoiceDelta:
     delta = ChoiceDelta(role=role, content=content, tool_calls=tool_calls)
     if reasoning_content:
         delta.model_extra["reasoning_content"] = reasoning_content
-    return openai.types.chat.chat_completion_chunk.Choice(delta=delta, finish_reason=finish_reason, index=0)
+    return delta
 
 
 def new_choice_message(content: str | None = None,

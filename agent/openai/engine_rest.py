@@ -35,7 +35,7 @@ def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSigna
         log.debug(f"add finish_reason to the last choice, finish_reason={finish_reason}")
     else:
         log.debug(f"add stop message at the end, finish_reason={finish_reason}")
-        responses.append(new_stop_response(role=ROLE_ASSISTANT, finish_reason=finish_reason))
+        responses.append(new_stop_response(finish_reason=finish_reason, role=None))
     return responses
 
 
@@ -89,7 +89,7 @@ class ContinuousBatchingController(BaseController):
         request_id = next(request_counter)
         response_id = str(uuid.uuid4())
         model_name = self.config.model_name
-        stop_response = new_stop_response(response_id=response_id, model=model_name, role=ROLE_ASSISTANT)
+        stop_response = new_stop_response(response_id=response_id, model=model_name, role=None)
 
         encode_size = self.get_tokens_size(prompt)
         max_length = generation_config.max_length

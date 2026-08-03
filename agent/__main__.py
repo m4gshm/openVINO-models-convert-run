@@ -10,7 +10,6 @@ from enum import Enum
 from pathlib import Path
 
 import uvicorn
-from openai import OpenAI
 from openvino_genai.py_openvino_genai import SchedulerConfig
 from pydantic.json import pydantic_encoder
 
@@ -149,6 +148,9 @@ def main():
                 text_config = config.get("text_config")
                 if isinstance(text_config, dict):
                     max_position_embeddings = text_config.get("max_position_embeddings")
+                else:
+                    # old models like Qwen2.5
+                    max_position_embeddings = config.get("max_position_embeddings")
             except Exception as e:
                 log.error(f"error on read {openvino_model_config_json}: {e}")
     elif not model_path.exists():
@@ -297,7 +299,7 @@ def main():
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
     }
 
-    npu_pipeline_properties = {
+    npu_pipeline_properties: dict[str, str | int] = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
@@ -308,13 +310,16 @@ def main():
         "NPU_COMPILER_TYPE": "PLUGIN",
         "NPU_USE_NPUW": "YES",
         "NPUW_LLM": "YES",
-        "NPUW_LLM_PREFILL_CHUNK_SIZE": default_batch_size,
+
         "NPUW_LLM_GENERATE_HINT": "BEST_PERF",
         "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
-        "MAX_PROMPT_LEN": max_prompt_len,
 
         "LOG_LEVEL": "LOG_WARNING",
     }
+    if max_prompt_len:
+        npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
+    if default_batch_size:
+        npu_pipeline_properties["NPUW_LLM_PREFILL_CHUNK_SIZE"] = default_batch_size
 
     if not model_path.exists():
         log.error(f"model path is not existed: {model_path}")
@@ -331,6 +336,7 @@ def main():
     if is_device_npu or pipe != Pipe.CB:
         app = init_sequential_engine(model_name=model_name,
                                      model_path=str(model_path),
+                                     model_architectures=model_architectures,
                                      device=device,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
@@ -343,6 +349,7 @@ def main():
     else:
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
+                                              model_architectures=model_architectures,
                                               device=device,
                                               parser=model_parser,
                                               generate_config=generate_opts,

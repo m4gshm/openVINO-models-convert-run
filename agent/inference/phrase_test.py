@@ -5,7 +5,7 @@ import unittest
 from importlib.resources import files
 
 from agent.inference.loop_error import LoopError
-from agent.inference.phrase import DUPLICATED_TOKENS_LIMIT, Phrase, \
+from agent.inference.phrase import DEFAULT_DUPLICATED_TOKENS_LIMIT, Phrase, \
     process_duplicate_pairs, visualize_ranges, add_token, \
     add_check_duplicate_tokens, visualize_reversed_ranges, visualize_tokens, visualize_islands_reversed, \
     get_last_part_border, layout_last_island
@@ -15,7 +15,7 @@ TEST_RESOURCES = "test_resources/phrase"
 
 class PhraseTestCase(unittest.TestCase):
     def test_loop_tokens(self):
-        repeated_string = "a" + ("b" * DUPLICATED_TOKENS_LIMIT)
+        repeated_string = "a" + ("b" * DEFAULT_DUPLICATED_TOKENS_LIMIT)
 
         phrase = Phrase()
         with self.assertRaises(LoopError):
@@ -43,6 +43,17 @@ class PhraseTestCase(unittest.TestCase):
                          'first\n'
                          'second\n', phrase.full)
 
+    def test_loop_in_one_line_false_case(self):
+        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line_false_case.txt").read_text(
+            encoding="utf-8")
+        phrase = Phrase()
+
+        for token in loop_messages:
+            phrase.add_token(token)
+
+        # no errors
+        pass
+
     def test_loop_in_one_line(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
         phrase = Phrase()
@@ -50,53 +61,7 @@ class PhraseTestCase(unittest.TestCase):
             for token in loop_messages:
                 phrase.add_token(token)
 
-        self.assertEqual(('tion;\\nimport io.github.m4gshm.idempotent.consumer.MessageImpl;\\nimport '
-                          'io.github.m4gshm.idempotent.consumer.storage.tables.InputMessages;\\nimport '
-                          'io.r2dbc.postgresql.api.ClientOptions;\\nimport '
-                          'io.r2dbc.postgresql.client.PoolConfig;\\nimport '
-                          'io.r2dbc.postgresql.client.R2DBCClient;\\nimport '
-                          'io.r2dbc.postgresql.codec.CodecRegistry;\\nimport '
-                          'io.r2dbc.postgresql.pgsql96.PgSqlParameterSource;\\nimport '
-                          'org.junit.jupiter.api.BeforeEach;\\nimport '
-                          'org.junit.jupiter.api.Test;\\nimport '
-                          'org.springframework.data.convert.JsonCodec;\\nimport '
-                          'reactor.core.publisher.Flux;\\nimport reactor.core.publisher.Mono;\\nimport '
-                          'reactor.core.scheduler.Schedulers;\\nimport '
-                          'reactor.test.StepVerifier;\\nimport '
-                          'r2dbc.jdbc.JdbcConnectionFactory;\\nimport '
-                          'r2dbc.jdbc.JdbcConnectionPool;\\nimport '
-                          'r2dbc.jdbc.JdbcDatabaseClient;\\nimport '
-                          'r2dbc.jdbc.JdbcTransactionManager;\\nimport '
-                          'r2dbc.jdbc.TransactionDefinition;\\nimport javax.sql.DataSource;\\nimport '
-                          'org.springframework.jdbc.datasource.DriverManagerDataSource;\\nimport '
-                          'org.springframework.jdbc.core.JdbcTemplate;\\nimport '
-                          'org.springframework.transaction.reactive.TransactionalOperator;\\nimport '
-                          'org.springframework.transaction.annotation.EnableTransactionManagement;\\nimport '
-                          'org.springframework.transaction.annotation.Transactional;\\nimport '
-                          'org.springframework.context.annotation.Configuration;\\nimport '
-                          'org.springframework.stereotype.Component;\\nimport '
-                          'org.springframework.boot.autoconfigure.SpringBootApplication;\\nimport '
-                          'org.springframework.boot.SpringApplication;\\nimport '
-                          'org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;\\nimport '
-                          'org.springframework.boot.autoconfigure.security.servlet.SecurityServletAutoConfiguration;\\nimport '
-                          'org.springframework.boot.autoconfigure.web.servlet.WebMvcAutoConfiguration;\\nimport '
-                          'org.springframework.data.jpa.repository.JpaRepository;\\nimport '
-                          'org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;\\nimport '
-                          'org.springframework.orm.jpa.vendor.DatabasePlatform;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitManager;\\nimport '
-                          'org.springframework.orm.jpa.metamodel.MappingModelGeneratorProcessor;\\nimport '
-                          'org.springframework.orm.jpa.support.EntityManagerCreator;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.DefaultPersistenceUnitManager;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitInfo;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitReader;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlReader;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlWriter;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+        self.assertEqual(('ramework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
@@ -108,7 +73,8 @@ class PhraseTestCase(unittest.TestCase):
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+                          'org.springf\n'
+                          'ramework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '

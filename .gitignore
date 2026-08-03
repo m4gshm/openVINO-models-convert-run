@@ -15,7 +15,6 @@ __pycache__
 agent/build/
 build
 bin/
-dev/
 src_models/venv*
 src_models/Qwen
 src_models/microsoft
@@ -38,7 +37,6 @@ models/SERA*
 models/microsoft*/1
 models/Phi-*
 models/gemma-*
-models/gemma-4-E4B-it-int8-ov/
 models/OmniCoder*
 models/Vibe-Coding-Claude-Fable-5*
 models/Mellum*/1

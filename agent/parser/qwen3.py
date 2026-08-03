@@ -35,13 +35,9 @@ def parse_name(parameters_block) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | None = None) -> tuple[
+def get_arguments(arguments_block: str) -> tuple[
     dict[str, Any], bool]:
-    expected_properties: dict[str, Any] = expected_parameters.get(EXPECTED_PARAMETERS_PROPERTIES,
-                                                                  {}) if expected_parameters else {}
-
     arguments: dict[str, Any] = {}
-
     partial = False
     parameter_blocks = arguments_block.split(PARAMETER_START_PREF)
     for parameter_block in parameter_blocks:
@@ -84,6 +80,23 @@ def get_arguments(arguments_block: str, expected_parameters: dict[str, Any] | No
                 arguments[param_name_norm] = param_value_norm
 
     return arguments, partial
+
+
+def parse_function_call(function_block: str, partial: bool) -> tuple[ParsedFunctionCall, bool]:
+    function_block_rstrip = function_block.rstrip()
+    if function_block_rstrip.endswith(FUNCTION_END):
+        function_block = function_block_rstrip[:-len(FUNCTION_END)]
+
+    func_name, tail = parse_name(function_block)
+    if not func_name is None:
+        arguments, partial_param = get_arguments(tail or "")
+        if partial_param:
+            partial = True
+
+        parsed_function_call = ParsedFunctionCall(name=func_name, arguments=arguments)
+    else:
+        parsed_function_call = None
+    return parsed_function_call, partial
 
 
 class Qwen3MoeParser(QwenBaseParser):
@@ -154,19 +167,8 @@ class Qwen3MoeParser(QwenBaseParser):
             for function_block in function_blocks:
                 if len(function_block) == 0:
                     continue
-                function_block_rstrip = function_block.rstrip()
-                if function_block_rstrip.endswith(FUNCTION_END):
-                    function_block = function_block_rstrip[:-len(FUNCTION_END)]
+                parsed_function_call, partial = parse_function_call(function_block, partial)
 
-                func_name, tail = parse_name(function_block)
-                if func_name is None:
-                    # log
-                    continue
-
-                parameters = state.get_function_parameters(func_name)
-                arguments, partial_param = get_arguments(tail or "", parameters)
-                if partial_param:
-                    partial = True
-
-                parsed_calls.append(ParsedFunctionCall(name=func_name, arguments=arguments))
+                if parsed_function_call:
+                    parsed_calls.append(parsed_function_call)
         return parsed_calls, partial

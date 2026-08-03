@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, LiteralString
 
 import json_repair
 
@@ -64,25 +64,38 @@ def parse_name(parameters_block) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple[dict[str, Any], list[str], bool]:
+ARGS_DELIM = ','
+VALID_NAME_VAL_DELIM = ":"
+INVALID_BUT_POSSIBLE_DELIM = "="
+ARRAY_START = "["
+ARRAY_END = "]"
+OBJECT_START = "{"
+OBJECT_END = "}"
+
+
+def parse_object_arguments(arguments_block: str) -> tuple[
+    dict[str, Any], list[str], str]:
     arguments_block = arguments_block.strip()
     if not arguments_block:
-        return {}, [], is_block_partial
+        return {}, [], ""
 
-    if arguments_block.startswith("{"):
+    object_expect = False
+
+    if arguments_block.startswith(OBJECT_START):
+        object_expect = True
         arguments_block = arguments_block[1:]
-
-    if arguments_block.endswith("}"):
-        arguments_block = arguments_block[:-1]
-
-    partial = is_block_partial
+    else:
+        raise Exception(f"expected object, {arguments_block}")
 
     value_tag_wrapper = "<|\"|>"
 
     named_parameters = {}
     anonymous_parameters = []
 
-    if arguments_block.startswith("{") and arguments_block.endswith("}"):
+    possible_json = arguments_block.startswith(OBJECT_START)
+    if possible_json:  # and arguments_block[:possible_json_object_close_tag_position].endswith(object_end):
+        if object_expect:
+            arguments_block = arguments_block[:-1]
         log.debug(f"trying to parse as json: {arguments_block}")
         possible_json_args = arguments_block.replace(value_tag_wrapper, "\"")
         try:
@@ -92,32 +105,42 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
                 arguments = json_repair.loads(possible_json_args)
             except Exception as e:
                 arguments = {}
+        named_parameters: dict[str, Any] = {}
         if not arguments:
-            named_parameters: dict[str, Any] = {}
             log.error(f"unrepairable json arguments: {arguments_block}")
         else:
-            named_parameters = arguments
+            for k, v in arguments.items():
+                clean_k = clean(k)
+                clean_v = clean(v)
+                named_parameters[clean_k] = clean_v
+        unparsed_tail = ""
     else:
-        expect_name = True
-        expect_end_delimiter = False
-        expect_kv_delim = False
+        array_end_expect = False
+        expect_name = object_expect
+        expect_value_end_delimiter = False
+        expect_args_delim = False
         word = ''
         name: str | None = None
 
-        valid_kv_delim = ','
-        valid_name_val_delim = ":"
-        invalid_but_possible_delim = "="
-
-        for i, token in enumerate(arguments_block):
+        on_parse = arguments_block
+        next_token_i = 0
+        while next_token_i < len(on_parse):
+            token = on_parse[next_token_i]
+            last_token_i = len(on_parse) - 1
+            is_last_token = next_token_i == last_token_i
+            next_token_i += 1
+            is_arg_end_by_delim = token == ARGS_DELIM
+            is_array_end = array_end_expect and token == ARRAY_END
+            is_object_end = object_expect and token == OBJECT_END
             if expect_name:
-                if token == valid_name_val_delim:
+                if token == VALID_NAME_VAL_DELIM:
                     if word.startswith(value_tag_wrapper):
                         # wrapped anonymous arg
                         expect_name = False
-                        expect_end_delimiter = True
+                        expect_value_end_delimiter = True
                         word = word[len(value_tag_wrapper):] + token
                     else:
-                        word_parts = word.split(invalid_but_possible_delim)
+                        word_parts = word.split(INVALID_BUT_POSSIBLE_DELIM)
                         if len(word_parts) == 2:
                             name = word_parts[0]
                             word = word_parts[1] + token
@@ -126,23 +149,33 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
                             expect_name = False
                             name = word
                             word = ''
-
-                elif token == valid_kv_delim or i == len(arguments_block) - 1:
-                    if expect_kv_delim:
-                        expect_kv_delim = False
+                elif is_arg_end_by_delim or is_object_end or is_array_end or is_last_token:
+                    if not (is_arg_end_by_delim or is_object_end or is_array_end):
+                        word += token
+                    if expect_args_delim:
+                        expect_args_delim = False
                     else:
-                        word_parts = word.split(invalid_but_possible_delim)
+                        word_parts = word.split(INVALID_BUT_POSSIBLE_DELIM)
                         if len(word_parts) == 2:
                             named_parameters[word_parts[0]] = word_parts[1]
                         elif word:
                             anonymous_parameters.append(word)
                         name = ''
                         word = ''
+                    if is_object_end:
+                        break
+                    # if is_array_end:
+                    #     break
+
+                # elif object_expect and token == object_end:
+                #     # log
+                #     break
                 else:
                     word += token
             else:
                 # expected value
-                if not expect_end_delimiter and (token == valid_kv_delim or token == invalid_but_possible_delim):
+                if not expect_value_end_delimiter and (
+                        is_arg_end_by_delim or token == INVALID_BUT_POSSIBLE_DELIM):
                     expect_name = True
                     if name:
                         named_parameters[name] = word
@@ -150,23 +183,34 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
                         anonymous_parameters.append(word)
                     name = ''
                     word = ''
+                elif token == ARRAY_START:
+                    array, next_token_i, on_parse = parse_array(arguments_block, next_token_i)
+                    named_parameters[name] = array
+                    name = ''
+                    word = ''
+                    expect_name = True
+                    expect_args_delim = True
                 else:
-                    word += token
-                    if word.endswith(value_tag_wrapper):
-                        if not expect_end_delimiter:
-                            expect_end_delimiter = True
-                            word = ''
-                        else:
-                            value = word[:len(word) - len(value_tag_wrapper)]
-                            if name:
-                                named_parameters[name] = value
-                            elif word:
-                                anonymous_parameters.append(value)
-                            name = ''
-                            word = ''
-                            expect_end_delimiter = False
-                            expect_name = True
-                            expect_kv_delim = True
+                    if not (is_last_token and (is_object_end or is_array_end)):
+                        word += token
+                        if word.endswith(value_tag_wrapper):
+                            if not expect_value_end_delimiter:
+                                expect_value_end_delimiter = True
+                                word = ''
+                            else:
+                                value = word[:len(word) - len(value_tag_wrapper)]
+                                if name:
+                                    named_parameters[name] = value
+                                elif word:
+                                    anonymous_parameters.append(value)
+                                name = ''
+                                word = ''
+                                expect_value_end_delimiter = False
+                                expect_name = True
+                                expect_args_delim = True
+                    else:
+                        pass
+        unparsed_tail = on_parse[next_token_i:]
 
         if name:
             named_parameters[name] = word
@@ -174,17 +218,88 @@ def get_arguments(arguments_block: str, is_block_partial: bool = False) -> tuple
             anonymous_parameters.append(word)
 
         for k, v in named_parameters.items():
-            if v and v.startswith("\"") and v.endswith("\""):
-                named_parameters[k] = v[1:-1]
+            if v and isinstance(v, str):
+                named_parameters[k] = unquote(v)
+            else:
+                pass
 
         for i, v in enumerate(anonymous_parameters):
-            if v and v.startswith("\"") and v.endswith("\""):
-                anonymous_parameters[i] = v[1:-1]
+            if v and isinstance(v, str):
+                anonymous_parameters[i] = unquote(v)
+            else:
+                pass
 
     log.debug(
-        f"tool call arguments parsed: src={arguments_block}, named_parameters={named_parameters}, partial={partial}"
+        f"tool call object parsed: src={arguments_block}, named_parameters={named_parameters}, "
         f"anonymous_parameters={anonymous_parameters}")
-    return named_parameters, anonymous_parameters, partial
+
+    return named_parameters, anonymous_parameters, unparsed_tail
+
+
+def clean(dirty_val: Any) -> Any:
+    if isinstance(dirty_val, str):
+        stripped = dirty_val.strip()
+        if stripped.startswith("{") or stripped.startswith("\""):
+            stripped = clean(stripped[1:len(dirty_val)])
+        if stripped.endswith("}") or stripped.endswith("\""):
+            stripped = clean(stripped[:-1])
+
+        dirty_val = stripped
+
+        dirty_val = fix_escaped_symbol(dirty_val)
+    return dirty_val
+
+
+def unquote(val: Any) -> Any:
+    if isinstance(val, str):
+        if val.startswith("\""):
+            val = clean(val[1:len(val)])
+        if val.endswith("\""):
+            val = clean(val[:-1])
+        val = fix_escaped_symbol(val)
+    return val
+
+
+def fix_escaped_symbol(val: str | Any) -> LiteralString:
+    if "\\\"" in val:
+        fix_escaped = val.replace( "\\\"", "\"")
+        log.debug(f"fix escaped:\nold={val}\nnew={fix_escaped}")
+        val = fix_escaped
+
+    if "\\r\\n" in val:
+        new_lines_dirty_val = val.replace("\\r\\n", "\r\n")
+        log.debug(f"fix new lines windows:\nold={val}\nnew={new_lines_dirty_val}")
+        val = new_lines_dirty_val
+    elif "\\n" in val:
+        new_lines_dirty_val = val.replace("\\n", "\n")
+        log.debug(f"fix new lines linux:\nold={val}\nnew={new_lines_dirty_val}")
+        val = new_lines_dirty_val
+    return val
+
+
+def parse_array(arguments_block: str, next_token_i: int) -> tuple[list[dict[str, Any]], int, str]:
+    array_tail = arguments_block[next_token_i:]
+    parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
+        arguments_block=array_tail)
+    next_token_i = 0
+    on_parse = unparsed_tail
+
+    array = [parsed_object_in_array]
+
+    while next_token_i < len(on_parse):
+        token = on_parse[next_token_i]
+        next_token_i += 1
+        if token == ARGS_DELIM:
+            parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
+                arguments_block=array_tail)
+            array.append(parsed_object_in_array)
+            next_token_i = 0
+            on_parse = unparsed_tail
+        elif token == ARRAY_END:
+            on_parse = on_parse[next_token_i:]
+            next_token_i = 0
+            break
+    return array, next_token_i, on_parse
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
@@ -269,9 +384,7 @@ class Gemma4ChannelParser(Parser[ParserState]):
                     # log
                     continue
 
-                arguments, anonymous_parameters, partial_param = get_arguments(tail or "")
-                if partial_param:
-                    partial = True
+                arguments, anonymous_parameters, unparsed_tail = parse_object_arguments(tail or "")
 
                 parsed_calls.append(
                     ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_parameters))

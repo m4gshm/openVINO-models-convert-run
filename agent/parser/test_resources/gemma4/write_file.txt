@@ -1,1 +1,27 @@
-<|tool_call>call:write_file{allow_overwrite:true,content:<|"|>payload<|"|>,target_file:<|"|>C:/temp.txt<|"|>}<tool_call|>
+<|tool_call>call:write_file{allow_overwrite:true,content:<|"|>plugins {
+    `java-library`
+}
+apply(plugin = "io.spring.dependency-management")
+
+dependencies {
+    api(project(":idempotent-consumer"))
+    api(project(":storage-api-reactive"))
+    api(project(":postgres-jdbc"))
+
+    implementation("io.projectreactor:reactor-core")
+
+    implementation("org.postgresql:postgresql")
+
+    implementation("org.springframework.boot:spring-boot-starter-jooq")
+    implementation("org.springframework.boot:spring-boot-autoconfigure")
+
+    implementation("org.jooq:jooq")
+    implementation("org.jooq:jooq-postgres-extensions")
+
+    // --- Testcontainers Dependencies ---
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:os" // Для Podman/Docker runtime
+    testImplementation("org.junit.jupiter:junit-jupiter-api")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+}<|"|>,target_file:<|"|>java/idempotent-consumer-jdbc/build.gradle.kts<|"|>}<tool_call|>

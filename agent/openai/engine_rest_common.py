@@ -49,6 +49,7 @@ MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
 class ControllerConfig(BaseModel):
     model_name: str
+    model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
 
 
@@ -161,7 +162,10 @@ class BaseController(ABC):
         log.info(f"inbound history messages {len(messages)}")
 
         is_veai = is_veai_agent(messages)
-        user_context = get_veai_context(messages) if is_veai else None
+
+        user_context = get_veai_context(messages) if is_veai else UserContext()
+        user_context.messages = messages
+        user_context.model_architectures = self.config.model_architectures
 
         last_message = messages[-1] if messages else None
 
@@ -178,10 +182,11 @@ class BaseController(ABC):
 
         tokenizer = self.tokenizer
         extra_context = {}
-        # if self.generate_config.reasoning_supported:
-        #     extra_context["enable_thinking"] = is_reasoning_enabled
+        if self.generate_config.enable_thinking:
+            extra_context["enable_thinking"] = self.generate_config.enable_thinking
 
         chat_history = new_chat_history(messages, tools_raw)
+        log.debug(f"chat history: messages={len(chat_history.get_messages())}, tools={len(chat_history.get_tools())}")
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,
