@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Any, LiteralString
+from typing import Any
 
 import json_repair
 
@@ -89,7 +89,6 @@ def parse_object_arguments(arguments_block: str) -> tuple[
 
     value_tag_wrapper = "<|\"|>"
 
-    named_parameters = {}
     anonymous_parameters = []
 
     possible_json = arguments_block.startswith(OBJECT_START)
@@ -105,16 +104,21 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                 arguments = json_repair.loads(possible_json_args)
             except Exception as e:
                 arguments = {}
+
+        # for k, v in arguments.items():
+        #     arguments[k] = escape(v)
+
         named_parameters: dict[str, Any] = {}
-        if not arguments:
-            log.error(f"unrepairable json arguments: {arguments_block}")
-        else:
+        if arguments:
             for k, v in arguments.items():
                 clean_k = clean(k)
                 clean_v = clean(v)
                 named_parameters[clean_k] = clean_v
+        else:
+            log.error(f"unrepairable json arguments: {arguments_block}")
         unparsed_tail = ""
     else:
+        arguments = dict[str, Any]()
         array_end_expect = False
         expect_name = object_expect
         expect_value_end_delimiter = False
@@ -157,7 +161,7 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                     else:
                         word_parts = word.split(INVALID_BUT_POSSIBLE_DELIM)
                         if len(word_parts) == 2:
-                            named_parameters[word_parts[0]] = word_parts[1]
+                            arguments[word_parts[0]] = word_parts[1]
                         elif word:
                             anonymous_parameters.append(word)
                         name = ''
@@ -178,14 +182,14 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                         is_arg_end_by_delim or token == INVALID_BUT_POSSIBLE_DELIM):
                     expect_name = True
                     if name:
-                        named_parameters[name] = word
+                        arguments[name] = word
                     elif word:
                         anonymous_parameters.append(word)
                     name = ''
                     word = ''
                 elif token == ARRAY_START:
                     array, next_token_i, on_parse = parse_array(arguments_block, next_token_i)
-                    named_parameters[name] = array
+                    arguments[name] = array
                     name = ''
                     word = ''
                     expect_name = True
@@ -200,7 +204,7 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                             else:
                                 value = word[:len(word) - len(value_tag_wrapper)]
                                 if name:
-                                    named_parameters[name] = value
+                                    arguments[name] = value
                                 elif word:
                                     anonymous_parameters.append(value)
                                 name = ''
@@ -213,21 +217,18 @@ def parse_object_arguments(arguments_block: str) -> tuple[
         unparsed_tail = on_parse[next_token_i:]
 
         if name:
-            named_parameters[name] = word
+            arguments[name] = word
         elif word:
             anonymous_parameters.append(word)
 
-        for k, v in named_parameters.items():
-            if v and isinstance(v, str):
-                named_parameters[k] = unquote(v)
-            else:
-                pass
+        named_parameters: dict[str, Any] = {}
+        for k, v in arguments.items():
+            clean_k = strip(k)
+            clean_v = unquote(strip(unescape(v)))
+            named_parameters[clean_k] = clean_v
 
         for i, v in enumerate(anonymous_parameters):
-            if v and isinstance(v, str):
-                anonymous_parameters[i] = unquote(v)
-            else:
-                pass
+            anonymous_parameters[i] = unquote(strip(unescape(v)))
 
     log.debug(
         f"tool call object parsed: src={arguments_block}, named_parameters={named_parameters}, "
@@ -243,37 +244,62 @@ def clean(dirty_val: Any) -> Any:
             stripped = clean(stripped[1:len(dirty_val)])
         if stripped.endswith("}") or stripped.endswith("\""):
             stripped = clean(stripped[:-1])
-
-        dirty_val = stripped
-
-        dirty_val = fix_escaped_symbol(dirty_val)
+        dirty_val = unescape(stripped)
     return dirty_val
+
+
+def strip(val: Any):
+    if isinstance(val, str):
+        if val.startswith(" ") or val.endswith(" "):
+            old = val
+            new = val.strip()
+            log.debug(f"strip '{old}' to '{new}'")
+            val = new
+    return val
 
 
 def unquote(val: Any) -> Any:
     if isinstance(val, str):
-        if val.startswith("\""):
-            val = clean(val[1:len(val)])
-        if val.endswith("\""):
-            val = clean(val[:-1])
-        val = fix_escaped_symbol(val)
+        if val.startswith("\"") or val.startswith("'"):
+            val = val[1:len(val)]
+        if val.endswith("\"") or val.startswith("'"):
+            val = val[:-1]
     return val
 
 
-def fix_escaped_symbol(val: str | Any) -> LiteralString:
-    if "\\\"" in val:
-        fix_escaped = val.replace( "\\\"", "\"")
-        log.debug(f"fix escaped:\nold={val}\nnew={fix_escaped}")
-        val = fix_escaped
+# over_escaped = {"\\\\\"": "\\\"", "\\\\r": "\\r", "\\\\n": "\\n", "\\\\t": "\\t"}
+#
+#
+# def replace_overescaped(val: str | Any):
+#     if isinstance(val, str):
+#         for old, new in over_escaped.items():
+#             if old in val:
+#                 after = val.replace(old, new)
+#                 log.debug(f"fix overescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
+#                 val = after
+#     return val
 
-    if "\\r\\n" in val:
-        new_lines_dirty_val = val.replace("\\r\\n", "\r\n")
-        log.debug(f"fix new lines windows:\nold={val}\nnew={new_lines_dirty_val}")
-        val = new_lines_dirty_val
-    elif "\\n" in val:
-        new_lines_dirty_val = val.replace("\\n", "\n")
-        log.debug(f"fix new lines linux:\nold={val}\nnew={new_lines_dirty_val}")
-        val = new_lines_dirty_val
+
+escaped = {"\"": "\\\"", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+# def escape(val: str | Any):
+#     if isinstance(val, str):
+#         for old, new in escaped.items():
+#             if old in val:
+#                 after = val.replace(old, new)
+#                 log.debug(f"escaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
+#                 val = after
+#     return val
+
+
+def unescape(val: str | Any):
+    if isinstance(val, str):
+        for new, old in escaped.items():
+            if old in val:
+                after = val.replace(old, new)
+                log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
+                val = after
     return val
 
 

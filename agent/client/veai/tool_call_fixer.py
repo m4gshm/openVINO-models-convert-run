@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 
 def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
-                                 user_context: UserContext | None = None) -> ParsedFunctionCall:
+                                 user_context: UserContext | None = UserContext()) -> ParsedFunctionCall:
     if run_command.function_name == function.name:
         return fix_run_command(function, user_context)
     elif list_dir.function_name == function.name:
@@ -296,7 +296,7 @@ def get_target_file(args, function_name: str, context: UserContext = UserContext
     if fixed:
         invalid = True
 
-    if not target_file and GEMMA_4 in context.model_architectures:
+    if not target_file and context and GEMMA_4 in context.model_architectures:
         log.debug(f"no required target file, trying to get from previous cool call of '{function_name}'")
         messages = context.messages
         for i, message in enumerate(reversed(messages)):

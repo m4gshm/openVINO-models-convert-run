@@ -1,0 +1,1 @@
+<|tool_call>call:search_for_text{is_case_sensitive: false, target_path_or_url: "MessageStorageImpl.java", text_snippet: "    public class MessageStorageImpl"}<tool_call|>
