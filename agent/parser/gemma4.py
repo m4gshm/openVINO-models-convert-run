@@ -72,8 +72,22 @@ ARRAY_END = "]"
 OBJECT_START = "{"
 OBJECT_END = "}"
 
+value_tag_wrapper = "<|\"|>"
+str_wrappers = [value_tag_wrapper, "\"", "'"]
 
-def parse_object_arguments(arguments_block: str) -> tuple[
+
+def is_start_by_wrapper(word: str):
+    for wrapper in str_wrappers:
+        if word.startswith(wrapper):
+            return wrapper
+    return None
+
+
+def is_end_by_wrapper(word: str | Any, wrapper: str) -> bool:
+    return word and word.endswith(wrapper) and not word.endswith("\\" + wrapper)
+
+
+def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[
     dict[str, Any], list[str], str]:
     arguments_block = arguments_block.strip()
     if not arguments_block:
@@ -86,8 +100,6 @@ def parse_object_arguments(arguments_block: str) -> tuple[
         arguments_block = arguments_block[1:]
     else:
         raise Exception(f"expected object, {arguments_block}")
-
-    value_tag_wrapper = "<|\"|>"
 
     anonymous_parameters = []
 
@@ -105,9 +117,6 @@ def parse_object_arguments(arguments_block: str) -> tuple[
             except Exception as e:
                 arguments = {}
 
-        # for k, v in arguments.items():
-        #     arguments[k] = escape(v)
-
         named_parameters: dict[str, Any] = {}
         if arguments:
             for k, v in arguments.items():
@@ -119,9 +128,8 @@ def parse_object_arguments(arguments_block: str) -> tuple[
         unparsed_tail = ""
     else:
         arguments = dict[str, Any]()
-        array_end_expect = False
         expect_name = object_expect
-        expect_value_end_delimiter = False
+        expect_value_end_delimiter = None
         expect_args_delim = False
         word = ''
         name: str | None = None
@@ -141,13 +149,17 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                     if word.startswith(value_tag_wrapper):
                         # wrapped anonymous arg
                         expect_name = False
-                        expect_value_end_delimiter = True
+                        expect_value_end_delimiter = value_tag_wrapper
                         word = word[len(value_tag_wrapper):] + token
                     else:
                         word_parts = word.split(INVALID_BUT_POSSIBLE_DELIM)
                         if len(word_parts) == 2:
                             name = word_parts[0]
                             word = word_parts[1] + token
+                            str_wrapper = is_start_by_wrapper(word)
+                            if str_wrapper:
+                                expect_value_end_delimiter = str_wrapper
+                                word = word[len(str_wrapper):]
                             expect_name = False
                         else:
                             expect_name = False
@@ -174,17 +186,17 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                 # elif object_expect and token == object_end:
                 #     # log
                 #     break
-                else:
+                elif word or (not word and token != ' '):
                     word += token
             else:
                 # expected value
                 if not expect_value_end_delimiter and (
                         is_arg_end_by_delim or token == INVALID_BUT_POSSIBLE_DELIM):
-                    expect_name = True
                     if name:
                         arguments[name] = word
                     elif word:
                         anonymous_parameters.append(word)
+                    expect_name = True
                     name = ''
                     word = ''
                 elif token == ARRAY_START:
@@ -195,27 +207,44 @@ def parse_object_arguments(arguments_block: str) -> tuple[
                     expect_name = True
                     expect_args_delim = True
                 else:
-                    if not (is_last_token and (is_object_end or is_array_end)):
-                        word += token
-                        if word.endswith(value_tag_wrapper):
-                            if not expect_value_end_delimiter:
-                                expect_value_end_delimiter = True
-                                word = ''
-                            else:
-                                value = word[:len(word) - len(value_tag_wrapper)]
-                                if name:
-                                    arguments[name] = value
-                                elif word:
-                                    anonymous_parameters.append(value)
-                                name = ''
-                                word = ''
-                                expect_value_end_delimiter = False
-                                expect_name = True
-                                expect_args_delim = True
-                    else:
+                    if is_last_token and (is_object_end or is_array_end):
                         pass
+                    elif expect_value_end_delimiter:
+                        # inside string
+                        word += token
+                        if is_end_by_wrapper(word, expect_value_end_delimiter):
+                            # end of string
+                            word = word[:len(word) - len(expect_value_end_delimiter)]
+                            if name:
+                                arguments[name] = word
+                            elif word:
+                                anonymous_parameters.append(word)
+                            name = ''
+                            word = ''
+                            expect_value_end_delimiter = None
+                            expect_name = True
+                            expect_args_delim = True
+                    else:
+                        if word or not token == ' ':
+                            word += token
+                        str_wrapper = is_start_by_wrapper(word)
+                        if str_wrapper:
+                            # start of string
+                            expect_value_end_delimiter = str_wrapper
+                            word = ''
+                        else:
+                            # may be string, may be out of string
+                            if is_object_end:
+                                word = word[:len(word) - len(OBJECT_END)]
+                                break
+                            elif is_array_end:
+                                word = word[:len(word) - len(ARRAY_END)]
+                                break
+                            else:
+                                pass
         unparsed_tail = on_parse[next_token_i:]
 
+        word = word.rstrip() if word and not expect_value_end_delimiter else word
         if name:
             arguments[name] = word
         elif word:
@@ -224,11 +253,13 @@ def parse_object_arguments(arguments_block: str) -> tuple[
         named_parameters: dict[str, Any] = {}
         for k, v in arguments.items():
             clean_k = strip(k)
-            clean_v = unquote(strip(unescape(v)))
+            clean_v = unescape(v)
             named_parameters[clean_k] = clean_v
+            if clean_v is None:
+                raise Exception(f"k={k}, " + arguments_block)
 
         for i, v in enumerate(anonymous_parameters):
-            anonymous_parameters[i] = unquote(strip(unescape(v)))
+            anonymous_parameters[i] = unescape(v)
 
     log.debug(
         f"tool call object parsed: src={arguments_block}, named_parameters={named_parameters}, "
@@ -267,35 +298,12 @@ def unquote(val: Any) -> Any:
     return val
 
 
-# over_escaped = {"\\\\\"": "\\\"", "\\\\r": "\\r", "\\\\n": "\\n", "\\\\t": "\\t"}
-#
-#
-# def replace_overescaped(val: str | Any):
-#     if isinstance(val, str):
-#         for old, new in over_escaped.items():
-#             if old in val:
-#                 after = val.replace(old, new)
-#                 log.debug(f"fix overescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
-#                 val = after
-#     return val
-
-
-escaped = {"\"": "\\\"", "\n": "\\n", "\r": "\\r", "\t": "\\t"}
-
-
-# def escape(val: str | Any):
-#     if isinstance(val, str):
-#         for old, new in escaped.items():
-#             if old in val:
-#                 after = val.replace(old, new)
-#                 log.debug(f"escaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
-#                 val = after
-#     return val
+unescaped = [("\\\"", "\""), ("\\r\\n", "\n"), ("\\n", "\n"), ("\\t", "\t")]
 
 
 def unescape(val: str | Any):
     if isinstance(val, str):
-        for new, old in escaped.items():
+        for (old, new) in unescaped:
             if old in val:
                 after = val.replace(old, new)
                 log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
@@ -317,7 +325,7 @@ def parse_array(arguments_block: str, next_token_i: int) -> tuple[list[dict[str,
         next_token_i += 1
         if token == ARGS_DELIM:
             parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
-                arguments_block=array_tail)
+                arguments_block=array_tail, array_end_expect=True)
             array.append(parsed_object_in_array)
             next_token_i = 0
             on_parse = unparsed_tail

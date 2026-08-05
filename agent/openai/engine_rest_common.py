@@ -39,6 +39,7 @@ STOP: Literal["stop"] = "stop"
 LENGTH: Literal["length"] = "length"
 
 log = logging.getLogger(__name__)
+log_client_generated = logging.getLogger(log.name + ".client.generated")
 
 WARN_GENERATION_IS_INTERRUPTED_ = "Generating is interrupted."
 
@@ -169,10 +170,13 @@ class BaseController(ABC):
 
         last_message = messages[-1] if messages else None
 
-        if last_message and is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
-                last_message.content).lower():
-            return new_http_response(stream, [
-                new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
+        if last_message:
+            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
+                    last_message.content).lower():
+                return new_http_response(stream, [
+                    new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
+            elif last_message.role == ROLE_TOOL:
+                log_client_generated.debug(last_message.content)
 
         invalid_response = self.validate_messages(messages, tools)
         if invalid_response:

@@ -1,0 +1,15 @@
+<|tool_call>call:edit_file{edits:[{new_text:<|"|>testImplementation {
+    // Testing Frameworks
+    testImplementation(\"org.junit.jupiter:junit-jupiter-api\")
+    testRuntimeOnly(\"org.junit.jupiter:junit-jupiter-engine\")
+
+    // Spring Boot Test Utilities
+    testImplementation(\"org.springframework.boot:spring-boot-starter-test\")
+
+    // Testcontainers Dependency for PostgreSQL
+    testImplementation(\"org.testcontainers:junit-jupiter\")
+    testImplementation(\"org.testcontainers:postgresql\"),
+
+    // If the production code uses reactor/netty/etc., these might be useful for reactive testing
+    implementation(\"io.projectreactor:reactor-test\")
+}<|"|>,old_text:<|"|>/* End of file or relevant marker */<|"|>,allow_multiple_matches:false}],target_file: "java/idempotent-consumer-jdbc/build.gradle.kts"}<tool_call|>

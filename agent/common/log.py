@@ -90,6 +90,11 @@ def logging_config(logs_dir: str):
                 "level": "DEBUG",
                 "propagate": True,
                 "handlers": ["file_generated"],
+            },
+            "client.tool_call.last.generated": {
+                "level": "DEBUG",
+                "propagate": True,
+                "handlers": ["file_generated"],
             }
         },
         "root": {

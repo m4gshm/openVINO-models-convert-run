@@ -1,0 +1,18 @@
+<|tool_call>call:edit_file{allowed_multiple_matches:false,edits:[{new_text:<|"|>test {
+    useTestcontainers = true
+
+    dependencies {
+        // Testing framework
+        testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
+        testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
+
+        // Testcontainers for PostgreSQL database
+        testImplementation("org.testcontainers:postgresql:1.19.8")
+        testImplementation("org.testcontainers:junit-jupiter:1.19.8")
+
+        // Optional: Logging if needed for test setup
+        testImplementation("ch.qos.logback:logback-classic")
+    }
+}<|"|>,old_text:<|"|>
+    implementation("org.jooq:jooq-postgres-extensions")
+}<|"|>,target_file: "java/idempotent-consumer-jdbc/build.gradle.kts"}}<tool_call|>

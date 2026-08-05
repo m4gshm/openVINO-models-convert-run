@@ -1,6 +1,7 @@
 import unittest
 from importlib.resources import files
 
+from agent.client.veai.tool_call_fixer import fix_edit_file
 from agent.parser.gemma4 import Gemma4ChannelParser
 
 TEST_RESOURCES = "test_resources"
@@ -41,9 +42,9 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_for_text", first.name)
-        self.assertEqual({'target_path_or_url': 'MessageStorageImpl.java',
-                          'text_snippet': '    public class MessageStorageImpl',
-                          'is_case_sensitive': 'false'}, first.arguments)
+        self.assertEqual({'is_case_sensitive': 'false',
+                          'target_path_or_url': 'MessageStorageImpl.java',
+                          'text_snippet': '    "MessageStorageImpl"'}, first.arguments)
         self.assertFalse(partial)
 
     def test_read_file_windows_path_parse(self):
@@ -195,39 +196,150 @@ class TestAddFunction(unittest.TestCase):
         first = calls[0]
         self.assertEqual("edit_file", first.name)
         self.assertEqual({'allow_multiple_matches': 'false',
-                          'edits': [{'new_text': 'dependencies {\r\n'
+                          'edits': [{'new_text': 'dependencies {\n'
                                                  '    '
-                                                 'testImplementation("org.testcontainers:junit-jupiter")\r\n'
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
                                                  '    '
-                                                 'testImplementation("org.testcontainers:postgresql")\r\n'
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
                                                  '    '
-                                                 'testImplementation("org.testcontainers:containers")\r\n'
+                                                 'testImplementation("org.testcontainers:containers")\n'
                                                  '    '
-                                                 'testImplementation("org.testcontainers:lombok")\r\n'
+                                                 'testImplementation("org.testcontainers:lombok")\n'
                                                  '    '
-                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api")\r\n'
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
                                                  '    '
-                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\r\n'
+                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\n'
                                                  '}',
-                                     'old_text': 'dependencies {\r\n'
-                                                 '    api(project(":idempotent-consumer"))\r\n'
-                                                 '    api(project(":storage-api-reactive"))\r\n'
-                                                 '    api(project(":postgres-jdbc"))\r\n'
+                                     'old_text': 'dependencies {\n'
+                                                 '    api(project(":idempotent-consumer"))\n'
+                                                 '    api(project(":storage-api-reactive"))\n'
+                                                 '    api(project(":postgres-jdbc"))\n'
                                                  '    '
-                                                 'implementation("io.projectreactor:reactor-core")\r\n'
-                                                 '    implementation("org.postgresql:postgresql")\r\n'
+                                                 'implementation("io.projectreactor:reactor-core")\n'
+                                                 '    implementation("org.postgresql:postgresql")\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
-                                                 '    implementation("org.jooq:jooq")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
+                                                 '    implementation("org.jooq:jooq")\n'
                                                  '    '
-                                                 'implementation("org.jooq:jooq-postgres-extensions")\r\n'
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
                                                  '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, first.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file2_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_2.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'new_text': '\n'
+                                                 '    implementation("org.jooq:jooq")\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '\n'
+                                                 '    // Testing Dependencies (JUnit 5 & '
+                                                 'Testcontainers)\n'
+                                                 '    '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '}',
+                                     'old_text': '    implementation("org.jooq:jooq")\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file3_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_3.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'allow_multiple_matches': 'false',
+                                     'new_text': 'testImplementation {\n'
+                                                 '    // Testing Frameworks\n'
+                                                 '    '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
+                                                 '    '
+                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\n'
+                                                 '\n'
+                                                 '    // Spring Boot Test Utilities\n'
+                                                 '    '
+                                                 'testImplementation("org.springframework.boot:spring-boot-starter-test")\n'
+                                                 '\n'
+                                                 '    // Testcontainers Dependency for PostgreSQL\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql"),\n'
+                                                 '\n'
+                                                 '    // If the production code uses '
+                                                 'reactor/netty/etc., these might be useful for '
+                                                 'reactive testing\n'
+                                                 '    implementation("io.projectreactor:reactor-test")\n'
+                                                 '}',
+                                     'old_text': '/* End of file or relevant marker */'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file4_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_4.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'new_text': 'test {\n'
+                                                 '    useTestcontainers = true\n'
+                                                 '\n'
+                                                 '    dependencies {\n'
+                                                 '        // Testing framework\n'
+                                                 '        '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")\n'
+                                                 '        '
+                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\n'
+                                                 '\n'
+                                                 '        // Testcontainers for PostgreSQL database\n'
+                                                 '        '
+                                                 'testImplementation("org.testcontainers:postgresql:1.19.8")\n'
+                                                 '        '
+                                                 'testImplementation("org.testcontainers:junit-jupiter:1.19.8")\n'
+                                                 '\n'
+                                                 '        // Optional: Logging if needed for test '
+                                                 'setup\n'
+                                                 '        '
+                                                 'testImplementation("ch.qos.logback:logback-classic")\n'
+                                                 '    }\n'
+                                                 '}',
+                                     'old_text': '\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
 
 if __name__ == '__main__':
     unittest.main()

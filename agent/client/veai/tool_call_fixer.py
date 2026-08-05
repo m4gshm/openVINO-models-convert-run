@@ -104,8 +104,19 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     args = get_args(function)
     target_file, invalid = get_target_file(args, function.name, context)
     if not target_file:
-        log.warning(f"tool call error: tool={function.name}, target_file is empty but required")
+        log.error(f"tool call error: tool={function.name}, target_file is empty but required")
     edits = args.get("edits")
+
+    if not target_file and edits:
+        # gemma 4
+        # try to search in edits
+        for i, edit in enumerate(edits):
+            if isinstance(edit, dict):
+                target_file = edit.get("target_file")
+                if target_file:
+                    del edit["target_file"]
+                    break
+
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
         if not allow_multiple_matches:
@@ -296,8 +307,13 @@ def get_target_file(args, function_name: str, context: UserContext = UserContext
     if fixed:
         invalid = True
 
-    if not target_file and context and GEMMA_4 in context.model_architectures:
-        log.debug(f"no required target file, trying to get from previous cool call of '{function_name}'")
+    if not target_file and (context and GEMMA_4 in context.model_architectures):
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                f"no required target_file, trying to get from previous cool call of '{function_name}', args='{args}'")
+        else:
+            log.info(f"no required target_file, trying to get from previous cool call of '{function_name}'")
+
         messages = context.messages
         for i, message in enumerate(reversed(messages)):
             if message.role == ROLE_ASSISTANT:

@@ -103,8 +103,8 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
         pipe = openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties)
     else:
         pipe = openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
-    if chat_template:
-        pipe.set_chat_template(chat_template)
+    # if chat_template:
+    #     pipe.set_chat_template(chat_template)
 
     log.info(f"model loaded successfully, pipe {type(pipe)}")
     loaded_pipe_mem = get_current_memory()
