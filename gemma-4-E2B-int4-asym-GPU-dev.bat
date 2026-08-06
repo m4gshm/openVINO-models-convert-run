@@ -1,4 +1,4 @@
-call agent-dev.bat --model gemma-4-E4B-it-int8-asym ^
+call agent-dev.bat --model gemma-4-E2B-it-int4-asym-g128-se-awq ^
  --device GPU ^
  --pipe CB ^
  --generate_config_file .config/generate_config_gemma4.json ^

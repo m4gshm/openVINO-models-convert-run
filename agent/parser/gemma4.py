@@ -53,17 +53,6 @@ class ParserState(agent.parser.ParserState):
         return prev_token
 
 
-def parse_name(parameters_block) -> tuple[str | None, str | None]:
-    pattern = r"(.*?)({.*})"
-    match = re.search(pattern, parameters_block, re.DOTALL)
-    if match:
-        name = match.group(1).strip()
-        tail = match.group(2).strip()
-        return name, tail
-    else:
-        return None, None
-
-
 ARGS_DELIM = ','
 VALID_NAME_VAL_DELIM = ":"
 INVALID_BUT_POSSIBLE_DELIM = "="
@@ -72,19 +61,8 @@ ARRAY_END = "]"
 OBJECT_START = "{"
 OBJECT_END = "}"
 
-value_tag_wrapper = "<|\"|>"
-str_wrappers = [value_tag_wrapper, "\"", "'"]
-
-
-def is_start_by_wrapper(word: str):
-    for wrapper in str_wrappers:
-        if word.startswith(wrapper):
-            return wrapper
-    return None
-
-
-def is_end_by_wrapper(word: str | Any, wrapper: str) -> bool:
-    return word and word.endswith(wrapper) and not word.endswith("\\" + wrapper)
+VALUE_TAG_WRAPPER = "<|\"|>"
+STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
 
 
 def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[
@@ -102,11 +80,11 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     anonymous_parameters = []
 
     possible_json = arguments_block.startswith(OBJECT_START)
-    if possible_json:  # and arguments_block[:possible_json_object_close_tag_position].endswith(object_end):
+    if possible_json:
         if object_expect:
             arguments_block = arguments_block[:-1]
         log.debug(f"trying to parse as json: {arguments_block}")
-        possible_json_args = arguments_block.replace(value_tag_wrapper, "\"")
+        possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
         try:
             arguments: dict[str, Any] = json.loads(possible_json_args)
         except json.decoder.JSONDecodeError as e:
@@ -144,11 +122,11 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
             is_object_end = object_expect and token == OBJECT_END
             if expect_name:
                 if token == VALID_NAME_VAL_DELIM:
-                    if word.startswith(value_tag_wrapper):
+                    if word.startswith(VALUE_TAG_WRAPPER):
                         # wrapped anonymous arg
                         expect_name = False
-                        expect_value_end_delimiter = value_tag_wrapper
-                        word = word[len(value_tag_wrapper):] + token
+                        expect_value_end_delimiter = VALUE_TAG_WRAPPER
+                        word = word[len(VALUE_TAG_WRAPPER):] + token
                     else:
                         word_parts = word.split(INVALID_BUT_POSSIBLE_DELIM)
                         if len(word_parts) == 2:
@@ -268,6 +246,28 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     return named_parameters, anonymous_parameters, unparsed_tail
 
 
+def parse_name(parameters_block) -> tuple[str | None, str | None]:
+    pattern = r"(.*?)({.*})"
+    match = re.search(pattern, parameters_block, re.DOTALL)
+    if match:
+        name = match.group(1).strip()
+        tail = match.group(2).strip()
+        return name, tail
+    else:
+        return None, None
+
+
+def is_start_by_wrapper(word: str):
+    for wrapper in STR_WRAPPERS:
+        if word.startswith(wrapper):
+            return wrapper
+    return None
+
+
+def is_end_by_wrapper(word: str | Any, wrapper: str) -> bool:
+    return word and word.endswith(wrapper) and not word.endswith("\\" + wrapper)
+
+
 def clean(dirty_val: Any) -> Any:
     if isinstance(dirty_val, str):
         stripped = dirty_val.strip()
@@ -298,7 +298,7 @@ def unquote(val: Any) -> Any:
     return val
 
 
-unescaped = [("\\\"", "\""), ("\\r\\n", "\n"), ("\\n", "\n"), ("\\t", "\t")]
+unescaped = [("\\\"", "\""), ("\\r\\n", "\n"), ("\r\n", "\n"), ("\\n", "\n"), ("\\t", "\t")]
 
 
 def unescape(val: str | Any):
@@ -309,6 +309,19 @@ def unescape(val: str | Any):
                 log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
                 val = after
     return val
+
+
+# new_line_map = [("\r\n", "\n")]
+#
+#
+# def normalize_new_line(val: str | Any):
+#     if isinstance(val, str):
+#         for (old, new) in new_line_map:
+#             if old in val:
+#                 after = val.replace(old, new)
+#                 log.debug(f"normalize_new_line '{old}' by '{new}':\nbefore={val}\nafter={after}")
+#                 val = after
+#     return val
 
 
 def parse_array(array_tail: str) -> tuple[list[dict[str, Any]], int, str]:
