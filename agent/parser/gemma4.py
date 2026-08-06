@@ -93,13 +93,11 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     if not arguments_block:
         return {}, [], ""
 
-    object_expect = False
-
     if arguments_block.startswith(OBJECT_START):
         object_expect = True
-        arguments_block = arguments_block[1:]
+        arguments_block = arguments_block[len(OBJECT_START):]
     else:
-        raise Exception(f"expected object, {arguments_block}")
+        object_expect = False
 
     anonymous_parameters = []
 
@@ -200,12 +198,14 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                     name = ''
                     word = ''
                 elif token == ARRAY_START:
-                    array, next_token_i, on_parse = parse_array(arguments_block, next_token_i)
+                    array_tail = arguments_block[next_token_i:]
+                    array, next_token_i, on_parse_after_array = parse_array(array_tail)
                     arguments[name] = array
                     name = ''
                     word = ''
                     expect_name = True
                     expect_args_delim = True
+                    on_parse = on_parse_after_array
                 else:
                     if is_last_token and (is_object_end or is_array_end):
                         pass
@@ -262,8 +262,8 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
             anonymous_parameters[i] = unescape(v)
 
     log.debug(
-        f"tool call object parsed: src={arguments_block}, named_parameters={named_parameters}, "
-        f"anonymous_parameters={anonymous_parameters}")
+        f"tool call object parsed: src='{arguments_block}', named_parameters='{named_parameters}', "
+        f"anonymous_parameters='{anonymous_parameters}', unparsed_tail='{unparsed_tail}'")
 
     return named_parameters, anonymous_parameters, unparsed_tail
 
@@ -311,29 +311,35 @@ def unescape(val: str | Any):
     return val
 
 
-def parse_array(arguments_block: str, next_token_i: int) -> tuple[list[dict[str, Any]], int, str]:
-    array_tail = arguments_block[next_token_i:]
-    parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
-        arguments_block=array_tail)
+def parse_array(array_tail: str) -> tuple[list[dict[str, Any]], int, str]:
     next_token_i = 0
-    on_parse = unparsed_tail
+    parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
+        arguments_block=array_tail[next_token_i:], array_end_expect=True)
+    array_tail = unparsed_tail
 
-    array = [parsed_object_in_array]
+    array: list = [parsed_object_in_array]
+    if parsed_anonymous_in_array:
+        array.append(parsed_anonymous_in_array)
 
-    while next_token_i < len(on_parse):
-        token = on_parse[next_token_i]
-        next_token_i += 1
-        if token == ARGS_DELIM:
-            parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
-                arguments_block=array_tail, array_end_expect=True)
-            array.append(parsed_object_in_array)
-            next_token_i = 0
-            on_parse = unparsed_tail
-        elif token == ARRAY_END:
-            on_parse = on_parse[next_token_i:]
+    while next_token_i < len(array_tail):
+        token = array_tail[next_token_i]
+        if token == ARRAY_END:
+            next_token_i += 1
+            array_tail = array_tail[next_token_i:]
             next_token_i = 0
             break
-    return array, next_token_i, on_parse
+        else:
+            if token == ARGS_DELIM:
+                next_token_i += 1
+            parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
+                arguments_block=array_tail[next_token_i:], array_end_expect=True)
+            array.append(parsed_object_in_array)
+            if parsed_anonymous_in_array:
+                array.append(parsed_anonymous_in_array)
+            next_token_i = 0
+            array_tail = unparsed_tail
+
+    return array, next_token_i, array_tail
 
 
 class Gemma4ChannelParser(Parser[ParserState]):

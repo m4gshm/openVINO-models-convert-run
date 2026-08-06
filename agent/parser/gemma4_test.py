@@ -196,15 +196,15 @@ class TestAddFunction(unittest.TestCase):
         first = calls[0]
         self.assertEqual("edit_file", first.name)
         self.assertEqual({'allow_multiple_matches': 'false',
-                          'edits': [{'new_text': 'dependencies {\n'
+                          'edits': [{},
+                                    {'new_text': 'dependencies {\n'
                                                  '    '
                                                  'testImplementation("org.testcontainers:junit-jupiter")\n'
                                                  '    '
                                                  'testImplementation("org.testcontainers:postgresql")\n'
                                                  '    '
                                                  'testImplementation("org.testcontainers:containers")\n'
-                                                 '    '
-                                                 'testImplementation("org.testcontainers:lombok")\n'
+                                                 '    testImplementation("org.testcontainers:lombok")\n'
                                                  '    '
                                                  'testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
                                                  '    '
@@ -214,8 +214,7 @@ class TestAddFunction(unittest.TestCase):
                                                  '    api(project(":idempotent-consumer"))\n'
                                                  '    api(project(":storage-api-reactive"))\n'
                                                  '    api(project(":postgres-jdbc"))\n'
-                                                 '    '
-                                                 'implementation("io.projectreactor:reactor-core")\n'
+                                                 '    implementation("io.projectreactor:reactor-core")\n'
                                                  '    implementation("org.postgresql:postgresql")\n'
                                                  '    '
                                                  'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
@@ -336,10 +335,31 @@ class TestAddFunction(unittest.TestCase):
                                      'old_text': '\n'
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
-                                                 '}'}],
+                                                 '}'},
+                                    {},
+                                    '}'],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
+
+    def test_edit_file5_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_5.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'new_text': 'null', 'old_text': '// ...'},
+                                    {'old_text': ''},
+                                    'new_text:null'],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -115,6 +115,8 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 target_file = edit.get("target_file")
                 if target_file:
                     del edit["target_file"]
+                    if len(edit) == 0:
+                        del edits[i]
                     break
 
     if target_file and edits:

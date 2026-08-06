@@ -1,0 +1,1 @@
+<|tool_call>call:edit_file{allow_multiple_matches:false,edits:[{new_text:null,old_text:"// ..."},new_text:null,old_text:""}],target_file: "java/idempotent-consumer-jdbc/build.gradle.kts"}<tool_call|>
