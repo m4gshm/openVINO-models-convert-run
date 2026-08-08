@@ -314,8 +314,7 @@ class TestAddFunction(unittest.TestCase):
                                      'old_text': '\n'
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
-                                                 '}'},
-                                    '}'],
+                                                 '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)

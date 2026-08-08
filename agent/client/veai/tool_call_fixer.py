@@ -111,11 +111,11 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         new_text_i = None
         old_text = None
         old_text_i = None
-        on_delete_i = set[int]()
+        on_delete_i = []
         for i, edit in enumerate(edits):
             if isinstance(edit, dict):
                 if len(edit) == 0:
-                    on_delete_i.add(i)
+                    on_delete_i.append(i)
                 else:
                     edit_new_text = edit.get("new_text")
                     edit_old_text = edit.get("old_text")
@@ -134,11 +134,10 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                         new_text_i = None
                     elif old_text_i is not None and new_text_i is not None:
                         # merge
-                        edits[new_text_i]["old_text"] = edits[old_text_i]
-                        on_delete_i.remove(new_text_i)
+                        edits[new_text_i]["old_text"] = old_text
                         del edits[old_text_i]["old_text"]
                         if len(edits[old_text_i]) == 0:
-                            on_delete_i.add(old_text_i)
+                            on_delete_i.append(old_text_i)
                         old_text_i = None
                         new_text_i = None
 
@@ -157,9 +156,9 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                     #     on_delete_i.append(i)
                 else:
                     pass
-                on_delete_i.add(i)
+                on_delete_i.append(i)
 
-        for i in on_delete_i:
+        for i in reversed(on_delete_i):
             del edits[i]
 
     if not target_file and edits:
