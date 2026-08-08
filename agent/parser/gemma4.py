@@ -100,7 +100,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         if arguments:
             for k, v in arguments.items():
                 clean_k = clean(k)
-                clean_v = strip_unquote_if_wrapped_by_empty_and_quoted(v)
+                clean_v = strip_unquote_if_wrapped_by_empty_and_quoted(unescape(v))
                 named_parameters[clean_k] = clean_v
         else:
             log.error(f"unrepairable json arguments: {arguments_block}")

@@ -548,6 +548,7 @@ class Phrase:
                 duplicated_rate = duplicated_lines_amount / lines_amount
                 if duplicated_rate >= self.duplicated_lines_rate_limit and duplicated_lines_amount >= self.duplicated_lines_limit:
                     payload = "".join(list(self.lines_unique.keys()))
+                    log.error(f"duplicated lines detected:\nunique='{self.lines_unique}'\n{self.lines}")
                     raise LoopError(payload=payload,
                                     message=f"Duplicated lines detected (amount={duplicated_lines_amount})")
 
