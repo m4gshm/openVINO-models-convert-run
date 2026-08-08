@@ -2,7 +2,7 @@ import unittest
 from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import fix_edit_file
-from agent.parser.gemma4 import Gemma4ChannelParser
+from agent.parser.gemma4 import Gemma4ChannelParser, parse_object_arguments
 
 TEST_RESOURCES = "test_resources"
 
@@ -28,7 +28,7 @@ class TestAddFunction(unittest.TestCase):
     def test_wrapped_file_structure_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/file_structure_wrapped.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("file_function", first.name)
@@ -38,7 +38,7 @@ class TestAddFunction(unittest.TestCase):
     def test_search_for_text_space_delimited_args(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/search_for_text_space_delimited_args.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_for_text", first.name)
@@ -50,7 +50,7 @@ class TestAddFunction(unittest.TestCase):
     def test_read_file_windows_path_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_windows_path.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -62,7 +62,7 @@ class TestAddFunction(unittest.TestCase):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES,
                                                     "gemma4/read_file_windows_path_delim_without_arg_name.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -73,7 +73,7 @@ class TestAddFunction(unittest.TestCase):
     def test_read_file_like_json(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_lie_json.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -86,7 +86,7 @@ class TestAddFunction(unittest.TestCase):
     def test_write_file_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
@@ -116,8 +116,7 @@ class TestAddFunction(unittest.TestCase):
                                      '    // --- Testcontainers Dependencies ---\n'
                                      '    testImplementation("org.testcontainers:junit-jupiter")\n'
                                      '    testImplementation("org.testcontainers:postgresql")\n'
-                                     '    testImplementation("org.testcontainers:os" // Для '
-                                     'Podman/Docker runtime\n'
+                                     '    testImplementation("org.testcontainers:os")\n'
                                      '    testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
                                      '    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\n'
                                      '}',
@@ -126,29 +125,10 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
-    # def test_write_file_one_line_parse(self):
-    #     state = parser.new_state()
-    #     tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_one_line.txt")
-    #     content_expected_file = files(__package__).joinpath(TEST_RESOURCES,
-    #                                                         "gemma4/write_file_one_line_content_expected.txt")
-    #     tool_call_text = tool_cal_file.read_text()
-    #     content_expected_text = content_expected_file.read_text()
-    #     calls, partial = parser.parse_tool_calls(state, tool_call_text)
-    #     first = calls[0]
-    #     self.assertEqual("write_file", first.name)
-    #     self.maxDiff = None
-    #     self.assertEqual(content_expected_text, first.arguments.get('content'))
-    #
-    #     self.assertTrue(first.arguments.get('allow_overwrite'))
-    #     self.assertTrue(first.arguments.get('target_file'))
-    #
-    #     self.assertEqual([], first.anonymous_arguments)
-    #     self.assertFalse(partial)
-
     def test_write_file_like_json(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
@@ -179,8 +159,7 @@ class TestAddFunction(unittest.TestCase):
                                      '    // --- Testcontainers Dependencies ---\n'
                                      '    testImplementation("org.testcontainers:junit-jupiter")\n'
                                      '    testImplementation("org.testcontainers:postgresql")\n'
-                                     '    testImplementation("org.testcontainers:os") // Для '
-                                     'Podman/Docker runtime\n'
+                                     '    testImplementation("org.testcontainers:os")\n'
                                      '    testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
                                      '    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")',
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
@@ -191,7 +170,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("edit_file", first.name)
@@ -231,7 +210,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file2_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_2.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -263,7 +242,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file3_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_3.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -302,7 +281,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file4_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_4.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -336,7 +315,6 @@ class TestAddFunction(unittest.TestCase):
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
                                                  '}'},
-                                    {},
                                     '}'],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
@@ -345,7 +323,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file5_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_5.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -353,25 +331,25 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': True,
-                          'edits': [{'new_text': 'null', 'old_text': '// ...'},
-                                    {'old_text': ''},
-                                    'new_text:null'],
+                          'edits': [{'new_text': 'null', 'old_text': '// ...'}, {'old_text': ''}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
-
     def test_edit_file6_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_6.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({}, fixed.arguments)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'new_text': 'testImplementation("org.testcontainers:junit-jupiter")',
+                                     'old_text': 'implementation("org.jooq:jooq-postgres-extensions")'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 

@@ -1,0 +1,1 @@
+<|tool_call>call:edit_file{{"target_file": "java/idempotent-consumer-jdbc/build.gradle.kts", "edits": [{"new_text": "testImplementation(\"org.testcontainers:junit-jupiter\")", "old_text": "implementation(\"org.jooq:jooq-postgres-extensions\")"}], "allow_multiple_matches": true}`

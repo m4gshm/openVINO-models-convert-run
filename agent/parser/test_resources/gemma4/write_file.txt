@@ -21,7 +21,7 @@ dependencies {
     // --- Testcontainers Dependencies ---
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
-    testImplementation("org.testcontainers:os" // Для Podman/Docker runtime
+    testImplementation("org.testcontainers:os")
     testImplementation("org.junit.jupiter:junit-jupiter-api")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
 }<|"|>,target_file:<|"|>java/idempotent-consumer-jdbc/build.gradle.kts<|"|>}<tool_call|>

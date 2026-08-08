@@ -65,8 +65,7 @@ VALUE_TAG_WRAPPER = "<|\"|>"
 STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
 
 
-def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[
-    dict[str, Any], list[str], str]:
+def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[dict[str, Any], list[str], str]:
     arguments_block = arguments_block.strip()
     if not arguments_block:
         return {}, [], ""
@@ -81,15 +80,19 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
 
     possible_json = arguments_block.startswith(OBJECT_START)
     if possible_json:
-        if object_expect:
+        if object_expect and arguments_block[-1] == OBJECT_END:
             arguments_block = arguments_block[:-1]
         log.debug(f"trying to parse as json: {arguments_block}")
         possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
         try:
             arguments: dict[str, Any] = json.loads(possible_json_args)
+            if not isinstance(arguments, dict):
+                log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
         except json.decoder.JSONDecodeError as e:
             try:
                 arguments = json_repair.loads(possible_json_args)
+                if not isinstance(arguments, dict):
+                    log.error(f"unexpected type of repaired args '{type(arguments)}', arguments='{arguments}'")
             except Exception as e:
                 arguments = {}
 

@@ -111,28 +111,56 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         new_text_i = None
         old_text = None
         old_text_i = None
-        on_delete_i = []
+        on_delete_i = set[int]()
         for i, edit in enumerate(edits):
-            if not new_text_i:
-                new_text = edit.get("new_text")
-                if new_text:
-                    new_text_i = i
-            if not old_text_i:
-                old_text = edit.get("old_text")
-                if old_text:
-                    old_text_i = i
-            if old_text_i == new_text_i:
-                # expected
-                old_text_i = None
-                new_text_i = None
-            elif old_text_i is not None and new_text_i is not None:
-                edits[new_text_i]["old_text"] = edits[old_text_i]["old_text"]
-                del edits[old_text_i]["old_text"]
-                if len(edits[old_text_i]) == 0:
-                    on_delete_i.append(old_text_i)
+            if isinstance(edit, dict):
+                if len(edit) == 0:
+                    on_delete_i.add(i)
+                else:
+                    edit_new_text = edit.get("new_text")
+                    edit_old_text = edit.get("old_text")
+                    if not new_text_i:
+                        if edit_new_text:
+                            new_text = edit_new_text
+                            new_text_i = i
+                    if not old_text_i:
+                        if edit_old_text:
+                            old_text = edit_old_text
+                            old_text_i = i
 
-            for i in on_delete_i:
-                del edits[i]
+                    if old_text_i == new_text_i:
+                        # expected
+                        old_text_i = None
+                        new_text_i = None
+                    elif old_text_i is not None and new_text_i is not None:
+                        # merge
+                        edits[new_text_i]["old_text"] = edits[old_text_i]
+                        on_delete_i.remove(new_text_i)
+                        del edits[old_text_i]["old_text"]
+                        if len(edits[old_text_i]) == 0:
+                            on_delete_i.add(old_text_i)
+                        old_text_i = None
+                        new_text_i = None
+
+            elif isinstance(edit, list) or isinstance(edit, set):
+                first = next(iter(edit)) if len(edit) > 0 else None
+                second = next(iter(edit)) if len(edit) > 1 else None
+                if new_text is None and old_text:
+                    new_text = first
+                    edits[old_text_i]["nex_text"] = new_text
+                    del edit[0]
+                elif old_text is None and new_text:
+                    old_text = first
+                    edits[new_text_i]["old_text"] = old_text
+                    del edit[0]
+                    # if len(edit) == 0:
+                    #     on_delete_i.append(i)
+                else:
+                    pass
+                on_delete_i.add(i)
+
+        for i in on_delete_i:
+            del edits[i]
 
     if not target_file and edits:
         # gemma 4
