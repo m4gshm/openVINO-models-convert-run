@@ -32,7 +32,8 @@ log = logging.getLogger(__name__)
 
 
 def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
-                                 user_context: UserContext | None = UserContext()) -> ParsedFunctionCall:
+                                 user_context: UserContext | None = UserContext()) -> list[
+                                                                                          ParsedFunctionCall] | ParsedFunctionCall:
     if run_command.function_name == function.name:
         return fix_run_command(function, user_context)
     elif list_dir.function_name == function.name:
@@ -100,7 +101,8 @@ def fix_file_structure(function: ParsedFunctionCall, context: UserContext = User
     return function
 
 
-def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> list[
+                                                                                             ParsedFunctionCall] | ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, function.name, context)
     if not target_file:
@@ -196,9 +198,9 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
 
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
-        if not allow_multiple_matches:
+        if allow_multiple_matches is None:
             invalid = True
-            allow_multiple_matches = True
+            allow_multiple_matches = False
         # qwen3.5 case
         if isinstance(edits, str):
             log.debug(f"convert string edits to json object, function='{function.name}', edist='{edits}'")
@@ -243,11 +245,37 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
 
                 edits[i] = edit
 
-        if invalid:
-            new_function = EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
-            return new_function
+        if len(edits) > 1:
+            # gemma 4
+            # try to merge
+            set_prev = False
+            merged = False
+            prev_old_text = None
+            prev_new_text = None
+            for edit in edits:
+                old_text = edit.get("old_text")
+                new_text = edit.get("new_text")
+                if prev_old_text is None and prev_new_text is None:
+                    set_prev = True
+                    prev_old_text = old_text
+                    prev_new_text = new_text
+                else:
+                    if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
+                        in_prev = old_text.startswith(prev_old_text)
+                        if in_prev:
+                            log.debug(
+                                f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
+                            prev_new_text = prev_new_text + new_text
+                            prev_old_text = old_text
+                            merged = True
 
-    return function
+            if prev_old_text and prev_new_text:
+                edits = [{"new_text": prev_new_text, "old_text": prev_old_text}]
+                log.debug(f"merged edits={edits}")
+                invalid = True
+        return EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
+    else:
+        return function
 
 
 def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
@@ -506,6 +534,15 @@ def as_int_or_none(val, name: str) -> tuple[int | None, bool]:
 
 
 def as_bool_or_none(val, name: str) -> bool | None:
+    if val:
+        if isinstance(val, bool):
+            return val
+        elif isinstance(val, str):
+            lower = val.lower()
+            if lower == "true":
+                return True
+            else:
+                return False
     return as_type_or_none(bool, val, name)
 
 

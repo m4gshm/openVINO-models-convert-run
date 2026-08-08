@@ -258,7 +258,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': '\n'
                                                  '    implementation("org.jooq:jooq")\n'
                                                  '    '
@@ -290,7 +290,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'allow_multiple_matches': 'false',
                                      'new_text': 'testImplementation {\n'
                                                  '    // Testing Frameworks\n'
@@ -329,7 +329,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': 'test {\n'
                                                  '    useTestcontainers = true\n'
                                                  '\n'
@@ -370,8 +370,8 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
-                          'edits': [{'new_text': 'null', 'old_text': '// ...'}, {'old_text': ''}],
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': 'null', 'old_text': '// ...'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
@@ -403,7 +403,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': '    '
                                                  'testImplementation("org.testcontainers:junit-jupiter")\n'
                                                  '    '
@@ -424,7 +424,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': 'false',
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': '    implementation("org.jooq:jooq")\n'
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
@@ -454,7 +454,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_edit_file(first)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': '\n'
                                                  'testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")\n'
                                                  'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")\n'
@@ -462,6 +462,34 @@ class TestAddFunction(unittest.TestCase):
                                                  'testImplementation("org.testcontainers:junit-jupiter:1.19.7")\n'
                                                  '}',
                                      'old_text': '}\n'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+
+    def test_edit_file10_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_10.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")\n'
+                                                 '    '
+                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")}',
+                                     'old_text': '    implementation("org.jooq:jooq")\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)

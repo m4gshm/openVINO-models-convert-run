@@ -414,8 +414,18 @@ class TokenHandler:
             log.info(f"phrase like tool calls: {tool_call_expression}")
             chunk = new_chat_completion_chunk(role=state.role, content=tool_call_expression)
         else:
-            fixed_tool_calls = [veai_fix_incorrect_arguments(tc, user_context=self.user_context) for tc in
-                                parsed_function_calls] if self.is_veai else parsed_function_calls
+            if self.is_veai:
+                fixed_tool_calls = []
+                for tc in parsed_function_calls:
+                    arguments = veai_fix_incorrect_arguments(tc, user_context=self.user_context)
+                    if isinstance(arguments, list):
+                        for arg in arguments:
+                            fixed_tool_calls.append(arg)
+                    else:
+                        fixed_tool_calls.append(arguments)
+            else:
+                fixed_tool_calls = parsed_function_calls
+
             if log.isEnabledFor(logging.INFO):
                 adapter = TypeAdapter(List[ParsedFunctionCall])
                 parsed_str = adapter.dump_json(parsed_function_calls).decode("utf-8")
