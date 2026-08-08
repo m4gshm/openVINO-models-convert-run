@@ -106,7 +106,9 @@ class VlmController(BaseController):
                         inference_finish_reasons = None
 
                     if metrics:
-                        log_msg += (f"num_input_tokens={metrics.get_num_input_tokens()}, "
+                        log_msg += (
+                                    f"token_handler_info='{token_handler.get_stat_info()}', "
+                                    f"num_input_tokens={metrics.get_num_input_tokens()}, "
                                     f"generated_tokens={metrics.get_num_generated_tokens()}, "
                                     f"generate_duration={to_str(metrics.get_generate_duration())}, "
                                     f"inference_duration={to_str(metrics.get_inference_duration())}, "

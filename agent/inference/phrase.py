@@ -565,3 +565,4 @@ class Phrase:
         self.duplicates_islands.clear()
         self.duplicates_islands_reversed.clear()
         self.last_island_rate = 0.0
+        self.start_time = None

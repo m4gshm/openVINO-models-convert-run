@@ -241,6 +241,7 @@ class ContinuousBatchingController(BaseController):
             metrics = self.pipe.get_metrics()
 
             self.log_inference.info(f"inference finished: "
+                                    f"token_handler_info='{token_handler.get_stat_info()}', "
                                     f"status={generation_handle.get_status()}, "
                                     f"kv_cache_size={metrics.kv_cache_size_in_bytes / 1024 / 1024:.2f}MB, "
                                     f"cache_size={metrics.cache_size_in_bytes / 1024 / 1024:.2f}MB "

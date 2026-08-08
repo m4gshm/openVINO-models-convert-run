@@ -1,7 +1,7 @@
 import collections
 import logging
 import time
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from enum import Enum
 from typing import Sequence, SupportsInt, Callable, List, Literal
 
@@ -117,15 +117,21 @@ def now() -> float:
     return time.perf_counter()
 
 
+def print_log(phrase: Phrase):
+    full = phrase.full
+    if full:
+        log_inference_generated.debug(full)
+
+
 class TokenHandler:
     def __clean_phrase(self):
-        log_inference_generated.debug(self.phrase.full)
+        print_log(self.phrase)
         self.phrase = Phrase()
         self.empty_conversation_counter = 0
         self.phrase_tick = None
 
     def __clean_tool_call_phrase(self):
-        log_inference_generated.debug(self.tool_call_phrase.full)
+        print_log(self.tool_call_phrase)
         self.tool_call_phrase = Phrase()
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
@@ -141,6 +147,8 @@ class TokenHandler:
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()
+        self.create_time = datetime.now(timezone.utc)
+        self.start_time: datetime | None = None
         self.user_context = user_context
         self.is_veai = is_veai
 
@@ -169,14 +177,27 @@ class TokenHandler:
         self.token_counter = 0
         self.role_initialized = False
 
-    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt], stop_no_conversations=True) -> tuple[
-        list[ChatCompletionChunk], StopSignal | None]:
+    def get_stat_info(self) -> str | None:
+        stat_info = None
+        start_time = self.start_time
+        if start_time:
+            now = datetime.now(timezone.utc)
+            time_delta = now - start_time
+            amount = self.token_counter
+            total_seconds = time_delta.total_seconds()
+            end = "s" if amount != 1 else ""
+            ftt = (start_time - self.create_time).total_seconds()
+            stat_info = f"{amount} token{end} in {time_delta} ({amount / total_seconds} t/sec), {ftt} sec. to first token"
+        return stat_info
 
+    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt]) -> tuple[
+        list[ChatCompletionChunk], StopSignal | None]:
         is_stop = self.is_stop
         if is_stop and is_stop():
             log.info("handle tokens is stopped")
             return [], StopSignal.CANCEL
-
+        if self.start_time is None:
+            self.start_time = datetime.now(timezone.utc)
         decoded_tokens = decode(tokens, self.tokenizer)
         prefill_tokens = self.state.prefill_tokens
         if not self.is_prefill_out and prefill_tokens:
@@ -186,18 +207,16 @@ class TokenHandler:
             decoded_tokens = all_tokens
             self.is_prefill_out = True
 
-        return self.process_tokens(decoded_tokens, self.state, self.parser, stop_no_conversations)
+        return self.process_tokens(decoded_tokens, self.state, self.parser)
 
-    def process_tokens(self, decoded_tokens: list[str], state: ParserState, parser: Parser,
-                       stop_no_conversations: bool = True, ) -> tuple[
+    def process_tokens(self, decoded_tokens: list[str], state: ParserState, parser: Parser) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
         result: list[ChatCompletionChunk] = []
         try:
             for token in decoded_tokens:
                 self.token_counter += 1
                 log.debug(f"token '{token}', num {self.token_counter}")
-                token_result, stop_signal = self.process_token(token, self.token_counter, state, parser,
-                                                               stop_no_conversations)
+                token_result, stop_signal = self.process_token(token, self.token_counter, state, parser)
                 if not self.role_initialized and token_result:
                     choices = token_result[0].choices
                     if choices:
@@ -217,8 +236,7 @@ class TokenHandler:
 
         return result, None
 
-    def process_token(self, token: str, token_number: int, state: ParserState, parser: Parser,
-                      stop_no_conversations=True) -> tuple[
+    def process_token(self, token: str, token_number: int, state: ParserState, parser: Parser) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
         now_time = now()
         result: list[ChatCompletionChunk] = []
@@ -285,7 +303,7 @@ class TokenHandler:
                     parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
                     if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
                         time = format_time(self.config.tool_call_parting_duration_warning)
-                        warning_msg = markdown_bold(f"WARNING: Long parsing of tool call ({time})") + "\n"
+                        warning_msg = markdown_bold(f"WARNING: Long tool call calling({time})") + "\n"
                         result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
                         self.tool_call_parsing_long_time_warned = True
                     elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
@@ -408,7 +426,8 @@ class TokenHandler:
             self.expect_role = True
 
     def handle_tool_call(self, state: ParserState) -> tuple[ChatCompletionChunk, Literal[StopSignal.TOOL_CALL]]:
-        tool_call_expression = self.tool_call_phrase.full
+        tool_call_phrase = self.tool_call_phrase
+        tool_call_expression = tool_call_phrase.full
         parsed_function_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
         if len(parsed_function_calls) == 0:
             log.info(f"phrase like tool calls: {tool_call_expression}")
