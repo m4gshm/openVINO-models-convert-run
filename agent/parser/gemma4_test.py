@@ -2,7 +2,7 @@ import unittest
 from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file
-from agent.parser.gemma4 import Gemma4ChannelParser, parse_object_arguments
+from agent.parser.gemma4 import Gemma4ChannelParser
 
 TEST_RESOURCES = "test_resources"
 
@@ -393,7 +393,6 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
-
     def test_edit_file7_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_7.txt")
@@ -414,7 +413,6 @@ class TestAddFunction(unittest.TestCase):
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
-
 
     def test_edit_file8_parse(self):
         state = parser.new_state()
@@ -445,6 +443,29 @@ class TestAddFunction(unittest.TestCase):
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
+
+    def test_edit_file9_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_9.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': True,
+                          'edits': [{'new_text': '\n'
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")\n'
+                                                 'testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")\n'
+                                                 'testImplementation("org.testcontainers:postgresql:1.19.7")\n'
+                                                 'testImplementation("org.testcontainers:junit-jupiter:1.19.7")\n'
+                                                 '}',
+                                     'old_text': '}\n'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
 
 if __name__ == '__main__':
     unittest.main()

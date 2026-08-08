@@ -357,10 +357,11 @@ def unescape(val: str | Any):
 #     return val
 
 
-def parse_array(array_tail: str) -> tuple[list[dict[str, Any]], int, str]:
+def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
+    log.debug(f"parse array from '{array_str}'")
     next_token_i = 0
     parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
-        arguments_block=array_tail[next_token_i:], array_end_expect=True)
+        arguments_block=array_str[next_token_i:], array_end_expect=True)
     array_tail = unparsed_tail
 
     array: list = [parsed_object_in_array]
@@ -374,6 +375,9 @@ def parse_array(array_tail: str) -> tuple[list[dict[str, Any]], int, str]:
             array_tail = array_tail[next_token_i:]
             next_token_i = 0
             break
+        elif token == OBJECT_END:
+            log.warning(f"unexpected object end {token} at index {next_token_i} in array tail '{array_tail}'")
+            next_token_i += 1
         else:
             if token == ARGS_DELIM:
                 next_token_i += 1
