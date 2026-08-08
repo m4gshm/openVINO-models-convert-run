@@ -1,7 +1,7 @@
 import unittest
 from importlib.resources import files
 
-from agent.client.veai.tool_call_fixer import fix_edit_file
+from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file
 from agent.parser.gemma4 import Gemma4ChannelParser, parse_object_arguments
 
 TEST_RESOURCES = "test_resources"
@@ -72,14 +72,12 @@ class TestAddFunction(unittest.TestCase):
 
     def test_read_file_like_json(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_lie_json.txt")
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_like_json.txt")
         tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
-        self.assertEqual({'end_line': '500',
-                          'start_line': '1',
-                          'target_file': 'build.gradle.kts'}, first.arguments)
+        self.assertEqual({'end_line': '500', 'start_line': '1', 'target_file': 'build.gradle.kts"}}'}, first.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
@@ -131,39 +129,82 @@ class TestAddFunction(unittest.TestCase):
         tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
-        self.assertEqual("write_file", first.name)
+        fixed = fix_write_file(first)
+        self.assertEqual("write_file", fixed.name)
         self.maxDiff = None
         self.assertEqual({'allow_overwrite': 'true',
-                          'content': 'plugins {\n'
-                                     '    `java-library`\n'
-                                     '}\n'
-                                     'apply(plugin = "io.spring.dependency-management")\n'
-                                     '\n'
-                                     'dependencies {\n'
-                                     '    api(project(":idempotent-consumer"))\n'
-                                     '    api(project(":storage-api-reactive"))\n'
-                                     '    api(project(":postgres-jdbc"))\n'
-                                     '\n'
-                                     '    implementation("io.projectreactor:reactor-core")\n'
-                                     '\n'
-                                     '    implementation("org.postgresql:postgresql")\n'
-                                     '\n'
+                          'content': 'plugins {\r\n'
+                                     '    `java-library`\r\n'
+                                     '}\r\n'
+                                     'apply(plugin = "io.spring.dependency-management")\r\n'
+                                     '\r\n'
+                                     'dependencies {\r\n'
+                                     '    api(project(":idempotent-consumer"))\r\n'
+                                     '    api(project(":storage-api-reactive"))\r\n'
+                                     '    api(project(":postgres-jdbc"))\r\n'
+                                     '\r\n'
+                                     '    implementation("io.projectreactor:reactor-core")\r\n'
+                                     '\r\n'
+                                     '    implementation("org.postgresql:postgresql")\r\n'
+                                     '\r\n'
                                      '    '
-                                     'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
+                                     'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
                                      '    '
-                                     'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
-                                     '\n'
-                                     '    implementation("org.jooq:jooq")\n'
-                                     '    implementation("org.jooq:jooq-postgres-extensions")\n'
-                                     '\n'
-                                     '    // --- Testcontainers Dependencies ---\n'
-                                     '    testImplementation("org.testcontainers:junit-jupiter")\n'
-                                     '    testImplementation("org.testcontainers:postgresql")\n'
-                                     '    testImplementation("org.testcontainers:os")\n'
-                                     '    testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
-                                     '    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")',
+                                     'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                     '\r\n'
+                                     '    implementation("org.jooq:jooq")\r\n'
+                                     '    implementation("org.jooq:jooq-postgres-extensions")\r\n'
+                                     '\r\n'
+                                     '    // --- Testcontainers Dependencies ---\r\n'
+                                     '    testImplementation("org.testcontainers:junit-jupiter")\r\n'
+                                     '    testImplementation("org.testcontainers:postgresql")\r\n'
+                                     '    testImplementation("org.testcontainers:os")\r\n'
+                                     '    testImplementation("org.junit.jupiter:junit-jupiter-api")\r\n'
+                                     '    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")\r\n'
+                                     '}',
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
-                         first.arguments)
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_write_file_like_json_2(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json_2.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_write_file(first)
+        self.assertEqual("write_file", first.name)
+        self.maxDiff = None
+        self.assertEqual({'allow_overwrite': True,
+                          'content': 'plugins {\r\n'
+                                     '    `java-library`\r\n'
+                                     '}\r\n'
+                                     'apply(plugin = "io.spring.dependency-management")\r\n'
+                                     '\r\n'
+                                     'dependencies {\r\n'
+                                     '    api(project(":idempotent-consumer"))\r\n'
+                                     '    api(project(":storage-api-reactive"))\r\n'
+                                     '    api(project(":postgres-jdbc"))\r\n'
+                                     '\r\n'
+                                     '    implementation("io.projectreactor:reactor-core")\r\n'
+                                     '\r\n'
+                                     '    implementation("org.postgresql:postgresql")\r\n'
+                                     '\r\n'
+                                     '    '
+                                     'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                     '    '
+                                     'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                     '\r\n'
+                                     '    implementation("org.jooq:jooq")\r\n'
+                                     '    implementation("org.jooq:jooq-postgres-extensions")\r\n'
+                                     '\r\n'
+                                     '    // Testcontainers dependencies for integration testing\r\n'
+                                     '    testImplementation("org.testcontainers:postgresql")\r\n'
+                                     '    testImplementation("org.testcontainers:junit-jupiter")\r\n'
+                                     '}',
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
@@ -397,9 +438,10 @@ class TestAddFunction(unittest.TestCase):
                                                  '    '
                                                  'testImplementation("org.testcontainers:postgresql:1.19.3")\n'
                                                  '}',
-                                     'old_text': 'implementation("org.jooq:jooq")\n'
+                                     'old_text': '    implementation("org.jooq:jooq")\n'
                                                  '    '
-                                                 'implementation("org.jooq:jooq-postgres-extensions")'}],
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)

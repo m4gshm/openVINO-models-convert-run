@@ -100,7 +100,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         if arguments:
             for k, v in arguments.items():
                 clean_k = clean(k)
-                clean_v = clean(v)
+                clean_v = strip_unquote_if_wrapped_by_empty_and_quoted(v)
                 named_parameters[clean_k] = clean_v
         else:
             log.error(f"unrepairable json arguments: {arguments_block}")
@@ -299,6 +299,36 @@ def unquote(val: Any) -> Any:
         if val.endswith("\"") or val.startswith("'"):
             val = val[:-1]
     return val
+
+
+def strip_unquote_if_wrapped_by_empty_and_quoted(val: Any):
+    if isinstance(val, str):
+        stripped = val
+        last_left_empty = -1
+        for i, symb in enumerate(val):
+            if symb == " ":
+                last_left_empty = i
+            else:
+                break
+
+        left_quoted = None
+        next_after_e = last_left_empty + 1
+        if stripped and next_after_e < len(stripped):
+            symb_next_after_empty = stripped[next_after_e] if stripped else None
+            if symb_next_after_empty and (symb_next_after_empty == "\"" or symb_next_after_empty == "'"):
+                left_quoted = symb_next_after_empty
+                stripped = stripped[next_after_e + 1:]
+
+        if left_quoted:
+            stripped = stripped.rstrip()
+            symb_last = stripped[len(stripped) - 1] if len(stripped) > 0 else None
+            if symb_last and symb_last == left_quoted:
+                stripped = stripped[:-1]
+
+        log.debug(f"strip '{val}' to '{stripped}'")
+        return stripped
+    else:
+        return val
 
 
 unescaped = [("\\\"", "\""), ("\\r\\n", "\n"), ("\r\n", "\n"), ("\\n", "\n"), ("\\t", "\t")]
