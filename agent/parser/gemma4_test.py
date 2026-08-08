@@ -375,5 +375,34 @@ class TestAddFunction(unittest.TestCase):
         self.assertFalse(partial)
 
 
+    def test_edit_file8_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_8.txt")
+        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': 'false',
+                          'edits': [{'new_text': '    implementation("org.jooq:jooq")\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '\n'
+                                                 '    '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.1")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter:1.19.3")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql:1.19.3")\n'
+                                                 '}',
+                                     'old_text': 'implementation("org.jooq:jooq")\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
 if __name__ == '__main__':
     unittest.main()

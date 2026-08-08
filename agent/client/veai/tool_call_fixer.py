@@ -161,6 +161,27 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         for i in reversed(on_delete_i):
             del edits[i]
 
+        # recheck edits fullness:
+        global_new_text = args.get("new_text")
+        if global_new_text:
+            is_set_new_text = False
+            for edit in edits:
+                if "nex_text" not in edit and "old_text" in edit:
+                    is_set_new_text = True
+                    edit["new_text"] = global_new_text
+            if is_set_new_text:
+                del args["nex_text"]
+
+        global_old_text = args.get("old_text")
+        if global_old_text:
+            is_set_old_text = False
+            for edit in edits:
+                if "old_text" not in edit and "new_text" in edit:
+                    is_set_old_text = True
+                    edit["old_text"] = global_old_text
+            if is_set_old_text:
+                del args["old_text"]
+
     if not target_file and edits:
         # gemma 4
         # try to search in edits
