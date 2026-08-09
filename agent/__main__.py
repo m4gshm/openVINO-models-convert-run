@@ -65,6 +65,11 @@ class Turn(Enum):
     off = 'off'
 
 
+class NpuCompilerType(Enum):
+    DRIVER = 'DRIVER'
+    PLUGIN = 'PLUGIN'
+
+
 stop_signal = threading.Event()
 
 
@@ -103,6 +108,8 @@ def main():
     args_parser.add_argument("--scheduler_config_file", type=str, required=False,
                              default=".config/scheduler_config_file.json",
                              help="%(default)s")
+    args_parser.add_argument("--npu_compiler_type", type=lambda c: NpuCompilerType[c], required=False,
+                             default=NpuCompilerType.DRIVER, choices=list(NpuCompilerType), help="%(default)s")
     args = args_parser.parse_args()
 
     model = args.model
@@ -303,11 +310,11 @@ def main():
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": "LATENCY",
         "ENABLE_MMAP": "YES",
+        "NPU_TURBO": "TRUE",
         # "PERF_COUNT": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
-        "NPU_COMPILER_TYPE": "PLUGIN",
         "NPU_USE_NPUW": "YES",
         "NPUW_LLM": "YES",
 
@@ -316,6 +323,9 @@ def main():
 
         "LOG_LEVEL": "LOG_WARNING",
     }
+    npu_compiler_type = args.npu_compiler_type
+    if npu_compiler_type:
+        npu_pipeline_properties["NPU_COMPILER_TYPE"] = npu_compiler_type.value
     if max_prompt_len:
         npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
     if default_batch_size:

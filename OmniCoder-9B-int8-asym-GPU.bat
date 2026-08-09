@@ -1,2 +1,4 @@
 call agent.bat --model OmniCoder-9B-int8-asym ^
- --pip CB
+ --device GPU ^
+ --pipe VLM ^
+ --attention_backend PA
