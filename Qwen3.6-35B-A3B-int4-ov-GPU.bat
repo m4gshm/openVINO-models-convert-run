@@ -1,0 +1,1 @@
+call agent.bat --model Qwen3.6-35B-A3B-int4-ov

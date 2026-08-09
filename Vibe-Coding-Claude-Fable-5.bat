@@ -1,2 +1,2 @@
 call agent.bat --model Vibe-Coding-Claude-Fable-5-int4-sym-g128-r1-se-awq ^
- --attention_backend SDPA
+ --attention_backend PA

@@ -98,16 +98,16 @@ class VlmController(BaseController):
                     def to_str(d: MeanStdPair) -> str:
                         return f"std {d.std} , mean {d.mean}"
 
-                    log_msg = f"inference finished: "
+                    log_msg = (f"inference finished: "
+                               f"token_handler_info='{token_handler.get_stat_info()}', ")
                     if isinstance(generate_result, DecodedResults):
                         inference_finish_reasons = generate_result.finish_reasons
-                        log_msg += f"reason '{inference_finish_reasons}'"
+                        log_msg += f"reason '{inference_finish_reasons}', "
                     else:
                         inference_finish_reasons = None
 
                     if metrics:
                         log_msg += (
-                                    f"token_handler_info='{token_handler.get_stat_info()}', "
                                     f"num_input_tokens={metrics.get_num_input_tokens()}, "
                                     f"generated_tokens={metrics.get_num_generated_tokens()}, "
                                     f"generate_duration={to_str(metrics.get_generate_duration())}, "

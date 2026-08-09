@@ -1,4 +1,4 @@
-call agent-dev.bat --model gemma-4-E2B-it-int8-asym ^
+call agent-dev.bat --model gemma-4-E2B-it-int8-sym ^
  --device NPU ^
  --max_prompt_len 49152 ^
  --generate_config_file .config/generate_config_gemma4_npu.json ^

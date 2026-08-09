@@ -11,7 +11,10 @@ optimum-cli export openvino ^
   --task image-text-to-text ^
   --weight-format %WEIGHT_FORMAT% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym
+  --dataset textvqa ^
+  --scale-estimation ^
+  --awq ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-asym-g%GROUP_SIZE%-se-awq
 
 pause
 
