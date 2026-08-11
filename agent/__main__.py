@@ -22,8 +22,6 @@ from .inference.token_handler import TokenHandlerConfig
 from .parser.gemma4 import Gemma4ChannelParser
 from .parser.qwen3 import Qwen3MoeParser
 
-default_device = "GPU"
-
 default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
 default_models_dir = f"./models"
 default_models_cache_dir = f"./models_cache"
@@ -70,6 +68,34 @@ class NpuCompilerType(Enum):
     PLUGIN = 'PLUGIN'
 
 
+class YesNo(Enum):
+    YES = 'YES'
+    NO = 'NO'
+
+
+class GenerateHint(Enum):
+    BEST_PERF = 'BEST_PERF'
+    FAST_COMPILE = 'FAST_COMPILE'
+
+
+class PrefillHint(Enum):
+    DYNAMIC = 'DYNAMIC'
+    STATIC = 'STATIC'
+
+
+class DeviceType(Enum):
+    GPU = 'GPU'
+    NPU = 'NPU'
+    CPU = 'CPU'
+    AUTO = 'AUTO'
+
+
+class PerformanceHint(Enum):
+    LATENCY = 'LATENCY'
+    THROUGHPUT = 'THROUGHPUT'
+    CUMULATIVE_THROUGHPUT = 'CUMULATIVE_THROUGHPUT'
+
+
 stop_signal = threading.Event()
 
 
@@ -89,7 +115,10 @@ def main():
     args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
-    args_parser.add_argument("--device", type=str, default=default_device, help="%(default)s")
+    args_parser.add_argument("--device", type=lambda c: DeviceType[c], required=False,
+                             default=DeviceType.GPU, choices=list(DeviceType), help="%(default)s")
+    args_parser.add_argument("--performance_hint", type=lambda c: PerformanceHint[c], required=False,
+                             default=PerformanceHint.LATENCY, choices=list(PerformanceHint), help="%(default)s")
     args_parser.add_argument("--parser", type=lambda c: ParserType[c], required=False,
                              default=None, choices=list(ParserType), help="%(default)s")
     args_parser.add_argument("--pipe", type=lambda c: Pipe[c], required=False,
@@ -97,8 +126,10 @@ def main():
     args_parser.add_argument("--attention_backend", type=lambda c: AttentionBackend[c], required=False,
                              default=None, choices=list(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
+    # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--cache_precision", type=lambda c: CachePrecision[c], required=False,
                              default=None, choices=list(CachePrecision), help="%(default)s")
+
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--fix_tool_type", type=lambda c: Turn[c], required=False,
                              default=None, choices=list(Turn), help="%(default)s")
@@ -110,6 +141,13 @@ def main():
                              help="%(default)s")
     args_parser.add_argument("--npu_compiler_type", type=lambda c: NpuCompilerType[c], required=False,
                              default=NpuCompilerType.DRIVER, choices=list(NpuCompilerType), help="%(default)s")
+    args_parser.add_argument("--generate_hint", type=lambda c: GenerateHint[c], required=False,
+                             default=GenerateHint.FAST_COMPILE, choices=list(GenerateHint), help="%(default)s")
+    args_parser.add_argument("--npu_prefill_hint", type=lambda c: PrefillHint[c], required=False,
+                             default=PrefillHint.DYNAMIC, choices=list(PrefillHint), help="%(default)s")
+    args_parser.add_argument("--npu_turbo", type=lambda c: YesNo[c], required=False,
+                             default=YesNo.YES, choices=list(YesNo), help="%(default)s")
+
     args = args_parser.parse_args()
 
     model = args.model
@@ -208,8 +246,8 @@ def main():
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
         max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
-    device = args.device
-    is_device_npu = device == "NPU"
+    device: DeviceType = args.device
+    is_device_npu = device == DeviceType.NPU
     if not max_prompt_len:
         max_prompt_len = max_position_embeddings
 
@@ -295,39 +333,62 @@ def main():
         f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
+    generate_hint: GenerateHint = args.generate_hint
+    performance_hint: PerformanceHint = args.performance_hint
+
     gpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": "LATENCY",
+        "PERFORMANCE_HINT": performance_hint.value,
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
+
+        "GENERATE_HINT": generate_hint.value,
 
         # "LOG_LEVEL": "LOG_WARNING",
         # "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
     }
 
+    npu_prefill_hint: PrefillHint = args.npu_prefill_hint
+    npu_turbo: YesNo = args.npu_turbo
+    npu_compiler_type: NpuCompilerType = args.npu_compiler_type
+
     npu_pipeline_properties: dict[str, str | int] = {
         "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": "LATENCY",
+        "PERFORMANCE_HINT": performance_hint.value,
         "ENABLE_MMAP": "YES",
-        "NPU_TURBO": "TRUE",
         # "PERF_COUNT": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
+        "NPU_COMPILER_TYPE": npu_compiler_type.value,
+
         "NPU_USE_NPUW": "YES",
         "NPUW_LLM": "YES",
+        # "NPUW_DEVICES": "NPU,CPU",
 
-        "NPUW_LLM_GENERATE_HINT": "BEST_PERF",
+        "NPU_TURBO": npu_turbo.value,
+        "NPUW_LLM_GENERATE_HINT": generate_hint.value,
+        "NPUW_LLM_PREFILL_HINT": npu_prefill_hint.value,
         "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
+        "NPUW_LLM_GENERATE_PYRAMID": "YES",
+
+        "NPUW_PARALLEL_COMPILE": "YES",
+        "NPUW_LLM_SHARED_HEAD": "YES",
 
         "LOG_LEVEL": "LOG_WARNING",
     }
-    npu_compiler_type = args.npu_compiler_type
-    if npu_compiler_type:
-        npu_pipeline_properties["NPU_COMPILER_TYPE"] = npu_compiler_type.value
+
     if max_prompt_len:
         npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
+
+    # max_generation_token_len = args.max_generation_token_len
+    # if not max_generation_token_len:
+    #     max_generation_token_len = generate_opts.max_new_tokens or default_generate_opts.max_new_tokens
+
+    # if max_generation_token_len:
+    #     npu_pipeline_properties["NPUW_LLM_MAX_GENERATION_TOKEN_LEN"] = max_generation_token_len
+
     if default_batch_size:
         npu_pipeline_properties["NPUW_LLM_PREFILL_CHUNK_SIZE"] = default_batch_size
 
@@ -347,7 +408,7 @@ def main():
         app = init_sequential_engine(model_name=model_name,
                                      model_path=str(model_path),
                                      model_architectures=model_architectures,
-                                     device=device,
+                                     device=device.value,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
                                      generate_config=generate_opts,
@@ -360,7 +421,7 @@ def main():
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
                                               model_architectures=model_architectures,
-                                              device=device,
+                                              device=device.value,
                                               parser=model_parser,
                                               generate_config=generate_opts,
                                               handler_config=handler_config,

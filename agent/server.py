@@ -31,7 +31,8 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None,
                                     chat_template='') -> FastAPI:
-    log.info(f"model loading {model_path}, device: {device}, scheduler_config {scheduler_config.to_string()}")
+    log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}, "
+             f"scheduler_config {scheduler_config.to_string()}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
@@ -94,7 +95,7 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
     if not pipeline_properties:
         pipeline_properties = {}
 
-    log.info(f"model loading {model_name}, device: {device}")
+    log.info(f"model loading {model_name}, device: {device}, properties: {pipeline_properties}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")

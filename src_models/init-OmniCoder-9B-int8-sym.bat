@@ -14,6 +14,7 @@ optimum-cli export openvino ^
   --weight-format %WEIGHT_FORMAT% ^
   --sym ^
   --trust-remote-code ^
+  --dataset textvqa ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym
 
 pause
