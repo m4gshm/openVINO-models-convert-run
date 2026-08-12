@@ -148,7 +148,7 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 second = next(iter(edit)) if len(edit) > 1 else None
                 if new_text is None and old_text:
                     new_text = first
-                    edits[old_text_i]["nex_text"] = new_text
+                    edits[old_text_i]["new_text"] = new_text
                     del edit[0]
                 elif old_text is None and new_text:
                     old_text = first
@@ -168,11 +168,11 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         if global_new_text:
             is_set_new_text = False
             for edit in edits:
-                if "nex_text" not in edit and "old_text" in edit:
+                if "new_text" not in edit and "old_text" in edit:
                     is_set_new_text = True
                     edit["new_text"] = global_new_text
             if is_set_new_text:
-                del args["nex_text"]
+                del args["new_text"]
 
         global_old_text = args.get("old_text")
         if global_old_text:

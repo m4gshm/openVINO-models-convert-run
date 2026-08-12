@@ -42,7 +42,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_for_text", first.name)
-        self.assertEqual({'is_case_sensitive': 'false',
+        self.assertEqual({'is_case_sensitive': False,
                           'target_path_or_url': 'MessageStorageImpl.java',
                           'text_snippet': '    "MessageStorageImpl"'}, first.arguments)
         self.assertFalse(partial)
@@ -81,6 +81,21 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_get_configurations_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/get_configurations.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_write_file(first)
+        self.assertEqual("get_configurations", fixed.name)
+        self.assertEqual({'configuration_name_for_part': 'test',
+                          'include_global_configurations': True,
+                          'page': '1',
+                          'target_file': None}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
     def test_write_file_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file.txt")
@@ -88,7 +103,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
-        self.assertEqual({'allow_overwrite': 'true',
+        self.assertEqual({'allow_overwrite': True,
                           'content': 'plugins {\n'
                                      '    `java-library`\n'
                                      '}\n'
@@ -132,7 +147,7 @@ class TestAddFunction(unittest.TestCase):
         fixed = fix_write_file(first)
         self.assertEqual("write_file", fixed.name)
         self.maxDiff = None
-        self.assertEqual({'allow_overwrite': 'true',
+        self.assertEqual({'allow_overwrite': True,
                           'content': 'plugins {\n'
                                      '    `java-library`\n'
                                      '}\n'
@@ -215,7 +230,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("edit_file", first.name)
-        self.assertEqual({'allow_multiple_matches': 'false',
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{},
                                     {'new_text': 'dependencies {\n'
                                                  '    '
@@ -291,7 +306,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': [{'allow_multiple_matches': 'false',
+                          'edits': [{'allow_multiple_matches': False,
                                      'new_text': 'testImplementation {\n'
                                                  '    // Testing Frameworks\n'
                                                  '    '
@@ -371,7 +386,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': [{'new_text': 'null', 'old_text': '// ...'}],
+                          'edits': [{'new_text': 'new_text:null', 'old_text': '// ...'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
@@ -465,7 +480,6 @@ class TestAddFunction(unittest.TestCase):
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
-
 
     def test_edit_file10_parse(self):
         state = parser.new_state()

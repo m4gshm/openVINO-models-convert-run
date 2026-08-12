@@ -101,7 +101,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
             for k, v in arguments.items():
                 clean_k = clean(k)
                 clean_v = strip_unquote_if_wrapped_by_empty_and_quoted(unescape(v))
-                named_parameters[clean_k] = clean_v
+                named_parameters[clean_k] = cast_value(clean_v)
         else:
             log.error(f"unrepairable json arguments: {arguments_block}")
         unparsed_tail = ""
@@ -235,9 +235,10 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         for k, v in arguments.items():
             clean_k = strip(k)
             clean_v = unescape(v)
-            named_parameters[clean_k] = clean_v
-            if clean_v is None:
-                raise Exception(f"k={k}, " + arguments_block)
+            cast_clean_v = cast_value(clean_v)
+            named_parameters[clean_k] = cast_clean_v
+            # if clean_v is None:
+            #     raise Exception(f"k={k}, " + arguments_block)
 
         for i, v in enumerate(anonymous_parameters):
             anonymous_parameters[i] = unescape(v)
@@ -341,6 +342,17 @@ def unescape(val: str | Any):
                 after = val.replace(old, new)
                 log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
                 val = after
+    return val
+
+def cast_value(val: str | Any):
+    if isinstance(val, str):
+        low_val = val.lower()
+        if low_val == "null":
+            return None
+        elif low_val == "false":
+            return False
+        elif low_val == "true":
+            return True
     return val
 
 
