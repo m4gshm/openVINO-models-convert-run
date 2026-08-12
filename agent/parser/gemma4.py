@@ -180,12 +180,13 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                     word = ''
                 elif token == ARRAY_START:
                     array_tail = arguments_block[next_token_i:]
-                    array, next_token_i, on_parse_after_array = parse_array(array_tail)
+                    array, next_token_i_after_array, on_parse_after_array = parse_array(array_tail)
                     arguments[name] = array
                     name = ''
                     word = ''
                     expect_name = True
                     expect_args_delim = True
+                    next_token_i = next_token_i_after_array
                     on_parse = on_parse_after_array
                 else:
                     if is_last_token and (is_object_end or is_array_end):
