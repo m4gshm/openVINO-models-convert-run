@@ -73,7 +73,7 @@ class YesNo(Enum):
     NO = 'NO'
 
 
-class GenerateHint(Enum):
+class NpuGenerateHint(Enum):
     BEST_PERF = 'BEST_PERF'
     FAST_COMPILE = 'FAST_COMPILE'
 
@@ -141,8 +141,8 @@ def main():
                              help="%(default)s")
     args_parser.add_argument("--npu_compiler_type", type=lambda c: NpuCompilerType[c], required=False,
                              default=NpuCompilerType.DRIVER, choices=list(NpuCompilerType), help="%(default)s")
-    args_parser.add_argument("--generate_hint", type=lambda c: GenerateHint[c], required=False,
-                             default=GenerateHint.FAST_COMPILE, choices=list(GenerateHint), help="%(default)s")
+    args_parser.add_argument("--npu_generate_hint", type=lambda c: NpuGenerateHint[c], required=False,
+                             default=NpuGenerateHint.FAST_COMPILE, choices=list(NpuGenerateHint), help="%(default)s")
     args_parser.add_argument("--npu_prefill_hint", type=lambda c: PrefillHint[c], required=False,
                              default=PrefillHint.DYNAMIC, choices=list(PrefillHint), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=lambda c: YesNo[c], required=False,
@@ -333,7 +333,7 @@ def main():
         f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
-    generate_hint: GenerateHint = args.generate_hint
+    npu_generate_hint: NpuGenerateHint = args.npu_generate_hint
     performance_hint: PerformanceHint = args.performance_hint
 
     gpu_pipeline_properties = {
@@ -341,8 +341,6 @@ def main():
         "PERFORMANCE_HINT": performance_hint.value,
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
-
-        "GENERATE_HINT": generate_hint.value,
 
         # "LOG_LEVEL": "LOG_WARNING",
         # "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
@@ -362,17 +360,14 @@ def main():
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": npu_compiler_type.value,
-
         "NPU_USE_NPUW": "YES",
         "NPUW_LLM": "YES",
         # "NPUW_DEVICES": "NPU,CPU",
-
         "NPU_TURBO": npu_turbo.value,
-        "NPUW_LLM_GENERATE_HINT": generate_hint.value,
+        "NPUW_LLM_GENERATE_HINT": npu_generate_hint.value,
         "NPUW_LLM_PREFILL_HINT": npu_prefill_hint.value,
         "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
         "NPUW_LLM_GENERATE_PYRAMID": "YES",
-
         "NPUW_PARALLEL_COMPILE": "YES",
         "NPUW_LLM_SHARED_HEAD": "YES",
 
