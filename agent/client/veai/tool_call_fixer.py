@@ -120,7 +120,18 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                     on_delete_i.append(i)
                 else:
                     edit_new_text = edit.get("new_text")
+                    if edit_new_text is None:
+                        edit_new_text = edit.get("new_config")
+                        if edit_new_text:
+                            edit["new_text"] = edit_new_text
+                            del edit["new_config"]
+
                     edit_old_text = edit.get("old_text")
+                    if edit_old_text is None:
+                        edit_old_text = edit.get("old_config")
+                        if edit_old_text:
+                            edit["old_text"] = edit_old_text
+                            del edit["old_config"]
                     if not new_text_i:
                         if edit_new_text:
                             new_text = edit_new_text

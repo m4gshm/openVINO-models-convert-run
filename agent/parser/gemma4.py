@@ -343,7 +343,16 @@ def unescape(val: str | Any):
                 after = val.replace(old, new)
                 log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
                 val = after
+    elif isinstance(val, list):
+        list_val = [unescape(lv) for lv in val]
+        return list_val
+    elif isinstance(val, dict):
+        dict_val = {}
+        for k, v in val.items():
+            dict_val[k] = unescape(v)
+        return dict_val
     return val
+
 
 def cast_value(val: str | Any):
     if isinstance(val, str):

@@ -411,7 +411,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file7_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_7.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -432,7 +432,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file8_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_8.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -462,7 +462,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file9_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_9.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -484,7 +484,7 @@ class TestAddFunction(unittest.TestCase):
     def test_edit_file10_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_10.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -504,6 +504,92 @@ class TestAddFunction(unittest.TestCase):
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
                                                  '}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file11_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_11.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': 'test {\n'
+                                                 '    runtimeClasspath = sourceSets.test.copy {\n'
+                                                 '        .+ dependencies {\n'
+                                                 '            implementation '
+                                                 'project(":storage-api-dependencies") // If '
+                                                 'applicable\n'
+                                                 '            '
+                                                 'testImplementation("org.springframework.boot:allowed-versions")\n'
+                                                 '            '
+                                                 'testImplementation("org.postgresql:postgresql")\n'
+                                                 '        }\n'
+                                                 '    }\n'
+                                                 '}',
+                                     'old_text': '}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file12_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_12.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'allow_multiple_matches': False,
+                                     'new_text': '    '
+                                                 'testImplementation("org.springframework.boot:spring-to-test")\n'
+                                                 '    '
+                                                 'testImplementation("net.bnd.system.container:postgresql-junit-container") '
+                                                 '// Or the modern Testcontainers suite\n'
+                                                 '    // Note: If using the unified Testcontainers '
+                                                 'dependency, the specific library coordinates might '
+                                                 "change. We'll use the standard ones for now.\n"
+                                                 '    // We need a robust dependency for the actual '
+                                                 'PostgreSQL container.\n'
+                                                 "    // Let's use the common Spring Testcontainers "
+                                                 'dependency approach if possible.\n'
+                                                 '\n'
+                                                 '    // Correcting to use the standard '
+                                                 'Testcontainers dependency for simplicity and '
+                                                 'compatibility:\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql:X.Y.Z")]',
+                                     'old_text': '\n}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file13_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_13.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
+                                                 '    testImplementation("org.springframework.boot:" + '
+                                                 '":0.0.0.0"',
+                                     'old_text': '\n}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)

@@ -1,0 +1,9 @@
+<|tool_call>call:edit_file{allow_multiple_matches:false,edits:[{new_text:<|"|>test {
+    runtimeClasspath = sourceSets.test.copy {
+        .+ dependencies {
+            implementation project(":storage-api-dependencies") // If applicable
+            testImplementation("org.springframework.boot:allowed-versions")
+            testImplementation("org.postgresql:postgresql")
+        }
+    }
+}<|"|>,old_text:<|"|>}<|"|>},target_file:<|"|>java/idempotent-consumer-jdbc/build.gradle.kts"}]}<tool_call|>
