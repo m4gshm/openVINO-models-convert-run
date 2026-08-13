@@ -1,4 +1,5 @@
 call agent.bat --model SERA-8B-int8-sym ^
  --device NPU ^
- --npu_compiler_type DRIVER ^
- --max_prompt_len 49152
+ --max_prompt_len 32768 ^
+ --npu_generate_hint BEST_PERF ^
+ --npu_compiler_type PLUGIN
