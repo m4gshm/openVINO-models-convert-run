@@ -24,7 +24,7 @@ class PhraseTestCase(unittest.TestCase):
 
     def test_loop_lines(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages.txt")
-        loop_messages = loop_messages_file.read_text(encoding="utf-8")
+        loop_messages = loop_messages_file.read_text()
 
         phrase = Phrase()
         with self.assertRaises(LoopError):
@@ -42,6 +42,67 @@ class PhraseTestCase(unittest.TestCase):
                          'second\n'
                          'first\n'
                          'second\n', phrase.full)
+
+    def test_loop_line_duplicated(self):
+        loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "looo_line_duplicated.txt")
+        loop_messages = loop_messages_file.read_text()
+
+        phrase = Phrase()
+        with self.assertRaises(LoopError):
+            for token in loop_messages:
+                phrase.add_token(token)
+
+        self.assertEqual(('some normal output\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'
+                          'duplicated\n'), phrase.full)
 
     def test_loop_in_one_line_false_case(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line_false_case.txt").read_text(
@@ -139,7 +200,7 @@ class PhraseTestCase(unittest.TestCase):
 
     def test_duplicated_parts_simple(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line.txt")
-        loop_messages = loop_messages_file.read_text(encoding="utf-8")
+        loop_messages = loop_messages_file.read_text()
 
         profiler = cProfile.Profile()
         profiler.enable()
@@ -163,7 +224,7 @@ class PhraseTestCase(unittest.TestCase):
 
     def test_duplicated_parts_repeated_consonants(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line4.txt")
-        loop_messages = loop_messages_file.read_text(encoding="utf-8")
+        loop_messages = loop_messages_file.read_text()
 
         profiler = cProfile.Profile()
         profiler.enable()

@@ -366,6 +366,7 @@ class Phrase:
         self.lines_duplicated_times: dict[int, set[str]] = {}
 
         self.current_line: list[str] = []
+        self.current_line_duplicated_count: int = 0
         self.current_line_has_no_pair_tokens: dict[str, set[int]] = {}
         self.duplicate_ranges_reversed = dict[int, int]()
         self.duplicate_ranges = dict[int, int]()
@@ -470,8 +471,13 @@ class Phrase:
             else:
                 current_line = self.current_line
                 current_line_str = "".join(current_line)
-                self.lines.append(current_line_str)
-                lines_amount = len(self.lines)
+                lines = self.lines
+                if lines and lines[-1] == current_line_str:
+                    self.current_line_duplicated_count += 1
+                else:
+                    self.current_line_duplicated_count = 0
+                lines.append(current_line_str)
+                lines_amount = len(lines)
                 current_line_positions = self.lines_unique.get(current_line_str, [])
                 duplicated_amount = len(current_line_positions)
                 duplicated_time_lines: set[str] | None = self.lines_duplicated_times.get(
@@ -513,7 +519,7 @@ class Phrase:
                                 stop = True
                                 break
 
-                            prev_line = self.lines[prev_line_position - 1]
+                            prev_line = lines[prev_line_position - 1]
                             prev_lines_position_unique[line_position] = prev_line_position
 
                             if prev_line_position in touched_line_positions:
@@ -537,18 +543,18 @@ class Phrase:
                             stop = True
 
                     if cycle_start and cycle_end:
-                        cycled_phrase = "\n".join([self.lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
+                        cycled_phrase = "\n".join([lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
                         raise LoopError(payload=cycled_phrase, message="Cycled phrase detected")
                     else:
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
                         if len(duplicated_phrase.strip()) > 0:
                             log.debug(f"duplicated phrase '{duplicated_phrase}', times {len(start_positions)}")
 
-                duplicated_lines_amount = lines_amount - len(self.lines_unique)  # len(duplicated_lines)
+                duplicated_lines_amount = self.current_line_duplicated_count + 1  # len(duplicated_lines)
                 duplicated_rate = duplicated_lines_amount / lines_amount
                 if duplicated_rate >= self.duplicated_lines_rate_limit and duplicated_lines_amount >= self.duplicated_lines_limit:
-                    payload = "".join(list(self.lines_unique.keys()))
-                    log.error(f"duplicated lines detected:\nunique='{self.lines_unique}'\n{self.lines}")
+                    payload = "\n".join(lines[-duplicated_lines_amount:])
+                    log.error(f"duplicated lines detected:\n{payload}")
                     raise LoopError(payload=payload,
                                     message=f"Duplicated lines detected (amount={duplicated_lines_amount})")
 
