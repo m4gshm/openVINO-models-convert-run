@@ -386,7 +386,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': [{'new_text': 'new_text:null', 'old_text': '// ...'}],
+                          'edits': [{'new_text': '}', 'old_text': '// ...'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
@@ -594,6 +594,29 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+
+    def test_edit_file14_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_14.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '\n'
+                                                 '    '
+                                                 'testImplementation("org.springframework.boot:spring-boot-starter-test)")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql") '
+                                                 '// Testcontainers for PostgreSQL\n'
+                                                 '}\n',
+                                     'old_text': '\n}\n'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
 
 if __name__ == '__main__':
     unittest.main()

@@ -108,71 +108,9 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     if not target_file:
         log.error(f"tool call error: tool={function.name}, target_file is empty but required")
     edits = args.get("edits")
+    unused_anonymous_edits = []
     if edits:
-        new_text = None
-        new_text_i = None
-        old_text = None
-        old_text_i = None
-        on_delete_i = []
-        for i, edit in enumerate(edits):
-            if isinstance(edit, dict):
-                if len(edit) == 0:
-                    on_delete_i.append(i)
-                else:
-                    edit_new_text = edit.get("new_text")
-                    if edit_new_text is None:
-                        edit_new_text = edit.get("new_config")
-                        if edit_new_text:
-                            edit["new_text"] = edit_new_text
-                            del edit["new_config"]
-
-                    edit_old_text = edit.get("old_text")
-                    if edit_old_text is None:
-                        edit_old_text = edit.get("old_config")
-                        if edit_old_text:
-                            edit["old_text"] = edit_old_text
-                            del edit["old_config"]
-                    if not new_text_i:
-                        if edit_new_text:
-                            new_text = edit_new_text
-                            new_text_i = i
-                    if not old_text_i:
-                        if edit_old_text:
-                            old_text = edit_old_text
-                            old_text_i = i
-
-                    if old_text_i == new_text_i:
-                        # expected
-                        old_text_i = None
-                        new_text_i = None
-                    elif old_text_i is not None and new_text_i is not None:
-                        # merge
-                        edits[new_text_i]["old_text"] = old_text
-                        del edits[old_text_i]["old_text"]
-                        if len(edits[old_text_i]) == 0:
-                            on_delete_i.append(old_text_i)
-                        old_text_i = None
-                        new_text_i = None
-
-            elif isinstance(edit, list) or isinstance(edit, set):
-                first = next(iter(edit)) if len(edit) > 0 else None
-                second = next(iter(edit)) if len(edit) > 1 else None
-                if new_text is None and old_text:
-                    new_text = first
-                    edits[old_text_i]["new_text"] = new_text
-                    del edit[0]
-                elif old_text is None and new_text:
-                    old_text = first
-                    edits[new_text_i]["old_text"] = old_text
-                    del edit[0]
-                    # if len(edit) == 0:
-                    #     on_delete_i.append(i)
-                else:
-                    pass
-                on_delete_i.append(i)
-
-        for i in reversed(on_delete_i):
-            del edits[i]
+        unused_anonymous_edits = handle_edits(edits)
 
         # recheck edits fullness:
         global_new_text = args.get("new_text")
@@ -206,6 +144,18 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                     if len(edit) == 0:
                         del edits[i]
                     break
+    if not target_file and unused_anonymous_edits:
+        expect_target_file = False
+        for v in unused_anonymous_edits:
+            if expect_target_file:
+                target_file = v
+                break
+            elif "target_file" == v:
+                expect_target_file = True
+            elif "target_file" in v:
+                pass
+
+
 
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
@@ -264,21 +214,26 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
             prev_old_text = None
             prev_new_text = None
             for edit in edits:
-                old_text = edit.get("old_text")
-                new_text = edit.get("new_text")
-                if prev_old_text is None and prev_new_text is None:
-                    set_prev = True
-                    prev_old_text = old_text
-                    prev_new_text = new_text
+                if isinstance(edit, dict):
+                    old_text = edit.get("old_text")
+                    new_text = edit.get("new_text")
+                    if prev_old_text is None and prev_new_text is None:
+                        set_prev = True
+                        prev_old_text = old_text
+                        prev_new_text = new_text
+                    else:
+                        if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
+                            in_prev = old_text.startswith(prev_old_text)
+                            if in_prev:
+                                log.debug(
+                                    f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
+                                prev_new_text = prev_new_text + new_text
+                                prev_old_text = old_text
+                                merged = True
+                elif isinstance(edit, list):
+                    log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
                 else:
-                    if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
-                        in_prev = old_text.startswith(prev_old_text)
-                        if in_prev:
-                            log.debug(
-                                f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
-                            prev_new_text = prev_new_text + new_text
-                            prev_old_text = old_text
-                            merged = True
+                    log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
 
             if prev_old_text and prev_new_text:
                 edits = [{"new_text": prev_new_text, "old_text": prev_old_text}]
@@ -287,6 +242,111 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         return EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
     else:
         return function
+
+
+def handle_edits(edits: Any):
+    new_text = None
+    new_text_i = None
+    old_text = None
+    old_text_i = None
+    on_delete_i = []
+    anonymous_edits = []
+    for i, edit in enumerate(edits):
+        if isinstance(edit, dict):
+            if len(edit) == 0:
+                on_delete_i.append(i)
+            else:
+                edit_new_text = edit.get("new_text")
+                if edit_new_text is None:
+                    edit_new_text = edit.get("new_config")
+                    if edit_new_text:
+                        edit["new_text"] = edit_new_text
+                        del edit["new_config"]
+
+                edit_old_text = edit.get("old_text")
+                if edit_old_text is None:
+                    edit_old_text = edit.get("old_config")
+                    if edit_old_text:
+                        edit["old_text"] = edit_old_text
+                        del edit["old_config"]
+                if not new_text_i:
+                    if edit_new_text:
+                        new_text = edit_new_text
+                        new_text_i = i
+                if not old_text_i:
+                    if edit_old_text:
+                        old_text = edit_old_text
+                        old_text_i = i
+
+                if old_text_i == new_text_i:
+                    # expected
+                    old_text_i = None
+                    new_text_i = None
+                elif old_text_i is not None and new_text_i is not None:
+                    # merge
+                    edits[new_text_i]["old_text"] = old_text
+                    del edits[old_text_i]["old_text"]
+                    if len(edits[old_text_i]) == 0:
+                        on_delete_i.append(old_text_i)
+                    old_text_i = None
+                    new_text_i = None
+
+        elif isinstance(edit, list) or isinstance(edit, set):
+            first = next(iter(edit)) if len(edit) > 0 else None
+            second = next(iter(edit)) if len(edit) > 1 else None
+            if new_text is None and old_text:
+                new_text = first
+                edits[old_text_i]["new_text"] = new_text
+                del edit[0]
+            elif old_text is None and new_text:
+                old_text = first
+                edits[new_text_i]["old_text"] = old_text
+                del edit[0]
+                # if len(edit) == 0:
+                #     on_delete_i.append(i)
+            else:
+                anonymous_edits.extend(edit)
+            on_delete_i.append(i)
+        else:
+            anonymous_edits.append(edit)
+            on_delete_i.append(i)
+
+    for i in reversed(on_delete_i):
+        del edits[i]
+
+    unused_anonymous_edits = []
+    if anonymous_edits:
+        expect_next_next = False
+        expect_old_text = False
+        dirty_edits = []
+        edit = {}
+        for v in anonymous_edits:
+            if expect_next_next:
+                edit["new_text"] = v
+                expect_next_next = False
+            elif expect_old_text:
+                edit["old_text"] = v
+                expect_old_text = False
+            elif v == "new_text":
+                if "new_text" in edit:
+                    dirty_edits.append(edit)
+                    edit = {}
+                expect_next_next = True
+            elif v == "old_text":
+                if "old_text" in edit:
+                    dirty_edits.append(edit)
+                    edit = {}
+                expect_old_text = True
+            else:
+                unused_anonymous_edits.append(v)
+
+        if edit:
+            dirty_edits.append(edit)
+
+        if isinstance(edits, list):
+            edits.extend(dirty_edits)
+            unused_anonymous_edits.extend(handle_edits(edits))
+    return unused_anonymous_edits
 
 
 def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:

@@ -1,0 +1,1 @@
+<|tool_call>call:edit_file{{"edits": [{"new_text": "\r\n    testImplementation(\"org.springframework.boot:spring-boot-starter-test)\")\n    testImplementation(\"org.testcontainers:postgresql\") // Testcontainers for PostgreSQL\r\n}\r\n"}, "old_text": "\r\n}\r\n"}], "target_file": "java/idempotent-consumer-jdbc/build.gradle.kts", "allow_multiple_matches": false}}<tool_call|>

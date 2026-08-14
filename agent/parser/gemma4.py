@@ -82,19 +82,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     if possible_json:
         if object_expect and arguments_block[-1] == OBJECT_END:
             arguments_block = arguments_block[:-1]
-        log.debug(f"trying to parse as json: {arguments_block}")
-        possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
-        try:
-            arguments: dict[str, Any] = json.loads(possible_json_args)
-            if not isinstance(arguments, dict):
-                log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
-        except json.decoder.JSONDecodeError as e:
-            try:
-                arguments = json_repair.loads(possible_json_args)
-                if not isinstance(arguments, dict):
-                    log.error(f"unexpected type of repaired args '{type(arguments)}', arguments='{arguments}'")
-            except Exception as e:
-                arguments = {}
+        arguments = try_to_parse(arguments_block)
 
         named_parameters: dict[str, Any] = {}
         if arguments:
@@ -107,7 +95,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         unparsed_tail = ""
     else:
         arguments = dict[str, Any]()
-        expect_name = object_expect
+        expect_name = True # object_expect
         expect_value_end_delimiter = None
         expect_args_delim = False
         word = ''
@@ -249,6 +237,30 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         f"anonymous_parameters='{anonymous_parameters}', unparsed_tail='{unparsed_tail}'")
 
     return named_parameters, anonymous_parameters, unparsed_tail
+
+
+def try_to_parse(arguments_block: str) -> dict[str, Any]:
+    log.debug(f"trying to parse as json: {arguments_block}")
+    possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
+    try:
+        arguments: dict[str, Any] = json.loads(possible_json_args)
+        if not isinstance(arguments, dict):
+            log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
+    except json.decoder.JSONDecodeError as e:
+        if e.msg == "Expecting ',' delimiter":
+            new_possible_json_args = possible_json_args[:e.pos] + ',' + possible_json_args[e.pos + 1:]
+            arguments = try_to_parse(new_possible_json_args)
+        elif e.msg == "Illegal trailing comma before end of array":
+            new_possible_json_args = possible_json_args[:e.pos] + possible_json_args[e.pos + 1:]
+            arguments = try_to_parse(new_possible_json_args)
+        else:
+            try:
+                arguments = json_repair.loads(possible_json_args)
+                if not isinstance(arguments, dict):
+                    log.error(f"unexpected type of repaired args '{type(arguments)}', arguments='{arguments}'")
+            except Exception as e:
+                arguments = {}
+    return arguments
 
 
 def parse_name(parameters_block) -> tuple[str | None, str | None]:
