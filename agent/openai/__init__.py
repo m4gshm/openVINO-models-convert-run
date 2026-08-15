@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -10,7 +12,7 @@ class GenerateOpts(BaseModel):
     min_p: float | None = None
     repetition_penalty: float | None = None
     preprocess_prompt_by_parser: bool = True
-    enable_thinking: bool = True
+    model_parameters: dict[str, Any] = None
 
 
 def get_default_generate_opts():

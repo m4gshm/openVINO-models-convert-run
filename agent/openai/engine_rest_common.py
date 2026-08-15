@@ -186,11 +186,13 @@ class BaseController(ABC):
 
         tokenizer = self.tokenizer
         extra_context = {}
-        if self.generate_config.enable_thinking:
-            extra_context["enable_thinking"] = self.generate_config.enable_thinking
+        model_parameters = self.generate_config.model_parameters
+        if model_parameters:
+            extra_context = model_parameters
 
         chat_history = new_chat_history(messages, tools_raw)
-        log.debug(f"chat history: messages={len(chat_history.get_messages())}, tools={len(chat_history.get_tools())}")
+        log.debug(f"chat history: messages={len(chat_history.get_messages())}, tools={len(chat_history.get_tools())}, "
+                  f"extra_context={extra_context}")
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,

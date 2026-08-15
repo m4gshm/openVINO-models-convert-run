@@ -47,7 +47,6 @@ class ContinuousBatchingController(BaseController):
                          chat_template)
         self.pipe = pipe
         self.handler_config = handler_config
-        self.generate_config = generate_config
         self.config = config
         self.executor = ThreadPoolExecutor()
         self.active_handles_lock = threading.Lock()

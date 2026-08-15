@@ -146,7 +146,7 @@ def main():
     args_parser.add_argument("--npu_prefill_hint", type=lambda c: PrefillHint[c], required=False,
                              default=PrefillHint.DYNAMIC, choices=list(PrefillHint), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=lambda c: YesNo[c], required=False,
-                             default=YesNo.YES, choices=list(YesNo), help="%(default)s")
+                             default=YesNo.NO, choices=list(YesNo), help="%(default)s")
 
     args = args_parser.parse_args()
 

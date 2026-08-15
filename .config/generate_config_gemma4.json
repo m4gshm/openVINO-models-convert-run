@@ -3,5 +3,8 @@
   "top_p": 0.95,
   "top_k": 64,
   "min_p": 0.05,
-  "repetition_penalty": 1.05
+  "repetition_penalty": 1.05,
+  "model_parameters": {
+    "enable_thinking": false
+  }
 }
