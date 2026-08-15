@@ -1,7 +1,10 @@
 import unittest
 from importlib.resources import files
 
-from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file
+from agent.client.user_context import UserContext
+from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file, GEMMA_4
+
+USER_CONTEXT = UserContext(model_architectures=[GEMMA_4])
 from agent.parser.gemma4 import Gemma4ChannelParser
 
 TEST_RESOURCES = "test_resources"
@@ -270,7 +273,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -302,7 +305,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -341,7 +344,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -382,7 +385,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -398,7 +401,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': True,
@@ -415,7 +418,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -436,7 +439,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -466,7 +469,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -488,7 +491,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -515,7 +518,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -544,7 +547,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -579,7 +582,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -602,7 +605,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first)
+        fixed = fix_edit_file(first, USER_CONTEXT)
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -617,6 +620,37 @@ class TestAddFunction(unittest.TestCase):
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
+
+    def test_edit_file15_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_15.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    implementation("org.jooq:jooq"\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-bom")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '}',
+                                     'old_text': '    implementation("org.jooq: "\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                 '}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
 
 if __name__ == '__main__':
     unittest.main()

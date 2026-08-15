@@ -95,7 +95,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         unparsed_tail = ""
     else:
         arguments = dict[str, Any]()
-        expect_name = True # object_expect
+        expect_name = True  # object_expect
         expect_value_end_delimiter = None
         expect_args_delim = False
         word = ''
@@ -242,18 +242,40 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
 def try_to_parse(arguments_block: str) -> dict[str, Any]:
     log.debug(f"trying to parse as json: {arguments_block}")
     possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
+    arguments: dict[str, Any] | None = None
     try:
-        arguments: dict[str, Any] = json.loads(possible_json_args)
+        arguments = json.loads(possible_json_args)
         if not isinstance(arguments, dict):
             log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
     except json.decoder.JSONDecodeError as e:
+        json_len = len(possible_json_args)
+        pos = e.pos
+        sym = possible_json_args[pos] if json_len < pos else None
+        prev_pos = pos - 1
+        prev_sym = possible_json_args[prev_pos] if json_len > 1 else None
         if e.msg == "Expecting ',' delimiter":
-            new_possible_json_args = possible_json_args[:e.pos] + ',' + possible_json_args[e.pos + 1:]
+            insert_sym = ','
+            if pos == json_len:
+                # end of object of array
+                if prev_sym == "}":
+                    insert_sym = "]"
+                else:
+                    insert_sym = "}"
+            else:
+                insert_sym = ','
+            new_possible_json_args = possible_json_args[:pos] + insert_sym + possible_json_args[pos + 1:]
             arguments = try_to_parse(new_possible_json_args)
         elif e.msg == "Illegal trailing comma before end of array":
-            new_possible_json_args = possible_json_args[:e.pos] + possible_json_args[e.pos + 1:]
+            new_possible_json_args = possible_json_args[:pos] + possible_json_args[pos + 1:]
             arguments = try_to_parse(new_possible_json_args)
-        else:
+        elif e.msg == "Expecting value":
+
+            if sym is None or sym == "]" or sym == "}" and prev_sym == ",":
+                new_possible_json_args = possible_json_args[:prev_pos] + possible_json_args[prev_pos + 1:]
+                arguments = try_to_parse(new_possible_json_args)
+            else:
+                arguments = None
+        if not arguments:
             try:
                 arguments = json_repair.loads(possible_json_args)
                 if not isinstance(arguments, dict):

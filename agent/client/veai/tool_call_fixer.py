@@ -94,7 +94,14 @@ def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext
 
 def fix_file_structure(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, function.name, context)
+    target_file, invalid = get_target_file(args, context)
+    target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+    if found:
+        invalid = True
+
+    if not target_file:
+        log.error(f"tool call error: tool={function.name}, target_file is empty but required")
+
     if invalid:
         new_function = FileStructure().new_call(target_file)
         return new_function
@@ -104,9 +111,7 @@ def fix_file_structure(function: ParsedFunctionCall, context: UserContext = User
 def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> list[
                                                                                              ParsedFunctionCall] | ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, function.name, context)
-    if not target_file:
-        log.error(f"tool call error: tool={function.name}, target_file is empty but required")
+    target_file, invalid = get_target_file(args, context)
     edits = args.get("edits")
     unused_anonymous_edits = []
     if edits:
@@ -154,8 +159,6 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 expect_target_file = True
             elif "target_file" in v:
                 pass
-
-
 
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
@@ -239,9 +242,23 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 edits = [{"new_text": prev_new_text, "old_text": prev_old_text}]
                 log.debug(f"merged edits={edits}")
                 invalid = True
+
+        target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+        if not target_file:
+            log.error(f"tool call error: tool={function.name}, target_file is empty but required")
+
         return EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
     else:
         return function
+
+
+def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], context: UserContext,
+                                                     function: ParsedFunctionCall,
+                                                     target_file: str | Any) -> Any | None:
+    if not target_file and (context and GEMMA_4 in context.model_architectures):
+        prev_target_file = find_target_file_from_prev_tool_call(args, context, function.name, target_file)
+        return prev_target_file, not prev_target_file is None
+    return target_file, None
 
 
 def handle_edits(edits: Any):
@@ -351,8 +368,13 @@ def handle_edits(edits: Any):
 
 def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, function.name, context)
+    target_file, invalid = get_target_file(args, context)
     content = args.get("content")
+
+    target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+    if found:
+        invalid |= found
+
     if target_file and content:
         allow_overwrite = args.get("allow_overwrite")
 
@@ -422,15 +444,19 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext =
 
 def fix_read_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, function.name, context)
+    target_file, invalid = get_target_file(args, context)
 
     anonymous_arguments = function.anonymous_arguments
     if not target_file and anonymous_arguments:
         invalid = True
         target_file = anonymous_arguments[0]
 
+    target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+    if found:
+        invalid = True
+
     if not target_file:
-        log.error(f"no target file for function '{function.name}'")
+        log.error(f"tool call error: tool={function.name}, target_file is empty but required")
     else:
         start_line, fixed = as_int_or_none(args.get("start_line"), "start_line")
         invalid |= fixed
@@ -461,7 +487,7 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext = UserConte
     return function
 
 
-def get_target_file(args, function_name: str, context: UserContext = UserContext()) -> tuple[str, bool]:
+def get_target_file(args, context: UserContext = UserContext()) -> tuple[str, bool]:
     target_file = args.get(TARGET_FILE)
 
     invalid = not target_file
@@ -483,32 +509,35 @@ def get_target_file(args, function_name: str, context: UserContext = UserContext
     if fixed:
         invalid = True
 
-    if not target_file and (context and GEMMA_4 in context.model_architectures):
-        if log.isEnabledFor(logging.DEBUG):
-            log.debug(
-                f"no required target_file, trying to get from previous cool call of '{function_name}', args='{args}'")
-        else:
-            log.info(f"no required target_file, trying to get from previous cool call of '{function_name}'")
-
-        messages = context.messages
-        for i, message in enumerate(reversed(messages)):
-            if message.role == ROLE_ASSISTANT:
-                for tool_call in message.tool_calls or []:
-                    function = tool_call.function
-                    if function.name == function_name:
-                        try:
-                            arguments = json.loads(function.arguments)
-                        except JSONDecodeError as e:
-                            log.debug(f"error on function arguments parsing: tool_call.id={tool_call.id}, "
-                                      f"function.name={function.name}, arguments='{function.argumentsl}'")
-                            arguments = {}
-
-                        target_file = arguments.get(TARGET_FILE)
-                        if target_file:
-                            log.info(f"gets target file from previous tool call: tool_call.id={tool_call.id}, "
-                                     f"function.name={function.name}, target_file='{target_file}'")
-
     return target_file, invalid
+
+
+def find_target_file_from_prev_tool_call(args, context: UserContext, function_name: str,
+                                         target_file: Any | None) -> Any | None:
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug(
+            f"no required target_file, trying to get from previous cool call of '{function_name}', args='{args}'")
+    else:
+        log.info(f"no required target_file, trying to get from previous cool call of '{function_name}'")
+
+    messages = context.messages
+    for i, message in enumerate(reversed(messages)):
+        if message.role == ROLE_ASSISTANT:
+            for tool_call in message.tool_calls or []:
+                function = tool_call.function
+                if function.name == function_name:
+                    try:
+                        arguments = json.loads(function.arguments)
+                    except JSONDecodeError as e:
+                        log.debug(f"error on function arguments parsing: tool_call.id={tool_call.id}, "
+                                  f"function.name={function.name}, arguments='{function.argumentsl}'")
+                        arguments = {}
+
+                    target_file = arguments.get(TARGET_FILE)
+                    if target_file:
+                        log.info(f"gets target file from previous tool call: tool_call.id={tool_call.id}, "
+                                 f"function.name={function.name}, target_file='{target_file}'")
+    return target_file
 
 
 def fix_list_dir(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
@@ -673,8 +702,13 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
 
 def fix_run_configuration(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, function.name, context)
+    target_file, invalid = get_target_file(args, context)
     configuration_name = args.get("configuration_name")
+
+    target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+    if found:
+        invalid |= found
+
     if target_file and configuration_name:
         line_number, fixed = as_int_or_none(args.get("line_number"), "line_number")
         invalid |= fixed
