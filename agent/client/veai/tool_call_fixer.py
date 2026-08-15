@@ -181,6 +181,12 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
         if allow_multiple_matches is None:
+            allow_multiple_matches = as_bool_or_none(args.get("allowed_multiple_matches"), "allowed_multiple_matches")
+            if not allow_multiple_matches is None:
+                invalid = True
+                del args["allowed_multiple_matches"]
+
+        if allow_multiple_matches is None:
             invalid = True
             allow_multiple_matches = False
         # qwen3.5 case
@@ -653,20 +659,19 @@ def as_int_or_none(val, name: str) -> tuple[int | None, bool]:
 
 
 def as_bool_or_none(val, name: str) -> bool | None:
-    if val:
-        if isinstance(val, bool):
-            return val
-        elif isinstance(val, str):
-            lower = val.lower()
-            if lower == "true":
-                return True
-            else:
-                return False
+    if isinstance(val, bool):
+        return val
+    elif isinstance(val, str):
+        lower = val.lower()
+        if lower == "true":
+            return True
+        else:
+            return False
     return as_type_or_none(bool, val, name)
 
 
 def as_type_or_none[T](t: type[T], val, name: str) -> T | None:
-    if val and not isinstance(val, t):
+    if not val is None and not isinstance(val, t):
         try:
             return t(val)
         except ValueError:

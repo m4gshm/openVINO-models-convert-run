@@ -28,6 +28,8 @@ src_models/ministralai
 src_models/ricdomolm
 src_models/codellama
 src_models/sakmkmk2
+src_models/ornith-ai
+src_models/Fara
 models_cache
 models/Qwen*
 models/Qwable*

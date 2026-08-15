@@ -597,7 +597,6 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
-
     def test_edit_file14_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_14.txt")
@@ -648,6 +647,30 @@ class TestAddFunction(unittest.TestCase):
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'
                                                  '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'}, fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file16_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_16.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    '
+                                                 "testImplementation('org.springframework.boot:spring-boot-starter-test') "
+                                                 '{ \n'
+                                                 "        exclude group: 'org.mockito'\n"
+                                                 '    }',
+                                     'old_text': '    '
+                                                 "implementation('org.springframework.boot:spring-boot-autoconfigure')",
+                                     }],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 

@@ -222,7 +222,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
 
         named_parameters: dict[str, Any] = {}
         for k, v in arguments.items():
-            clean_k = strip(k)
+            clean_k = unquote(strip(k))
             clean_v = unescape(v)
             cast_clean_v = cast_value(clean_v)
             named_parameters[clean_k] = cast_clean_v
