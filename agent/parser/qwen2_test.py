@@ -59,7 +59,7 @@ class Qwen2TestCases(unittest.TestCase):
         self.assertEqual({'edits': expected_edits, 'target_file': 'C:/build.gradle.kts'}, first.arguments)
 
         self.assertEqual("edit_file", fixed.name)
-        self.assertEqual({'allow_multiple_matches': True,
+        self.assertEqual({'allow_multiple_matches': False,
                           'edits': expected_edits, 'target_file': 'C:/build.gradle.kts'},
                          fixed.arguments)
 

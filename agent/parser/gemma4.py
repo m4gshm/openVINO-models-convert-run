@@ -239,7 +239,11 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     return named_parameters, anonymous_parameters, unparsed_tail
 
 
-def try_to_parse(arguments_block: str) -> dict[str, Any]:
+def try_to_parse(arguments_block: str, cycle_detect=0, last_inserted_pos: int | None = None,
+                 last_inserted_sym: str | None = None) -> \
+        dict[str, Any]:
+    if cycle_detect >= 100:
+        raise Exception(f"try_to_parse is cycled on {arguments_block}")
     log.debug(f"trying to parse as json: {arguments_block}")
     possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
     arguments: dict[str, Any] | None = None
@@ -250,29 +254,31 @@ def try_to_parse(arguments_block: str) -> dict[str, Any]:
     except json.decoder.JSONDecodeError as e:
         json_len = len(possible_json_args)
         pos = e.pos
-        sym = possible_json_args[pos] if json_len < pos else None
+        sym = possible_json_args[pos] if pos < json_len else None
         prev_pos = pos - 1
-        prev_sym = possible_json_args[prev_pos] if json_len > 1 else None
+        prev_sym = possible_json_args[prev_pos] if json_len > 1 and prev_pos < json_len else None
         if e.msg == "Expecting ',' delimiter":
             insert_sym = ','
-            if pos == json_len:
+            if pos == last_inserted_pos:
+                if last_inserted_sym == OBJECT_END:
+                    insert_sym = ARRAY_END
+                elif last_inserted_sym == ARRAY_END:
+                    insert_sym = OBJECT_END
+            elif pos == json_len:
                 # end of object of array
-                if prev_sym == "}":
-                    insert_sym = "]"
+                if prev_sym == OBJECT_END:
+                    insert_sym = ARRAY_END
                 else:
-                    insert_sym = "}"
-            else:
-                insert_sym = ','
+                    insert_sym = OBJECT_END
             new_possible_json_args = possible_json_args[:pos] + insert_sym + possible_json_args[pos + 1:]
-            arguments = try_to_parse(new_possible_json_args)
+            arguments = try_to_parse(new_possible_json_args, cycle_detect + 1, pos, insert_sym)
         elif e.msg == "Illegal trailing comma before end of array":
             new_possible_json_args = possible_json_args[:pos] + possible_json_args[pos + 1:]
-            arguments = try_to_parse(new_possible_json_args)
+            arguments = try_to_parse(new_possible_json_args, cycle_detect + 1)
         elif e.msg == "Expecting value":
-
             if sym is None or sym == "]" or sym == "}" and prev_sym == ",":
                 new_possible_json_args = possible_json_args[:prev_pos] + possible_json_args[prev_pos + 1:]
-                arguments = try_to_parse(new_possible_json_args)
+                arguments = try_to_parse(new_possible_json_args, cycle_detect + 1)
             else:
                 arguments = None
         if not arguments:

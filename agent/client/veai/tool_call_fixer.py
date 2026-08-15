@@ -108,6 +108,24 @@ def fix_file_structure(function: ParsedFunctionCall, context: UserContext = User
     return function
 
 
+def clean_file_path(target_file):
+    if not target_file:
+        return target_file
+
+    cleaned_target_file = ""
+    for i, s in enumerate(target_file):
+        ignore = s == "}" or s == "]"
+        if not ignore and (s == "\"" or s == "'"):
+            prev = target_file[i - 1] if i > 0 else None
+            if prev != "\\":
+                ignore = True
+
+        if not ignore:
+            cleaned_target_file += s
+    log.debug(f"clean_file_path: path={target_file}, cleaned={cleaned_target_file}")
+    return cleaned_target_file
+
+
 def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> list[
                                                                                              ParsedFunctionCall] | ParsedFunctionCall:
     args = get_args(function)
@@ -243,7 +261,8 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 log.debug(f"merged edits={edits}")
                 invalid = True
 
-        target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+        target_file, _ = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+        target_file = clean_file_path(target_file)
         if not target_file:
             log.error(f"tool call error: tool={function.name}, target_file is empty but required")
 
