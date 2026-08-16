@@ -29,7 +29,7 @@ src_models/ricdomolm
 src_models/codellama
 src_models/sakmkmk2
 src_models/ornith-ai
-src_models/Fara
+src_models/Fara*
 models_cache
 models/Qwen*
 models/Qwable*
@@ -42,5 +42,5 @@ models/gemma-*
 models/OmniCoder*
 models/Vibe-Coding-Claude-Fable-5*
 models/Mellum*/1
-models/*/1
-
+models/Fara*
+models/Ornith*

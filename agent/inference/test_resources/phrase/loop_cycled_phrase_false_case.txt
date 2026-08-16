@@ -1,0 +1,15 @@
+class DatabaseInitializer {
+    @Autowired
+    MessageStorageImpl messageStorageImpl;
+
+    @Autowired
+    PostgreSQLContainer<?> postgreSQLContainer;
+
+    @Autowired
+    DSLContext dslContext;
+
+    @Autowired
+    InputMessages inputMessages;
+
+    @Autowired
+

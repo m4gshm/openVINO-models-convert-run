@@ -40,8 +40,31 @@ class PhraseTestCase(unittest.TestCase):
                          'second\n'
                          'first\n'
                          'second\n'
+                         'first\n', phrase.full)
+
+    def test_loop_lines_2(self):
+        loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages_2.txt")
+        loop_messages = loop_messages_file.read_text()
+
+        phrase = Phrase()
+        with self.assertRaises(LoopError):
+            for token in loop_messages:
+                phrase.add_token(token)
+
+        self.assertEqual('some normal output\n'
                          'first\n'
-                         'second\n', phrase.full)
+                         'second\n'
+                         'third\n'
+                         'first\n'
+                         'second\n'
+                         'third\n'
+                         'first\n'
+                         'second\n'
+                         'third\n'
+                         'first\n'
+                         'second\n'
+                         'third\n'
+                         'first\n', phrase.full)
 
     def test_loop_line_duplicated(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "looo_line_duplicated.txt")
@@ -52,57 +75,12 @@ class PhraseTestCase(unittest.TestCase):
             for token in loop_messages:
                 phrase.add_token(token)
 
-        self.assertEqual(('some normal output\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'), phrase.full)
+        self.assertEqual('some normal output\n'
+                         'duplicated\n'
+                         'duplicated\n'
+                         'duplicated\n'
+                         'duplicated\n'
+                         'duplicated\n', phrase.full)
 
     def test_loop_in_one_line_false_case(self):
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line_false_case.txt").read_text(
@@ -309,6 +287,14 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual((''), loop_part1)
         self.assertEqual((''), visual_islands)
 
+        pass
+
+    def test_duplicated_cycle_phrase_false_case(self):
+        loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_cycled_phrase_false_case.txt").read_text()
+
+        phrase = Phrase()
+        for token in loop_messages:
+            phrase.add_token(token)
         pass
 
 
