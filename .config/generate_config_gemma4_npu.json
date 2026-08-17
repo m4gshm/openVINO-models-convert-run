@@ -6,6 +6,6 @@
   "repetition_penalty": 1.05,
   "max_tokens": 32768,
   "model_parameters": {
-    "enable_thinking": false
+    "enable_thinking": true
   }
 }
