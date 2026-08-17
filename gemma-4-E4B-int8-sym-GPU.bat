@@ -1,4 +1,4 @@
-call agent.bat --model gemma-4-E4B-it-int4-asym-g128-se-awq ^
+call agent.bat --model gemma-4-E4B-it-int8-sym ^
  --device GPU ^
  --pipe VLM ^
  --attention_backend PA ^
