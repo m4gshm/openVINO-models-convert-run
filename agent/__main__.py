@@ -154,7 +154,7 @@ def main():
                              default=YesNo.NO, choices=list(YesNo), help="%(default)s")
 
     args_parser.add_argument("--gpu_enable_large_allocations", type=lambda c: YesNo[c], required=False,
-                             default=YesNo.NO, choices=list(YesNo), help="%(default)s")
+                             default=YesNo.YES, choices=list(YesNo), help="%(default)s")
     args_parser.add_argument("--gpu_priorities", type=lambda c: Level[c], required=False,
                              default=Level.HIGH, choices=list(Level), help="%(default)s")
 

@@ -5,6 +5,6 @@
   "min_p": 0.05,
   "repetition_penalty": 1.05,
   "model_parameters": {
-    "enable_thinking": true
+    "enable_thinking": false
   }
 }
