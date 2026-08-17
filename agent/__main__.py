@@ -73,6 +73,11 @@ class YesNo(Enum):
     NO = 'NO'
 
 
+class Level(Enum):
+    HIGH = 'HIGH'
+    MEDIUM = 'MEDIUM'
+
+
 class NpuGenerateHint(Enum):
     BEST_PERF = 'BEST_PERF'
     FAST_COMPILE = 'FAST_COMPILE'
@@ -147,6 +152,11 @@ def main():
                              default=PrefillHint.DYNAMIC, choices=list(PrefillHint), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=lambda c: YesNo[c], required=False,
                              default=YesNo.NO, choices=list(YesNo), help="%(default)s")
+
+    args_parser.add_argument("--gpu_enable_large_allocations", type=lambda c: YesNo[c], required=False,
+                             default=YesNo.NO, choices=list(YesNo), help="%(default)s")
+    args_parser.add_argument("--gpu_priorities", type=lambda c: Level[c], required=False,
+                             default=Level.HIGH, choices=list(Level), help="%(default)s")
 
     args = args_parser.parse_args()
 
@@ -336,15 +346,20 @@ def main():
     npu_generate_hint: NpuGenerateHint = args.npu_generate_hint
     performance_hint: PerformanceHint = args.performance_hint
 
+    gpu_enable_large_allocations: YesNo = args.gpu_enable_large_allocations
+    gpu_priorities: Level = args.gpu_priorities
     gpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": performance_hint.value,
         "ENABLE_MMAP": "YES",
-        # "PERF_COUNT": "YES",
 
-        # "LOG_LEVEL": "LOG_WARNING",
-        # "KEY_CACHE_QUANT_MODE": "BY_CHANNEL",
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
+
+        "GPU_ENABLE_LARGE_ALLOCATIONS": gpu_enable_large_allocations.value,
+        "GPU_QUEUE_THROTTLE": gpu_priorities.value,
+        "MODEL_PRIORITY": gpu_priorities.value,
+        "GPU_HOST_TASK_PRIORITY": gpu_priorities.value,
+        "GPU_QUEUE_PRIORITY": gpu_priorities.value,
     }
 
     npu_prefill_hint: PrefillHint = args.npu_prefill_hint
