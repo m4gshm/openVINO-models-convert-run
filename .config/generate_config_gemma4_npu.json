@@ -4,5 +4,8 @@
   "top_k": 64,
   "min_p": 0.05,
   "repetition_penalty": 1.05,
-  "max_tokens": 32768
+  "max_tokens": 32768,
+  "model_parameters": {
+    "enable_thinking": false
+  }
 }
