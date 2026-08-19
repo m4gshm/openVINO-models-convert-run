@@ -354,6 +354,7 @@ def main():
         "ENABLE_MMAP": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
+        "PERFORMANCE_HINT_NUM_REQUESTS": 1,
 
         "GPU_ENABLE_LARGE_ALLOCATIONS": gpu_enable_large_allocations.value,
         "GPU_QUEUE_THROTTLE": gpu_priorities.value,
