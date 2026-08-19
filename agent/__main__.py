@@ -161,7 +161,7 @@ def main():
     args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
                              default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
-                             default=YesNo.NO, choices=enum_values(YesNo), help="%(default)s")
+                             default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
 
     args_parser.add_argument("--gpu_enable_large_allocations", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
@@ -266,7 +266,7 @@ def main():
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
         max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
-    device = args.device
+    device: DeviceType = DeviceType[args.device]
     is_device_npu = device == DeviceType.NPU
     if not max_prompt_len:
         max_prompt_len = max_position_embeddings
@@ -429,7 +429,7 @@ def main():
         app = init_sequential_engine(model_name=model_name,
                                      model_path=str(model_path),
                                      model_architectures=model_architectures,
-                                     device=device,
+                                     device=device.value,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
                                      generate_config=generate_opts,
@@ -442,7 +442,7 @@ def main():
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
                                               model_architectures=model_architectures,
-                                              device=device,
+                                              device=device.value,
                                               parser=model_parser,
                                               generate_config=generate_opts,
                                               handler_config=handler_config,

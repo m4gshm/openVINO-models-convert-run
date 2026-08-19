@@ -1,4 +1,4 @@
-call agent.bat --model gemma-4-E2B-it-int4-sym-g128-se-awq ^
+call agent.bat --model gemma-4-E4B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq ^
  --device NPU ^
  --npu_compiler_type PLUGIN ^
  --max_prompt_len 32768 ^
