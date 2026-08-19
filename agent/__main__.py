@@ -8,6 +8,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig
@@ -47,7 +48,7 @@ class ParserType(Enum):
     gemma4 = 'gemma4'
 
 
-class CachePrecision(Enum):
+class KvCachePrecision(Enum):
     u8 = 'u8'
     u4 = 'u4'
     f16 = 'f16'
@@ -113,6 +114,13 @@ signal.signal(signal.SIGINT, handle_exit_signal)
 signal.signal(signal.SIGTERM, handle_exit_signal)
 
 
+def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
+    return [member.value for member in enum_class]
+
+def enum_value[T: Enum](member: T) -> Any:
+    return member.value
+
+
 def main():
     args_parser = argparse.ArgumentParser()
     args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
@@ -120,43 +128,45 @@ def main():
     args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
-    args_parser.add_argument("--device", type=lambda c: DeviceType[c], required=False,
-                             default=DeviceType.GPU, choices=list(DeviceType), help="%(default)s")
-    args_parser.add_argument("--performance_hint", type=lambda c: PerformanceHint[c], required=False,
-                             default=PerformanceHint.LATENCY, choices=list(PerformanceHint), help="%(default)s")
-    args_parser.add_argument("--parser", type=lambda c: ParserType[c], required=False,
-                             default=None, choices=list(ParserType), help="%(default)s")
-    args_parser.add_argument("--pipe", type=lambda c: Pipe[c], required=False,
-                             default=None, choices=list(Pipe), help="%(default)s")
-    args_parser.add_argument("--attention_backend", type=lambda c: AttentionBackend[c], required=False,
-                             default=None, choices=list(AttentionBackend), help="%(default)s")
+    args_parser.add_argument("--device", type=str, required=False,
+                             default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
+    args_parser.add_argument("--performance_hint", type=str, required=False,
+                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint), help="%(default)s")
+    args_parser.add_argument("--parser", type=str, required=False,
+                             default=None, choices=enum_values(ParserType), help="%(default)s")
+    args_parser.add_argument("--pipe", type=str, required=False,
+                             default=None, choices=enum_values(Pipe), help="%(default)s")
+    args_parser.add_argument("--attention_backend", type=str, required=False,
+                             default=None, choices=enum_values(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
     # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
-    args_parser.add_argument("--cache_precision", type=lambda c: CachePrecision[c], required=False,
-                             default=None, choices=list(CachePrecision), help="%(default)s")
+    args_parser.add_argument("--kv_cache_precision", type=str, required=False,
+                             default=None, choices=enum_values(KvCachePrecision), help="%(default)s")
 
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
-    args_parser.add_argument("--fix_tool_type", type=lambda c: Turn[c], required=False,
-                             default=None, choices=list(Turn), help="%(default)s")
+    args_parser.add_argument("--fix_tool_type", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
                              help="%(default)s")
     args_parser.add_argument("--scheduler_config_file", type=str, required=False,
                              default=".config/scheduler_config_file.json",
                              help="%(default)s")
-    args_parser.add_argument("--npu_compiler_type", type=lambda c: NpuCompilerType[c], required=False,
-                             default=NpuCompilerType.DRIVER, choices=list(NpuCompilerType), help="%(default)s")
-    args_parser.add_argument("--npu_generate_hint", type=lambda c: NpuGenerateHint[c], required=False,
-                             default=NpuGenerateHint.FAST_COMPILE, choices=list(NpuGenerateHint), help="%(default)s")
-    args_parser.add_argument("--npu_prefill_hint", type=lambda c: PrefillHint[c], required=False,
-                             default=PrefillHint.DYNAMIC, choices=list(PrefillHint), help="%(default)s")
-    args_parser.add_argument("--npu_turbo", type=lambda c: YesNo[c], required=False,
-                             default=YesNo.NO, choices=list(YesNo), help="%(default)s")
+    args_parser.add_argument("--npu_compiler_type", type=str, required=False,
+                             default=enum_value(NpuCompilerType.DRIVER), choices=enum_values(NpuCompilerType),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_generate_hint", type=str, required=False,
+                             default=enum_value(NpuGenerateHint.FAST_COMPILE), choices=enum_values(NpuGenerateHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
+                             default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint), help="%(default)s")
+    args_parser.add_argument("--npu_turbo", type=str, required=False,
+                             default=YesNo.NO, choices=enum_values(YesNo), help="%(default)s")
 
-    args_parser.add_argument("--gpu_enable_large_allocations", type=lambda c: YesNo[c], required=False,
-                             default=YesNo.YES, choices=list(YesNo), help="%(default)s")
-    args_parser.add_argument("--gpu_priorities", type=lambda c: Level[c], required=False,
-                             default=Level.HIGH, choices=list(Level), help="%(default)s")
+    args_parser.add_argument("--gpu_enable_large_allocations", type=str, required=False,
+                             default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
+    args_parser.add_argument("--gpu_priorities", type=str, required=False,
+                             default=enum_value(Level.HIGH), choices=enum_values(Level), help="%(default)s")
 
     args = args_parser.parse_args()
 
@@ -256,7 +266,7 @@ def main():
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
         max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
-    device: DeviceType = args.device
+    device = args.device
     is_device_npu = device == DeviceType.NPU
     if not max_prompt_len:
         max_prompt_len = max_position_embeddings
@@ -301,8 +311,8 @@ def main():
     tokenizer_properties = {
     }
 
-    pipe: Pipe = args.pipe
-    parser_type: ParserType = args.parser
+    pipe: Pipe = Pipe[args.pipe] if args.pipe else None
+    parser_type = args.parser
     if not parser_type:
         is_qwen3_5 = any("qwen3_5" in model_arch.lower() for model_arch in model_architectures)
         is_qwen3moe = any("qwen3moe" in model_arch.lower() for model_arch in model_architectures)
@@ -343,45 +353,45 @@ def main():
         f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
-    npu_generate_hint: NpuGenerateHint = args.npu_generate_hint
-    performance_hint: PerformanceHint = args.performance_hint
+    npu_generate_hint = args.npu_generate_hint
+    performance_hint = args.performance_hint
 
-    gpu_enable_large_allocations: YesNo = args.gpu_enable_large_allocations
-    gpu_priorities: Level = args.gpu_priorities
+    gpu_enable_large_allocations = args.gpu_enable_large_allocations
+    gpu_priorities = args.gpu_priorities
     gpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": performance_hint.value,
+        "PERFORMANCE_HINT": performance_hint,
         "ENABLE_MMAP": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
         "PERFORMANCE_HINT_NUM_REQUESTS": 1,
 
-        "GPU_ENABLE_LARGE_ALLOCATIONS": gpu_enable_large_allocations.value,
-        "GPU_QUEUE_THROTTLE": gpu_priorities.value,
-        "MODEL_PRIORITY": gpu_priorities.value,
-        "GPU_HOST_TASK_PRIORITY": gpu_priorities.value,
-        "GPU_QUEUE_PRIORITY": gpu_priorities.value,
+        "GPU_ENABLE_LARGE_ALLOCATIONS": gpu_enable_large_allocations,
+        "GPU_QUEUE_THROTTLE": gpu_priorities,
+        "MODEL_PRIORITY": gpu_priorities,
+        "GPU_HOST_TASK_PRIORITY": gpu_priorities,
+        "GPU_QUEUE_PRIORITY": gpu_priorities,
     }
 
-    npu_prefill_hint: PrefillHint = args.npu_prefill_hint
-    npu_turbo: YesNo = args.npu_turbo
-    npu_compiler_type: NpuCompilerType = args.npu_compiler_type
+    npu_prefill_hint = args.npu_prefill_hint
+    npu_turbo = args.npu_turbo
+    npu_compiler_type = args.npu_compiler_type
 
     npu_pipeline_properties: dict[str, str | int] = {
         "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": performance_hint.value,
+        "PERFORMANCE_HINT": performance_hint,
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
-        "NPU_COMPILER_TYPE": npu_compiler_type.value,
+        "NPU_COMPILER_TYPE": npu_compiler_type,
         "NPU_USE_NPUW": "YES",
         "NPUW_LLM": "YES",
         # "NPUW_DEVICES": "NPU,CPU",
-        "NPU_TURBO": npu_turbo.value,
-        "NPUW_LLM_GENERATE_HINT": npu_generate_hint.value,
-        "NPUW_LLM_PREFILL_HINT": npu_prefill_hint.value,
+        "NPU_TURBO": npu_turbo,
+        "NPUW_LLM_GENERATE_HINT": npu_generate_hint,
+        "NPUW_LLM_PREFILL_HINT": npu_prefill_hint,
         "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
         "NPUW_LLM_GENERATE_PYRAMID": "YES",
         "NPUW_PARALLEL_COMPILE": "YES",
@@ -407,19 +417,19 @@ def main():
         log.error(f"model path is not existed: {model_path}")
 
     pipeline_properties = npu_pipeline_properties if is_device_npu else gpu_pipeline_properties
-    cache_precision: CachePrecision = args.cache_precision
-    if cache_precision:
-        pipeline_properties["KV_CACHE_PRECISION"] = cache_precision.value
+    kv_cache_precision = args.kv_cache_precision
+    if kv_cache_precision:
+        pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
 
-    attention_backend: AttentionBackend = args.attention_backend
+    attention_backend = args.attention_backend
     if attention_backend:
-        pipeline_properties["ATTENTION_BACKEND"] = attention_backend.value
+        pipeline_properties["ATTENTION_BACKEND"] = attention_backend
 
     if is_device_npu or pipe != Pipe.CB:
         app = init_sequential_engine(model_name=model_name,
                                      model_path=str(model_path),
                                      model_architectures=model_architectures,
-                                     device=device.value,
+                                     device=device,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
                                      generate_config=generate_opts,
@@ -432,7 +442,7 @@ def main():
         app = init_continuous_batching_engine(model=model_name,
                                               model_path=str(model_path),
                                               model_architectures=model_architectures,
-                                              device=device.value,
+                                              device=device,
                                               parser=model_parser,
                                               generate_config=generate_opts,
                                               handler_config=handler_config,
