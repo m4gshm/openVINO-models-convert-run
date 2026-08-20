@@ -7,6 +7,7 @@ import json_repair
 
 from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
+from agent.parser.gemma4 import try_to_parse_json
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
 log = logging.getLogger(__name__)
@@ -51,30 +52,34 @@ def get_arguments(arguments_block: str) -> tuple[
             param_name_norm: str = param_name.strip()
             param_tail_norm: str = param_tail.strip()
 
-            full_parameter = param_tail_norm.endswith(PARAMETER_END)
+            parameter_end_i = param_tail_norm.find(PARAMETER_END)
+            full_parameter = param_tail_norm[:parameter_end_i] if parameter_end_i >= 0 else None
             if full_parameter:
-                param_tail_norm = param_tail_norm[:-len(PARAMETER_END)]
+                next_param_i = parameter_end_i + len(PARAMETER_END)
+                next_tail = param_tail_norm[next_param_i:]
+                param_tail_norm = next_tail
+                param_value_norm = full_parameter.strip()
             else:
                 partial = True
-
-            param_value_norm = param_tail_norm.strip()
+                param_value_norm = param_tail_norm.strip()
 
             is_like_json = param_value_norm.startswith("[") or param_value_norm.startswith("{")
             if is_like_json:
-                try:
-                    result_parameter = json.loads(param_value_norm)
-                except json.decoder.JSONDecodeError as e:
-                    log.debug(
-                        f"function parameter parsing error, parameter='{param_name}', value='{param_value_norm}', "
-                        f"type '{type(param_value_norm)}': {e}")
-                    try:
-                        result_parameter = json_repair.loads(param_value_norm)
-                        log.debug(f"repaired parameter value '{result_parameter}'")
-                    except Exception as e:
-                        log.debug(
-                            f"fail to repaired parameter value, parameter='{param_name}', value='{param_value_norm}', "
-                            f"type '{type(param_value_norm)}': {e}")
-                        result_parameter = param_value_norm
+                result_parameter, _ = try_to_parse_json(param_value_norm)
+                # try:
+                #     result_parameter = json.loads(param_value_norm)
+                # except json.decoder.JSONDecodeError as e:
+                #     log.debug(
+                #         f"function parameter parsing error, parameter='{param_name}', value='{param_value_norm}', "
+                #         f"type '{type(param_value_norm)}': {e}")
+                #     try:
+                #         result_parameter = json_repair.loads(param_value_norm)
+                #         log.debug(f"repaired parameter value '{result_parameter}'")
+                #     except Exception as e:
+                #         log.debug(
+                #             f"fail to repaired parameter value, parameter='{param_name}', value='{param_value_norm}', "
+                #             f"type '{type(param_value_norm)}': {e}")
+                #         result_parameter = param_value_norm
                 arguments[param_name_norm] = result_parameter
             else:
                 arguments[param_name_norm] = param_value_norm

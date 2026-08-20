@@ -23,7 +23,6 @@ optimum-cli export openvino ^
 
 pause
 
-@REM Statistics collection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 32/32 • 0:07:19 • 0:00:00
 @REM INFO:nncf:Statistics of the bitwidth distribution:
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |

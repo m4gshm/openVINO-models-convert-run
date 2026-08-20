@@ -1,7 +1,6 @@
 call agent-dev.bat --model gemma-4-E4B-it-qat-q4_0-unquantized-int4-sym-g128 ^
  --device NPU ^
  --max_prompt_len 32768 ^
- --cache_precision u4 ^
  --npu_generate_hint BEST_PERF ^
  --npu_compiler_type PLUGIN ^
  --attention_backend PA ^

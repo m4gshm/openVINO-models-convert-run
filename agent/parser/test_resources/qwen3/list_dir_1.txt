@@ -1,0 +1,12 @@
+<tool_call>
+<function=list_dir>
+<parameter=directory_path>
+java/idempotent-consumer-jdbc/src/test/resources
+</parameter>
+<parameter=depth>
+5
+</parameter>
+</file_structure
+</parameter>
+</function>
+</tool_call>

@@ -1,9 +1,12 @@
 import unittest
 from importlib.resources import files
 
+from agent.client.user_context import UserContext
+from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file
 from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
+USER_CONTEXT = UserContext()
 TEST_RESOURCES = "test_resources"
 
 parser = Qwen3MoeParser()
@@ -94,7 +97,7 @@ Target.py
 
     def test_partial_tool_call(self):
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
@@ -103,13 +106,83 @@ Target.py
 
     def test_search_file_by_name(self):
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_file_by_name.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_text = tool_cal_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_file_by_name", first.name)
         self.assertEqual({'glob_pattern': 'Properties.*',
                           'search_directory': 'consumer/config'},
                          first.arguments)
+        self.assertFalse(partial)
+
+    def test_list_dir(self):
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/list_dir_1.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_list_dir(first, USER_CONTEXT)
+        self.assertEqual("list_dir", fixed.name)
+        self.assertEqual({'depth': '5',
+                          'directory_path': 'java/idempotent-consumer-jdbc/src/test/resources'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file(self):
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/edit_file_1.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_edit_file(first, USER_CONTEXT)
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': 'dependencies {\r\n'
+                                                 '    api(project(":idempotent-consumer"))\r\n'
+                                                 '    api(project(":storage-api-reactive"))\r\n'
+                                                 '    api(project(":postgres-jdbc"))\r\n'
+                                                 '\r\n'
+                                                 '    '
+                                                 'implementation("io.projectreactor:reactor-core")\r\n'
+                                                 '\r\n'
+                                                 '    implementation("org.postgresql:postgresql")\r\n'
+                                                 '\r\n'
+                                                 '    '
+                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                                 '    '
+                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                                 '\r\n'
+                                                 '    implementation("org.jooq:jooq")\r\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\r\n'
+                                                 '\r\n'
+                                                 '    // Test containers for integration tests\r\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:testcontainers")\r\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\r\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\r\n'
+                                                 '}',
+                                     'old_text': 'dependencies {\r\n'
+                                                 '    api(project(":idempotent-consumer"))\r\n'
+                                                 '    api(project(":storage-api-reactive"))\r\n'
+                                                 '    api(project(":postgres-jdbc"))\r\n'
+                                                 '\r\n'
+                                                 '    '
+                                                 'implementation("io.projectreactor:reactor-core")\r\n'
+                                                 '\r\n'
+                                                 '    implementation("org.postgresql:postgresql")\r\n'
+                                                 '\r\n'
+                                                 '    '
+                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                                 '    '
+                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                                 '\r\n'
+                                                 '    implementation("org.jooq:jooq")\r\n'
+                                                 '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\r\n'
+                                                 '}'}],
+                          'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
         self.assertFalse(partial)
 
 

@@ -82,7 +82,8 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     if possible_json:
         if object_expect and arguments_block[-1] == OBJECT_END:
             arguments_block = arguments_block[:-1]
-        arguments, _ = try_to_parse(arguments_block)
+        possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
+        arguments, _ = try_to_parse_json(possible_json_args)
 
         named_parameters: dict[str, Any] = {}
         if arguments:
@@ -248,26 +249,25 @@ def error_on_duplicates(ordered_pairs):
             result[key] = value
     return result
 
-def try_to_parse(arguments_block: str, cycle_detect=0, last_inserted_pos: int | None = None,
-                 last_inserted_sym: str | None = None, last_replaced_sym: str | None = None) -> tuple[
-    dict[str, Any], bool]:
+def try_to_parse_json(arguments_block: str, cycle_detect=0, last_inserted_pos: int | None = None,
+                      last_inserted_sym: str | None = None, last_replaced_sym: str | None = None) -> tuple[
+    Any, bool]:
     repeat = False
     if cycle_detect >= 1000:
         raise Exception(f"try_to_parse is cycled on {arguments_block}")
     log.debug(f"trying to parse as json: {arguments_block}")
-    possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
-    arguments: dict[str, Any] | None = None
+    arguments: Any | None = None
     try:
-        arguments = json.loads(possible_json_args, object_pairs_hook=error_on_duplicates)
+        arguments = json.loads(arguments_block, object_pairs_hook=error_on_duplicates)
         pass
         if not isinstance(arguments, dict):
             log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
     except json.decoder.JSONDecodeError as e:
-        json_len = len(possible_json_args)
+        json_len = len(arguments_block)
         pos = e.pos
-        sym = possible_json_args[pos] if pos < json_len else None
+        sym = arguments_block[pos] if pos < json_len else None
         prev_pos = pos - 1
-        prev_sym = possible_json_args[prev_pos] if json_len > 1 and prev_pos < json_len else None
+        prev_sym = arguments_block[prev_pos] if json_len > 1 and prev_pos < json_len else None
         msg = e.msg
         if msg == "Expecting ',' delimiter":
             insert_sym = ','
@@ -282,22 +282,22 @@ def try_to_parse(arguments_block: str, cycle_detect=0, last_inserted_pos: int | 
                     insert_sym = ARRAY_END
                 else:
                     insert_sym = OBJECT_END
-            new_possible_json_args = possible_json_args[:pos] + insert_sym + possible_json_args[pos + 1:]
-            arguments, repeat = try_to_parse(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
+            new_possible_json_args = arguments_block[:pos] + insert_sym + arguments_block[pos + 1:]
+            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
             if repeat == True and sym == "\\":
                 # try to escape
-                prefix = possible_json_args[:prev_pos] + "\\" + prev_sym
-                new_possible_json_args = prefix + possible_json_args[prev_pos + 1:]
-                arguments, repeat = try_to_parse(new_possible_json_args, cycle_detect + 1)
+                prefix = arguments_block[:prev_pos] + "\\" + prev_sym
+                new_possible_json_args = prefix + arguments_block[prev_pos + 1:]
+                arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
                 pass
         elif msg == "Illegal trailing comma before end of array":
-            new_possible_json_args = possible_json_args[:pos] + possible_json_args[pos + 1:]
-            arguments, repeat = try_to_parse(new_possible_json_args, cycle_detect + 1)
+            new_possible_json_args = arguments_block[:pos] + arguments_block[pos + 1:]
+            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
             pass
         elif msg == "Expecting value":
             if sym is None or sym == "]" or sym == "}" and prev_sym == ",":
-                new_possible_json_args = possible_json_args[:prev_pos] + possible_json_args[prev_pos + 1:]
-                arguments, repeat = try_to_parse(new_possible_json_args, cycle_detect + 1)
+                new_possible_json_args = arguments_block[:prev_pos] + arguments_block[prev_pos + 1:]
+                arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
             else:
                 arguments = None
         elif msg == "Expecting property name enclosed in double quotes":
@@ -307,14 +307,14 @@ def try_to_parse(arguments_block: str, cycle_detect=0, last_inserted_pos: int | 
                 pass
         elif msg == "Invalid control character at":
             insert_sym = escape(sym)
-            new_possible_json_args = possible_json_args[:pos] + insert_sym + possible_json_args[pos + 1:]
-            arguments, repeat = try_to_parse(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
+            new_possible_json_args = arguments_block[:pos] + insert_sym + arguments_block[pos + 1:]
+            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
             pass
         else:
             pass
         if not arguments:
             try:
-                arguments = json_repair.loads(possible_json_args)
+                arguments = json_repair.loads(arguments_block)
                 if not isinstance(arguments, dict):
                     log.error(f"unexpected type of repaired args '{type(arguments)}', arguments='{arguments}'")
             except Exception as e:
