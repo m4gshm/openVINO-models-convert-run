@@ -1,13 +1,10 @@
-import json
+import logging
 import logging
 import re
-from typing import Any, Callable
+from typing import Any
 
-import json_repair
-
-from agent.openai.chat_api import ROLE_ASSISTANT
-from agent.parser import ParserState, StateEvent, ParsedFunctionCall, fill_state_by_prompt_tail
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
+from agent.parser import fill_state_by_prompt_tail
 from agent.parser.gemma4 import try_to_parse_json
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
@@ -100,6 +97,7 @@ def parse_function_call(function_block: str, partial: bool) -> tuple[ParsedFunct
     else:
         parsed_function_call = None
     return parsed_function_call, partial
+
 
 class Qwen3MoeParser(QwenBaseParser):
     def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
