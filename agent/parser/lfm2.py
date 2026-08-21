@@ -33,15 +33,15 @@ class Lfm2Parser(Parser):
         parsed_calls: list[ParsedFunctionCall] = []
         partial = False
         for call_block in tool_call_blocks:
-            if len(call_block) == 0:
-                continue
-
             call_block_rstrip = call_block.rstrip()
             if call_block_rstrip.endswith(TOOL_CALL_END):
                 call_block = call_block_rstrip[:-len(TOOL_CALL_END)]
 
             call_block = call_block.lstrip()
             function_block = call_block
+
+            if len(function_block) == 0:
+                continue
 
             parsed_function_call = parse_function_call(function_block)
 
@@ -54,7 +54,11 @@ def parse_function_call(function_block: str) -> ParsedFunctionCall:
     clean_function_block = function_block.strip("[]")
 
     # Парсим строку в абстрактное синтаксическое дерево
-    tree = ast.parse(clean_function_block, mode="eval")
+    try:
+        tree = ast.parse(clean_function_block, mode="eval")
+    except Exception as e:
+        log.error(f"parsing error {e}")
+        tree = ast.parse(clean_function_block, mode="eval")
 
     body = tree.body
     if not isinstance(body, ast.Call):
