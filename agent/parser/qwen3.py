@@ -1,11 +1,12 @@
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 import json_repair
 
 from agent.openai.chat_api import ROLE_ASSISTANT
+from agent.parser import ParserState, StateEvent, ParsedFunctionCall, fill_state_by_prompt_tail
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser.gemma4 import try_to_parse_json
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
@@ -20,9 +21,6 @@ EXPECTED_PARAMETERS_PROPERTIES = "properties"
 FUNCTION_START_PREF = "<function"
 FUNCTION_START = FUNCTION_START_PREF + OPEN_TAG_SUF
 FUNCTION_END = CLOSE_TAG_PREF + "function>"
-
-THINK_START = "<think>"
-IM_START = "<|im_start|>"
 
 
 def parse_name(parameters_block) -> tuple[str | None, str | None]:
@@ -103,7 +101,6 @@ def parse_function_call(function_block: str, partial: bool) -> tuple[ParsedFunct
         parsed_function_call = None
     return parsed_function_call, partial
 
-
 class Qwen3MoeParser(QwenBaseParser):
     def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
         if not prompt:
@@ -111,46 +108,8 @@ class Qwen3MoeParser(QwenBaseParser):
             if init_chat_events:
                 state.start_event(StateEvent.THINK)
         else:
-            prompt = prompt.rstrip()
-            tail_size = 200
-            tail = prompt[-tail_size:] if len(prompt) > tail_size else prompt
-            tail_lines = tail.rstrip().splitlines()
             state = self._new_state()
-            if init_chat_events:
-                is_think = None
-                is_conversation = None
-                role = ""
-
-                for i, line in enumerate(reversed(tail_lines)):
-                    line = line.strip()
-                    if line.endswith(THINK_START):
-                        is_think = i
-                        log.debug(f"state init is_think: {is_think}")
-                    elif line.startswith(IM_START):
-                        is_conversation = i
-                        log.debug(f"state init is_conversation: {is_conversation}")
-                        prompt_role = line[len(IM_START):].strip()
-                        is_assistant = self.is_assistant(prompt_role)
-                        if is_assistant:
-                            role = ROLE_ASSISTANT
-                            log.debug(f"state init role: {role}")
-                            break
-                prefill_i = None
-                if not is_conversation is None:
-                    state.start_event(StateEvent.CONVERSATION)
-                    prefill_i = (len(tail_lines) - 1 - is_conversation)
-                if not is_think is None:
-                    state.start_event(StateEvent.THINK)
-                    prefill_i = (len(tail_lines) - 1 - is_think)
-                state.role = role
-
-                if not prefill_i is None:
-                    prefill_i += 1
-                    if prefill_i < len(tail_lines):
-                        out_tokens = tail_lines[prefill_i:]
-                        out_tokens.append("\n")
-                        state.prefill_tokens = out_tokens
-
+            fill_state_by_prompt_tail(init_chat_events, prompt, state, self.is_assistant)
         return state
 
     def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:

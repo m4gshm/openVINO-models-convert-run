@@ -191,9 +191,12 @@ class BaseController(ABC):
             extra_context = model_parameters
 
         chat_history = new_chat_history(messages, tools_raw)
-        log.debug(f"chat history: messages={len(chat_history.get_messages())}, tools={len(chat_history.get_tools())}, "
+        history_get_messages = chat_history.get_messages()
+        log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
                   f"extra_context={extra_context}")
+
         full_prompt = tokenizer.apply_chat_template(history=chat_history,
+                                                    tools=tools_raw,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,
                                                     chat_template=self.chat_template)
@@ -344,10 +347,9 @@ def is_disconnected(request: Request) -> bool:
 def new_chat_history(messages: list[ChatCompletionMessageParam],
                      tools_raw: list[dict[str, Any]] | None = None) -> ChatHistory:
     chat_history = ChatHistory()
-    history_messages = []
     for message in messages:
-        history_messages.append(message.model_dump())
-    chat_history.set_messages(history_messages)
+        model_dump = message.model_dump()
+        chat_history.append(model_dump)
     if tools_raw:
         chat_history.set_tools(tools_raw)
     return chat_history

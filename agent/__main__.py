@@ -16,6 +16,7 @@ from pydantic.json import pydantic_encoder
 
 from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
 from agent.parser import Parser
+from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.server import init_continuous_batching_engine, init_sequential_engine
 from .common.log import logging_config
@@ -46,6 +47,7 @@ class ParserType(Enum):
     qwen2 = 'qwen2'
     qwen3moe = 'qwen3moe'
     gemma4 = 'gemma4'
+    lfm2 = 'lfm2'
 
 
 class KvCachePrecision(Enum):
@@ -117,6 +119,7 @@ signal.signal(signal.SIGTERM, handle_exit_signal)
 def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
     return [member.value for member in enum_class]
 
+
 def enum_value[T: Enum](member: T) -> Any:
     return member.value
 
@@ -131,7 +134,8 @@ def main():
     args_parser.add_argument("--device", type=str, required=False,
                              default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
     args_parser.add_argument("--performance_hint", type=str, required=False,
-                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint), help="%(default)s")
+                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint),
+                             help="%(default)s")
     args_parser.add_argument("--parser", type=str, required=False,
                              default=None, choices=enum_values(ParserType), help="%(default)s")
     args_parser.add_argument("--pipe", type=str, required=False,
@@ -159,7 +163,8 @@ def main():
                              default=enum_value(NpuGenerateHint.FAST_COMPILE), choices=enum_values(NpuGenerateHint),
                              help="%(default)s")
     args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
-                             default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint), help="%(default)s")
+                             default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint),
+                             help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
                              default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
 
@@ -319,6 +324,7 @@ def main():
         is_qwen3 = any("qwen3" in model_arch.lower() for model_arch in model_architectures)
         is_qwen2 = any("qwen2" in model_arch.lower() for model_arch in model_architectures)
         is_gemma4 = any("gemma4" in model_arch.lower() for model_arch in model_architectures)
+        is_lfm = any("lfm2" in model_arch.lower() for model_arch in model_architectures)
         if is_gemma4:
             pipe = or_default_pipe(pipe, Pipe.VLM)
             parser_type = ParserType.gemma4
@@ -331,22 +337,24 @@ def main():
         elif is_qwen3 or is_qwen2:
             parser_type = ParserType.qwen2
             pipe = or_default_pipe(pipe, Pipe.LLM)
+        elif is_lfm or is_qwen2:
+            parser_type = ParserType.lfm2
+            pipe = or_default_pipe(pipe, Pipe.LLM)
 
     if not pipe:
         log.error(f"need define --pipe for model architectures={model_architectures}")
         sys.exit(1)
 
-    if args.fix_tool_type == Turn.on:
-        is_fix_tool_type = True
-    elif args.fix_tool_type == Turn.off:
+    if args.fix_tool_type == Turn.off:
         is_fix_tool_type = False
     else:
-        is_fix_tool_type = parser_type == ParserType.gemma4 and len(chat_template) == 0
+        is_fix_tool_type = True  # parser_type == ParserType.gemma4
 
     model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
-                Parser()
+                Lfm2Parser() if parser_type == ParserType.lfm2 else \
+                    Parser()
 
     log.info(
         f"model: path='{model_path}', architectures={model_architectures}, pipe={pipe}, parser='{parser_type}', "

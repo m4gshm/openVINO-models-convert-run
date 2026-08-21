@@ -1,5 +1,6 @@
-set MODEL_NAME=Qwen3-Coder-Next
-set MODEL_DEVELOPER=Qwen
+@REM transformers==5.7.0
+set MODEL_NAME=LFM2.5-8B-A1B
+set MODEL_DEVELOPER=LiquidAI
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
@@ -12,10 +13,12 @@ optimum-cli export openvino ^
   --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
   --backup-precision int8_sym ^
-  --sym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
+  --dataset c4-new ^
+  --sym ^
+  --scale-estimation ^
+  --awq ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-se-awq
 
 pause
-

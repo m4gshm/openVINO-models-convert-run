@@ -1,4 +1,4 @@
-call agent-dev.bat --model gemma-4-E4B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq ^
+call agent-dev.bat --model gemma-4-E2B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq ^
  --device NPU ^
  --npu_generate_hint BEST_PERF ^
  --npu_compiler_type PLUGIN ^

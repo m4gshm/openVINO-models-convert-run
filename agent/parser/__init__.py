@@ -1,7 +1,7 @@
 import json
 import logging
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from pydantic import BaseModel
@@ -9,9 +9,12 @@ from pydantic import BaseModel
 from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import FunctionDefinition
 
-# from agent.openai.chat_completions_api import FunctionDefinition
-
 log = logging.getLogger(__name__)
+
+THINK_START = "<think>"
+THINK_END = "</think>"
+IM_START = "<|im_start|>"
+IM_END = "<|im_end|>"
 
 
 class StateEvent(Enum):
@@ -70,7 +73,7 @@ def _is_conversation_start(tag: str, token: str) -> tuple[bool, str]:
 class ParsedFunctionCall(BaseModel):
     name: str
     arguments: dict[str, Any]
-    anonymous_arguments: list[str] = []
+    anonymous_arguments: list[Any] = []
 
     def to_openai_function_call(self) -> ChoiceDeltaToolCallFunction:
         return ChoiceDeltaToolCallFunction(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
@@ -97,16 +100,16 @@ class Parser[State: ParserState]():
         return False
 
     def is_think_end(self, state: State, token: str) -> bool:
-        return False
+        return token.strip() == THINK_END
 
     def is_think_start(self, state: State, token: str) -> bool:
-        return False
+        return token.strip() == THINK_START
 
     def is_conversation_start(self, state: State, token: str) -> tuple[bool, str]:
         return False, token
 
     def is_sequence_end(self, state: State, token: str) -> bool:
-        return False
+        return IM_END == token.strip()
 
     def is_text_end(self, state: State, token: str) -> bool:
         return False
@@ -137,3 +140,45 @@ class Parser[State: ParserState]():
 
     def is_erase(self, state: State, token: str) -> bool:
         return False
+
+
+def fill_state_by_prompt_tail(init_chat_events: bool, prompt: str, state: ParserState,
+                              is_assistant: Callable[[str], bool]):
+    prompt = prompt.rstrip()
+    tail_size = 200
+    tail = prompt[-tail_size:] if len(prompt) > tail_size else prompt
+    tail_lines = tail.rstrip().splitlines()
+    if init_chat_events:
+        is_think = None
+        is_conversation = None
+        role = ""
+
+        for i, line in enumerate(reversed(tail_lines)):
+            line = line.strip()
+            if line.endswith(THINK_START):
+                is_think = i
+                log.debug(f"state init is_think: {is_think}")
+            elif line.startswith(IM_START):
+                is_conversation = i
+                log.debug(f"state init is_conversation: {is_conversation}")
+                prompt_role = line[len(IM_START):].strip()
+                is_assistant = is_assistant(prompt_role)
+                if is_assistant:
+                    role = ROLE_ASSISTANT
+                    log.debug(f"state init role: {role}")
+                    break
+        prefill_i = None
+        if not is_conversation is None:
+            state.start_event(StateEvent.CONVERSATION)
+            prefill_i = (len(tail_lines) - 1 - is_conversation)
+        if not is_think is None:
+            state.start_event(StateEvent.THINK)
+            prefill_i = (len(tail_lines) - 1 - is_think)
+        state.role = role
+
+        if not prefill_i is None:
+            prefill_i += 1
+            if prefill_i < len(tail_lines):
+                out_tokens = tail_lines[prefill_i:]
+                out_tokens.append("\n")
+                state.prefill_tokens = out_tokens
