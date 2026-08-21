@@ -124,6 +124,47 @@ def print_log(phrase: Phrase):
 
 
 class TokenHandler:
+
+    def __init__(self,
+                 tokenizer: Tokenizer,
+                 prompt: str,
+                 parser: Parser,
+                 init_chat_events: bool,
+                 is_stop: Callable[[], bool] | None,
+                 config: TokenHandlerConfig,
+                 is_veai: bool,
+                 user_context: UserContext | None = None,
+                 supported_functions: dict[str, FunctionDefinition] | None = None):
+        super().__init__()
+        self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
+                                        config=config, is_veai=is_veai, user_context=user_context,
+                                        supported_functions=supported_functions)
+        self.start_time: datetime | None = None
+        self.tokenizer = tokenizer
+        self.is_prefill_out = False
+        self.is_stop = is_stop
+
+    def get_stat_info(self):
+        return self.processor.get_stat_info()
+
+    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt]) -> tuple[
+        list[ChatCompletionChunk], StopSignal | None]:
+        is_stop = self.is_stop
+        if is_stop and is_stop():
+            log.info("handle tokens is stopped")
+            return [], StopSignal.CANCEL
+        decoded_tokens = decode(tokens, self.tokenizer)
+        prefill_tokens = self.processor.state.prefill_tokens
+        if not self.is_prefill_out and prefill_tokens:
+            all_tokens = []
+            all_tokens.extend(prefill_tokens)
+            all_tokens.extend(decoded_tokens)
+            decoded_tokens = all_tokens
+            self.is_prefill_out = True
+        return self.processor.process_tokens(decoded_tokens)
+
+
+class TokenProcessor:
     def __clean_phrase(self):
         print_log(self.phrase)
         self.phrase = Phrase()
@@ -137,11 +178,9 @@ class TokenHandler:
         self.tool_call_parsing_start_time = None
 
     def __init__(self,
-                 tokenizer: Tokenizer,
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
-                 is_stop: Callable[[], bool] | None,
                  config: TokenHandlerConfig,
                  is_veai: bool,
                  user_context: UserContext | None = None,
@@ -152,15 +191,12 @@ class TokenHandler:
         self.user_context = user_context
         self.is_veai = is_veai
 
-        self.tokenizer = tokenizer
         self.parser = parser
         state = parser.new_state(prompt, init_chat_events)
         if state:
             state.supported_functions = supported_functions if supported_functions else {}
         self.state = state
-        self.is_prefill_out = False
         self.is_chat_mode = init_chat_events
-        self.is_stop = is_stop
         self.config = config
         self.prev_role = None
         self.token_conversation_start_number: int = -1
@@ -172,6 +208,7 @@ class TokenHandler:
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
+        self.probably_tool_call = False
         self.empty_conversation_counter = 0
         self.stop_inference = False
         self.token_counter = 0
@@ -190,33 +227,17 @@ class TokenHandler:
             stat_info = f"{amount} token{end} in {time_delta} ({amount / total_seconds} t/sec), {ftt} sec. to first token"
         return stat_info
 
-    def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt]) -> tuple[
+    def process_tokens(self, decoded_tokens: list[str]) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
-        is_stop = self.is_stop
-        if is_stop and is_stop():
-            log.info("handle tokens is stopped")
-            return [], StopSignal.CANCEL
         if self.start_time is None:
             self.start_time = datetime.now(timezone.utc)
-        decoded_tokens = decode(tokens, self.tokenizer)
-        prefill_tokens = self.state.prefill_tokens
-        if not self.is_prefill_out and prefill_tokens:
-            all_tokens = []
-            all_tokens.extend(prefill_tokens)
-            all_tokens.extend(decoded_tokens)
-            decoded_tokens = all_tokens
-            self.is_prefill_out = True
-
-        return self.process_tokens(decoded_tokens, self.state, self.parser)
-
-    def process_tokens(self, decoded_tokens: list[str], state: ParserState, parser: Parser) -> tuple[
-        list[ChatCompletionChunk], StopSignal | None]:
+        state = self.state
         result: list[ChatCompletionChunk] = []
         try:
             for token in decoded_tokens:
                 self.token_counter += 1
                 log.debug(f"token '{token}', num {self.token_counter}")
-                token_result, stop_signal = self.process_token(token, self.token_counter, state, parser)
+                token_result, stop_signal = self.process_token(token, self.token_counter)
                 if not self.role_initialized and token_result:
                     choices = token_result[0].choices
                     if choices:
@@ -236,11 +257,14 @@ class TokenHandler:
 
         return result, None
 
-    def process_token(self, token: str, token_number: int, state: ParserState, parser: Parser) -> tuple[
+    def process_token(self, token: str, token_number: int) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
         now_time = now()
         result: list[ChatCompletionChunk] = []
         stop_signal = None
+
+        state = self.state
+        parser = self.parser
 
         conversation_start, tail = parser.is_conversation_start(state, token)
         current_event = state.get_current_event()
@@ -250,7 +274,15 @@ class TokenHandler:
             # ignore stop signal
             result, _ = self.conversation_end(state, token_number)
         elif parser.is_sequence_end(state, token):
-            result, stop_signal = self.conversation_end(state, token_number)
+            if self.probably_tool_call:
+                content = self.tool_call_phrase.full
+                delayed_chunk = new_chat_completion_chunk(role=state.role, content=content,
+                                                          thinking=(state.has_event(StateEvent.THINK)))
+                result.append(delayed_chunk)
+                self.probably_tool_call = False
+            conversation_end_result, stop_signal = self.conversation_end(state, token_number)
+            result.extend(conversation_end_result)
+
         elif self.expect_role and current_event == StateEvent.CONVERSATION and token_number - self.token_conversation_start_number == 1:
             if len(token.rstrip()) > 0:  # conversation role
                 self.set_role(token, state)
@@ -265,6 +297,10 @@ class TokenHandler:
                 self.thinking_start(state)
         elif parser.is_think_end(state, token):
             self.thinking_end(state)
+        elif not self.probably_tool_call and parser.is_probably_tool_call_start(state, token) and current_event == StateEvent.CONVERSATION:
+            log.info(f"probably tool call is started by token '{token}'")
+            self.tool_call_start(state, token)
+            self.probably_tool_call = True
         elif parser.is_tool_call_start(state, token):
             if current_event == StateEvent.TOOL_CALL:
                 log.debug(f"tool call is finished by starting new tool call: '{token}'")
@@ -344,10 +380,8 @@ class TokenHandler:
                         log.warning(f"unexpected role {state.role}")
                     if is_assistant or not self.config.prevent_no_assistant_inference_output:
                         if not erase:
-                            thinking = state.has_event(StateEvent.THINK)
-                            chunk = new_chat_completion_chunk(role=state.role, content=token,
-                                                              thinking=thinking)
-                            result.append(chunk)
+                            result.append(new_chat_completion_chunk(role=state.role, content=token,
+                                                                    thinking=(state.has_event(StateEvent.THINK))))
                         else:
                             log.debug(f"erase token: {token}")
                             pass

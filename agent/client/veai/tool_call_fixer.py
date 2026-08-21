@@ -177,6 +177,17 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 expect_target_file = True
             elif "target_file" in v:
                 pass
+    if not edits:
+        edits = {}
+        # lfm 2.5 case
+        old_text = args.get("old_text")
+        if old_text:
+            edits["old_text"] = old_text
+            del args["old_text"]
+        new_text = args.get("new_text")
+        if new_text:
+            edits["new_text"] = new_text
+            del args["new_text"]
 
     if target_file and edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")

@@ -114,6 +114,9 @@ class Parser[State: ParserState]():
     def is_text_end(self, state: State, token: str) -> bool:
         return False
 
+    def is_probably_tool_call_start(self, state: State, token: str) -> bool:
+        return False
+
     def is_tool_call_start(self, state: State, token: str) -> bool:
         return False
 
