@@ -674,6 +674,36 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file17_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_17.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': {'new_text': 'dependencies {\n'
+                                                '    // ... existing dependencies ...\n'
+                                                '\n'
+                                                '    // Testcontainers for PostgreSQL\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:postgresql:1.19.7")\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:junit-jupiter:1.19.7")\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:docker-compose:1.19.7")\n'
+                                                '\n'
+                                                '    // ... other dependencies ...\n'
+                                                '}'},
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+
     def test_write_file_2_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")

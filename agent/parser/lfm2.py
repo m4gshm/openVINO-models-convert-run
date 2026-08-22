@@ -2,7 +2,7 @@ import ast
 import logging
 
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail
-from agent.parser.gemma4 import unquote, unescape
+from agent.parser.gemma4 import unescape
 
 TOOL_CALL_START_PROBABLY = "{\n"
 
@@ -54,23 +54,21 @@ class Lfm2Parser(Parser):
             if len(function_block) == 0:
                 continue
 
-            parsed_function_call = parse_function_call(function_block)
-
-            if parsed_function_call:
-                parsed_calls.append(parsed_function_call)
+            parsed_function_calls = parse_function_call(function_block)
+            if parsed_function_calls:
+                parsed_calls.extend(parsed_function_calls)
         return parsed_calls, partial
 
 
-def parse_function_call(function_block: str) -> ParsedFunctionCall:
+def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
     clean_function_block = function_block.strip("[]")
-
-    # Парсим строку в абстрактное синтаксическое дерево
+    tree: ast.Expression | None = None
     stop = False
     cycle = 0
     while not stop:
         try:
             cycle += 1
-            tree = ast.parse(clean_function_block, mode="eval")
+            tree: ast.Expression = ast.parse(clean_function_block, mode="eval")
             stop = True
         except SyntaxError as e:
             log.debug(f"parsing error: message='{e.msg}' line={e.lineno}, offset={e.offset}, trying to fix")
@@ -80,34 +78,39 @@ def parse_function_call(function_block: str) -> ParsedFunctionCall:
                 raise e
 
     body = tree.body
-    if not isinstance(body, ast.Call):
-        raise ValueError(f"unexpected ast parse result type '{type(body)}'")
 
-    func: ast.Name = body.func
-    func_name = func.id
+    elements = body.elts if isinstance(body, ast.Tuple) else [body]
 
-    arguments = {
-        keyword.arg: ast.literal_eval(keyword.value)
-        for keyword in body.keywords
-    }
+    result: list[ParsedFunctionCall] = []
+    for element in elements:
+        if not isinstance(element, ast.Call):
+            raise ValueError(f"unexpected ast parse result type '{type(element)}'")
 
-    has_anonymous = True
+        func: ast.Name = element.func
+        func_name = func.id
 
-    body_args = body.args
-    if not arguments and body_args:
-        first = body_args[0]
-        if isinstance(first, ast.Dict):
-            for i, k in enumerate(first.keys):
-                v = first.values[i]
-                if not isinstance(k, ast.Constant):
-                    log.error(f"unexpected key type={type(k)}, key={k}")
-                elif not isinstance(v, ast.Constant):
-                    log.error(f"unexpected value type {type(v)}, value={v}")
-                else:
-                    arguments[k.value] = v.value
+        arguments = {
+            keyword.arg: ast.literal_eval(keyword.value)
+            for keyword in element.keywords
+        }
 
-            has_anonymous = not arguments
+        has_anonymous = True
 
-    anonymous_arguments = [ast.literal_eval(arg) for arg in body_args] if has_anonymous else []
+        element_args = element.args
+        if not arguments and element_args:
+            first = element_args[0]
+            if isinstance(first, ast.Dict):
+                for i, k in enumerate(first.keys):
+                    v = first.values[i]
+                    if not isinstance(k, ast.Constant):
+                        log.error(f"unexpected key type={type(k)}, key={k}")
+                    elif not isinstance(v, ast.Constant):
+                        log.error(f"unexpected value type {type(v)}, value={v}")
+                    else:
+                        arguments[k.value] = v.value
 
-    return ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_arguments)
+                has_anonymous = not arguments
+        anonymous_arguments = [ast.literal_eval(arg) for arg in element_args] if has_anonymous else []
+        result.append(ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_arguments))
+
+    return result

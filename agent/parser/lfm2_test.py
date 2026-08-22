@@ -68,6 +68,22 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertEqual("list_dir", function.name)
         self.assertEqual({'depth': 2, 'directory_path': '.'}, arguments)
 
+    def test_read_file_tuple(self):
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        self.assertEqual(len(calls), 2)
+        first = calls[0]
+        self.assertEqual("read_file", first.name)
+        self.assertEqual({'target_file': 'C:/1/2/3/4/build.gradle.kts'},
+                         first.arguments)
+
+        second = calls[1]
+        self.assertEqual("read_file", second.name)
+        self.assertEqual({'target_file': 'C:/1/2/3/4/java/MessageImpl.java'},
+                         second.arguments)
+        self.assertFalse(partial)
+
 
 if __name__ == '__main__':
     unittest.main()

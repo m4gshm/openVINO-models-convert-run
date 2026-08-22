@@ -1,0 +1,10 @@
+<|tool_call>call:edit_file{content:<|"|>dependencies {
+    // ... existing dependencies ...
+
+    // Testcontainers for PostgreSQL
+    testImplementation("org.testcontainers:postgresql:1.19.7")
+    testImplementation("org.testcontainers:junit-jupiter:1.19.7")
+    testImplementation("org.testcontainers:docker-compose:1.19.7")
+
+    // ... other dependencies ...
+}<|"|>,file_path:<|"|>java/idempotent-consumer-jdbc/build.gradle.kts<|"|>,allow_overwrite:true}<tool_call|>

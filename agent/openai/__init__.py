@@ -11,6 +11,8 @@ class GenerateOpts(BaseModel):
     top_k: int | None = None
     min_p: float | None = None
     repetition_penalty: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
     preprocess_prompt_by_parser: bool = True
     model_parameters: dict[str, Any] = None
 

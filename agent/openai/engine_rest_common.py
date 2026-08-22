@@ -133,6 +133,10 @@ class BaseController(ABC):
 
             if frequency_penalty:
                 generation_config.frequency_penalty = frequency_penalty
+            else:
+                frequency_penalty = self.generate_config.frequency_penalty
+                if frequency_penalty:
+                    generation_config.frequency_penalty = frequency_penalty
 
             if logprobs:
                 generation_config.logprobs = 1
@@ -140,6 +144,10 @@ class BaseController(ABC):
         repetition_penalty = self.generate_config.repetition_penalty
         if repetition_penalty:
             generation_config.repetition_penalty = repetition_penalty
+
+        presence_penalty = self.generate_config.presence_penalty
+        if presence_penalty:
+            generation_config.presence_penalty = presence_penalty
 
         stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
         generation_config.stop_strings = stop_set
