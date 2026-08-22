@@ -221,9 +221,7 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 log.info(f"repaired edits type='{type(edits)}', payload='{json.dumps(edits)}'")
 
         # qwen2 case
-        if not isinstance(edits, list):
-            log.error(f"unexpected edits type, function='{function.name}', type='{type(edits)}', edits='{edits}'")
-        else:
+        if isinstance(edits, list):
             for i, edit in enumerate(edits):
                 if isinstance(edit, list):
                     invalid = True
@@ -254,39 +252,39 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
 
                 edits[i] = edit
 
-        if len(edits) > 1:
-            # gemma 4
-            # try to merge
-            set_prev = False
-            merged = False
-            prev_old_text = None
-            prev_new_text = None
-            for edit in edits:
-                if isinstance(edit, dict):
-                    old_text = edit.get("old_text")
-                    new_text = edit.get("new_text")
-                    if prev_old_text is None and prev_new_text is None:
-                        set_prev = True
-                        prev_old_text = old_text
-                        prev_new_text = new_text
+            if len(edits) > 1:
+                # gemma 4
+                # try to merge
+                set_prev = False
+                merged = False
+                prev_old_text = None
+                prev_new_text = None
+                for edit in edits:
+                    if isinstance(edit, dict):
+                        old_text = edit.get("old_text")
+                        new_text = edit.get("new_text")
+                        if prev_old_text is None and prev_new_text is None:
+                            set_prev = True
+                            prev_old_text = old_text
+                            prev_new_text = new_text
+                        else:
+                            if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
+                                in_prev = old_text.startswith(prev_old_text)
+                                if in_prev:
+                                    log.debug(
+                                        f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
+                                    prev_new_text = prev_new_text + new_text
+                                    prev_old_text = old_text
+                                    merged = True
+                    elif isinstance(edit, list):
+                        log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
                     else:
-                        if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
-                            in_prev = old_text.startswith(prev_old_text)
-                            if in_prev:
-                                log.debug(
-                                    f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
-                                prev_new_text = prev_new_text + new_text
-                                prev_old_text = old_text
-                                merged = True
-                elif isinstance(edit, list):
-                    log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
-                else:
-                    log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
+                        log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
 
-            if prev_old_text and prev_new_text:
-                edits = [{"new_text": prev_new_text, "old_text": prev_old_text}]
-                log.debug(f"merged edits={edits}")
-                invalid = True
+                if prev_old_text and prev_new_text:
+                    edits = [{"new_text": prev_new_text, "old_text": prev_old_text}]
+                    log.debug(f"merged edits={edits}")
+                    invalid = True
 
         target_file, _ = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
         target_file = clean_file_path(target_file)

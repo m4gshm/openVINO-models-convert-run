@@ -3,7 +3,6 @@ from importlib.resources import files
 
 from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file, GEMMA_4
-
 from agent.parser.gemma4 import Gemma4ChannelParser
 
 USER_CONTEXT = UserContext(model_architectures={GEMMA_4})
@@ -746,7 +745,6 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
-
     def test_write_file_2_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")
@@ -754,7 +752,7 @@ class TestAddFunction(unittest.TestCase):
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
-        fixed = fix_edit_file(first, USER_CONTEXT)
+        fixed = fix_write_file(first, USER_CONTEXT)
 
         self.assertEqual("write_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
