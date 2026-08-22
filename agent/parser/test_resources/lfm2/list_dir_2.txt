@@ -1,0 +1,2 @@
+{
+  "list_dir(directory_path": "C:/alex\\github\\m4gshm\\distributed-transactions-practice", depth=2)]<|tool_call_end|>

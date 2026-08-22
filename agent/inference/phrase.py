@@ -359,7 +359,7 @@ class Phrase:
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.0025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
                  duplicated_lines_limit=50,
-                 duplicated_lines_threshold=5):
+                 duplicated_lines_threshold=10):
         self.tokens: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}
@@ -513,8 +513,8 @@ class Phrase:
                         snapshot2 = lines[prev_prev_line_position:prev_line_position]
 
                         if snapshot and snapshot2 and snapshot == snapshot2:
-                            cycle_start = line_position
-                            cycle_end = prev_line_position
+                            cycle_end = line_position
+                            cycle_start = prev_line_position
                             break
                         i -= 1
 
@@ -522,7 +522,7 @@ class Phrase:
                         cycled_phrase = "\n".join([lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
                         payload = "\n".join(lines)
                         log.error(
-                            f"cycled phrase detected:\npayload={payload}\ncycled_phras={cycled_phrase}\ncycle_start={cycle_start}, cycle_end={cycle_end}")
+                            f"cycled phrase detected:\npayload={payload}\ncycled_phrase={cycled_phrase}\ncycle_start={cycle_start}, cycle_end={cycle_end}")
                         raise LoopError(payload=cycled_phrase, message="Cycled phrase detected")
                     else:
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
