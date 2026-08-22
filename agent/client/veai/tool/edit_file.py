@@ -13,8 +13,11 @@ class EditFile(Tool):
 
     @staticmethod
     def new_call(target_file: str, edits: Any, allow_multiple_matches=True) -> ParsedFunctionCall:
-        return ParsedFunctionCall(name=function_name, arguments={
-            "target_file": target_file,
-            "edits": edits,
-            "allow_multiple_matches": allow_multiple_matches,
-        })
+        arguments = {
+            "allow_multiple_matches": allow_multiple_matches
+        }
+        if target_file:
+            arguments["target_file"] = target_file
+        if edits:
+            arguments["edits"] = edits
+        return ParsedFunctionCall(name=function_name, arguments=arguments)

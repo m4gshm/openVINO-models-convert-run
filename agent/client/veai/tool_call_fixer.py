@@ -199,7 +199,7 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 edits["new_text"] = content
                 del args["content"]
 
-    if target_file and edits:
+    if target_file or edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
         if allow_multiple_matches is None:
             allow_multiple_matches = as_bool_or_none(args.get("allowed_multiple_matches"), "allowed_multiple_matches")

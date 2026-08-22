@@ -703,6 +703,49 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file18_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_18.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': {'new_text': 'dependencies {\n'
+                                                '    api(project(":idempotent-consumer"))\n'
+                                                '    api(project(":storage-api-reactive"))\n'
+                                                '    api(project(":postgres-jdbc"))\n'
+                                                '\n'
+                                                '    implementation("io.projectreactor:reactor-core")\n'
+                                                '\n'
+                                                '    implementation("org.postgresql:postgresql")\n'
+                                                '\n'
+                                                '    '
+                                                'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
+                                                '    '
+                                                'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
+                                                '\n'
+                                                '    implementation("org.jooq:jooq")\n'
+                                                '    '
+                                                'implementation("org.jooq:jooq-postgres-extensions")\n'
+                                                '\n'
+                                                '    // Testcontainers dependencies\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:postgresql:1.19.7")\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:junit-jupiter:1.19.7")\n'
+                                                '    '
+                                                'testImplementation("org.testcontainers:containers:1.19.7")\n'
+                                                '\n'
+                                                '}\n'},
+                          },
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
 
     def test_write_file_2_parse(self):
         state = parser.new_state()
