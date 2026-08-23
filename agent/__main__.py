@@ -435,6 +435,7 @@ def main():
 
     if is_device_npu or pipe != Pipe.CB:
         app = init_sequential_engine(model_name=model_name,
+                                     max_prompt_len=max_prompt_len,
                                      model_path=str(model_path),
                                      model_architectures=model_architectures,
                                      device=device.value,
@@ -448,6 +449,7 @@ def main():
                                      stop_signal=stop_signal)
     else:
         app = init_continuous_batching_engine(model=model_name,
+                                              max_prompt_len=max_prompt_len,
                                               model_path=str(model_path),
                                               model_architectures=model_architectures,
                                               device=device.value,

@@ -26,6 +26,7 @@ class ModelObject(BaseModel):
     permission: Optional[List[ModelPermission]] = None
     root: Optional[str] = None
     parent: Optional[str] = None
+    max_model_len: Optional[int] = None
 
 
 class ModelsListResponse(BaseModel):

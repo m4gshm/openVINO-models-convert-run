@@ -415,9 +415,9 @@ def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserCont
     target_file, invalid = get_target_file(args, context)
     content = args.get("content")
 
-    target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
-    if found:
-        invalid |= found
+    # target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
+    # if found:
+    #     invalid |= found
 
     if target_file and content:
         allow_overwrite = args.get("allow_overwrite")

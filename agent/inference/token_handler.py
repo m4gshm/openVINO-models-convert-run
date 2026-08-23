@@ -208,7 +208,6 @@ class TokenProcessor:
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
-        self.probably_tool_call = False
         self.empty_conversation_counter = 0
         self.stop_inference = False
         self.token_counter = 0
@@ -274,12 +273,12 @@ class TokenProcessor:
             # ignore stop signal
             result, _ = self.conversation_end(state, token_number)
         elif parser.is_sequence_end(state, token):
-            if self.probably_tool_call:
+            if self.state.probably_tool_call:
                 content = self.tool_call_phrase.full
                 delayed_chunk = new_chat_completion_chunk(role=state.role, content=content,
                                                           thinking=(state.has_event(StateEvent.THINK)))
                 result.append(delayed_chunk)
-                self.probably_tool_call = False
+                self.state.probably_tool_call = False
             conversation_end_result, stop_signal = self.conversation_end(state, token_number)
             result.extend(conversation_end_result)
 
@@ -297,10 +296,10 @@ class TokenProcessor:
                 self.thinking_start(state)
         elif parser.is_think_end(state, token):
             self.thinking_end(state)
-        elif not self.probably_tool_call and parser.is_probably_tool_call_start(state, token) and current_event == StateEvent.CONVERSATION:
+        elif not self.state.probably_tool_call and parser.is_probably_tool_call_start(state, token) and current_event == StateEvent.CONVERSATION:
             log.info(f"probably tool call is started by token '{token}'")
             self.tool_call_start(state, token)
-            self.probably_tool_call = True
+            self.state.probably_tool_call = True
         elif parser.is_tool_call_start(state, token):
             if current_event == StateEvent.TOOL_CALL:
                 log.debug(f"tool call is finished by starting new tool call: '{token}'")

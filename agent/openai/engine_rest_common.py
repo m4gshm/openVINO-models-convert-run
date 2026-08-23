@@ -50,6 +50,7 @@ MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
 class ControllerConfig(BaseModel):
     model_name: str
+    max_prompt_len: int
     model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
 
@@ -90,6 +91,7 @@ class BaseController(ABC):
         current_time = int(time.time())
         return ModelsListResponse(data=[ModelObject(
             id=self.config.model_name,
+            max_model_len=self.config.max_prompt_len,
             created=current_time,
         )])
 

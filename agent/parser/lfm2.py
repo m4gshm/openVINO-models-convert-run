@@ -54,9 +54,14 @@ class Lfm2Parser(Parser):
             if len(function_block) == 0:
                 continue
 
-            parsed_function_calls = parse_function_call(function_block)
-            if parsed_function_calls:
-                parsed_calls.extend(parsed_function_calls)
+            try:
+                parsed_function_calls = parse_function_call(function_block)
+                if parsed_function_calls:
+                    parsed_calls.extend(parsed_function_calls)
+            except SyntaxError as e:
+                log.error(f"unparseable tool call: {function_block}")
+                pass
+
         return parsed_calls, partial
 
 

@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 
 def init_continuous_batching_engine(model: str, model_path: str, model_architectures: set[str],
+                                    max_prompt_len: int | None,
                                     device: str, parser: Parser,
                                     is_fix_tool_type: bool, stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
@@ -61,6 +62,7 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
         sys.exit(1)
 
     return new_app(ContinuousBatchingController(config=ControllerConfig(model_name=model,
+                                                                        max_prompt_len=max_prompt_len,
                                                                         model_architectures=model_architectures),
                                                 parser=parser, pipe=pipe,
                                                 chat_template=chat_template,
@@ -87,6 +89,7 @@ def new_app(controller: BaseController) -> FastAPI:
 
 
 def init_sequential_engine(model_name: str, model_path: str, model_architectures: set[str],
+                           max_prompt_len: int | None,
                            device: str, vlm: bool, parser: Parser,
                            is_fix_tool_type: bool, stop_signal: threading.Event,
                            generate_config=GenerateOpts(),
@@ -114,6 +117,7 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
     log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
 
     return new_app(VlmController(config=ControllerConfig(model_name=model_name,
+                                                         max_prompt_len=max_prompt_len,
                                                          model_architectures=model_architectures),
                                  parser=parser, pipe=pipe,
                                  generate_config=generate_config, chat_template=chat_template,
