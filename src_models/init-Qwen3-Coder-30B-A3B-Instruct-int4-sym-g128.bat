@@ -12,9 +12,9 @@ optimum-cli export openvino ^
   --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
   --backup-precision int8_sym ^
-  --sym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
+  --sym ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
 
 pause
