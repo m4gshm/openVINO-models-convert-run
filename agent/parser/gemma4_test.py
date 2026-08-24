@@ -745,6 +745,40 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file19_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_19.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'file_path': 'java/idempotent-consumer-jdbc/build.gradle.kts',
+                                     'new_text': '    api(project(":postgres-jdbc"))\n'
+                                                 '\n'
+                                                 '    '
+                                                 'testImplementation("org.junit.jupiter:junit-jupiter-api")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
+                                                 '\n'
+                                                 '    '
+                                                 'implementation("io.projectreactor:reactor-core")\n',
+                                     'old_text': '    api(project(":postgres-jdbc"))\n'
+                                                 '\n'
+                                                 '    '
+                                                 'implementation("io.projectreactor:reactor-core")\n',
+                                     'start_column': 9,
+                                     'start_line': 9}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
     def test_write_file_2_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")

@@ -135,9 +135,14 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     if edits:
         unused_anonymous_edits = handle_edits(edits)
 
-        # recheck edits fullness:
-        global_new_text = args.get("new_text")
-        if global_new_text:
+    # recheck edits fullness:
+    global_new_text = args.get("new_text")
+    if global_new_text:
+        if not "new_text" in edits:
+            if not edits:
+                edits = {}
+            edits["new_text"] = global_new_text
+        else:
             is_set_new_text = False
             for edit in edits:
                 if "new_text" not in edit and "old_text" in edit:
@@ -146,8 +151,13 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
             if is_set_new_text:
                 del args["new_text"]
 
-        global_old_text = args.get("old_text")
-        if global_old_text:
+    global_old_text = args.get("old_text")
+    if global_old_text:
+        if not "old_text" in edits:
+            if not edits:
+                edits = {}
+            edits["old_text"] = global_old_text
+        else:
             is_set_old_text = False
             for edit in edits:
                 if "old_text" not in edit and "new_text" in edit:
@@ -268,7 +278,8 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                             prev_old_text = old_text
                             prev_new_text = new_text
                         else:
-                            if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text, str):
+                            if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text,
+                                                                                                       str):
                                 in_prev = old_text.startswith(prev_old_text)
                                 if in_prev:
                                     log.debug(
