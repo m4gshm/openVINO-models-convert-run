@@ -52,6 +52,24 @@ class PhraseTestCase(unittest.TestCase):
                           'second\n'
                           'first\n'), phrase.full)
 
+    def test_loop_lines6(self):
+        loop_tokens_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line6.json")
+        loop_tokens_text = loop_tokens_file.read_text()
+        loop_tokens_json = json.loads(loop_tokens_text)
+
+        phrase = Phrase()
+        with self.assertRaises(LoopError) as context:
+            for token in loop_tokens_json:
+                phrase.add_token(token)
+
+        exception = context.exception
+        error_message = exception.message
+        self.assertEqual('Generated content appears to be a loop', error_message)
+        self.assertEqual('-jdbc/../idempotent-consumer\n-jdbc/../idempotent-consumer', exception.payload)
+        self.assertEqual(('<function=read_file>\n'
+                          '<parameter=target_file>\n'
+                          'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer'), phrase.full)
+
     def test_loop_lines_2(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages_2.txt")
         loop_messages = loop_messages_file.read_text()

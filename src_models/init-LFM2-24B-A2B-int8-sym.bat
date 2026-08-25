@@ -11,7 +11,6 @@ optimum-cli export openvino ^
   --model %MODEL_PATH% ^
   --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
-  --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
   --sym ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym

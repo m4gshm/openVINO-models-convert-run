@@ -328,7 +328,7 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: st
             if prev_word_start in end_positions:
                 # loop
                 break
-            elif prev_word_start and prev_word_start >= last_part_start:
+            elif not prev_word_start is None and prev_word_start >= last_part_start:
                 prev_word = "".join(duplicates_check_tail[prev_word_start: start_position + 1])
                 if duplicated_words.get(prev_word):
                     join = "".join(duplicates_check_tail[prev_word_start: end_position + 1])
@@ -356,7 +356,7 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: st
 
 class Phrase:
     def __init__(self, strat_duplicates_detect_from: int = 500, last_part_duplicates_rate: float = 0.5,
-                 last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.0025,
+                 last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
                  duplicated_lines_limit=50,
                  duplicated_lines_threshold=10):

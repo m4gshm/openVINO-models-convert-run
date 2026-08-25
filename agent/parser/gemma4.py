@@ -259,9 +259,6 @@ def try_to_parse_json(arguments_block: str, cycle_detect=0, last_inserted_pos: i
     arguments: Any | None = None
     try:
         arguments = json.loads(arguments_block, object_pairs_hook=error_on_duplicates)
-        pass
-        if not isinstance(arguments, dict):
-            log.error(f"unexpected type of args '{type(arguments)}', arguments='{arguments}'")
     except json.decoder.JSONDecodeError as e:
         json_len = len(arguments_block)
         pos = e.pos
