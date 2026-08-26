@@ -1,7 +1,7 @@
 from typing import Any
 
 from agent.client import is_agent
-from agent.client.user_context import UserContext
+from agent.client.user_context import UserContext, UserContextFiles
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
 
 PROJECT_ABSOLUTE_PATH_ = "Project absolute path:"
@@ -48,7 +48,9 @@ def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext 
 
     content = first_message.content
 
-    return _get_context(content)
+    context = _get_context(content)
+    context.files = _get_files(messages)
+    return context
 
 
 def _get_context(system_prompt: str | list[dict[str, Any]] | None) -> UserContext | None:
@@ -66,3 +68,13 @@ def _get_context(system_prompt: str | list[dict[str, Any]] | None) -> UserContex
             return context
 
     return None
+
+
+def _get_files(messages: list[ChatCompletionMessageParam]) -> UserContextFiles:
+    for message in messages:
+        tool_calls = message.tool_calls
+        for tool_call in (tool_calls if tool_calls else []):
+            function = tool_call.function
+            if function.name == "read_file":
+                arguments = function.arguments
+    return UserContextFiles()

@@ -1,0 +1,16 @@
+<tool_call>
+<function=write_file>
+<parameter=target_file>
+agent/pyproject.toml
+</parameter>
+<parameter=content>
+[project]
+name = "openVINO-models-convert-run"
+version = "0.1.0"
+description = "OpenVINO models conversion and run utility"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+</parameter>
+</function>
+</tool_call>

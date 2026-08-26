@@ -29,8 +29,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_wrapped_file_structure_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/file_structure_wrapped.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/file_structure_wrapped.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("file_function", first.name)
@@ -39,8 +39,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_search_for_text_space_delimited_args(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/search_for_text_space_delimited_args.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/search_for_text_space_delimited_args.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_for_text", first.name)
@@ -51,8 +51,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_read_file_windows_path_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_windows_path.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_windows_path.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -62,9 +62,9 @@ class TestAddFunction(unittest.TestCase):
 
     def test_read_file_windows_path_delim_without_arg_name_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES,
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES,
                                                     "gemma4/read_file_windows_path_delim_without_arg_name.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -74,8 +74,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_read_file_like_json(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_like_json.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/read_file_like_json.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -85,8 +85,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_get_configurations_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/get_configurations.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/get_configurations.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         fixed = fix_write_file(first)
@@ -100,8 +100,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_write_file_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
@@ -142,8 +142,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_write_file_like_json(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         fixed = fix_write_file(first)
@@ -186,8 +186,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_write_file_like_json_2(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json_2.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_like_json_2.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         fixed = fix_write_file(first)
@@ -227,8 +227,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("edit_file", first.name)
@@ -267,8 +267,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file2_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_2.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_2.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -299,8 +299,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file3_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_3.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_3.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -338,8 +338,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file4_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_4.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_4.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -379,8 +379,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file5_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_5.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_5.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -395,8 +395,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file6_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_6.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_6.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -412,8 +412,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file7_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_7.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_7.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -433,8 +433,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file8_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_8.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_8.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -463,8 +463,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file9_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_9.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_9.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -485,8 +485,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file10_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_10.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_10.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -512,8 +512,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file11_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_11.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_11.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -541,8 +541,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file12_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_12.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_12.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -576,8 +576,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file13_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_13.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_13.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -598,8 +598,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file14_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_14.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_14.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -621,8 +621,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file15_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_15.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_15.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -651,8 +651,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file16_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_16.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_16.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -675,8 +675,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file17_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_17.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_17.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -704,8 +704,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file18_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_18.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_18.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -747,8 +747,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file19_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_19.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_19.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -781,8 +781,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_edit_file20_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_20.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_20.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -818,8 +818,8 @@ class TestAddFunction(unittest.TestCase):
 
     def test_write_file_2_parse(self):
         state = parser.new_state()
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 

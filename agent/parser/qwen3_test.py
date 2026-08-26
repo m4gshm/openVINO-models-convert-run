@@ -2,7 +2,7 @@ import unittest
 from importlib.resources import files
 
 from agent.client.user_context import UserContext
-from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file
+from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file
 from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
@@ -96,8 +96,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_partial_tool_call(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("write_file", first.name)
@@ -105,8 +105,8 @@ Target.py
         self.assertTrue(partial)
 
     def test_search_file_by_name(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_file_by_name.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_file_by_name.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("search_file_by_name", first.name)
@@ -116,8 +116,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_list_dir(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/list_dir_1.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/list_dir_1.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         fixed = fix_list_dir(first, USER_CONTEXT)
@@ -128,8 +128,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_edit_file(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/edit_file_1.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/edit_file_1.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         fixed = fix_edit_file(first, USER_CONTEXT)
@@ -182,6 +182,25 @@ Target.py
                                                  'implementation("org.jooq:jooq-postgres-extensions")\r\n'
                                                  '}'}],
                           'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_write_file(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/write_file.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_write_file(first, USER_CONTEXT)
+        self.assertEqual("write_file", fixed.name)
+        self.assertEqual({'allow_overwrite': True,
+                          'content': '[project]\n'
+                                     'name = "openVINO-models-convert-run"\n'
+                                     'version = "0.1.0"\n'
+                                     'description = "OpenVINO models conversion and run utility"\n'
+                                     'authors = [\n'
+                                     '    {name = "Your Name", email = "your.email@example.com"}\n'
+                                     ']',
+                          'target_file': 'agent/pyproject.toml'},
                          fixed.arguments)
         self.assertFalse(partial)
 

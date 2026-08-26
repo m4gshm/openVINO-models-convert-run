@@ -16,8 +16,8 @@ class Qwen2TestCases(unittest.TestCase):
         super().__init__(*args, **kwargs)
 
     def test_edit_file(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/veai_edit_file.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/veai_edit_file.txt")
+        tool_call_text = tool_call_file.read_text(encoding="utf-8")
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
 
@@ -64,8 +64,8 @@ class Qwen2TestCases(unittest.TestCase):
                          fixed.arguments)
 
     def test_parse_multiple_calls(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/mutliple_tool_calls.txt")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/mutliple_tool_calls.txt")
+        tool_call_text = tool_call_file.read_text(encoding="utf-8")
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         self.assertEqual(3, len(calls))
         self.assertTrue(partial)

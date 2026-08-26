@@ -21,6 +21,7 @@ from agent.client.veai.tool.write_file import WriteFile
 from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam
 from agent.parser import ParsedFunctionCall
+from agent.parser.gemma4 import try_to_parse_json
 
 GEMMA_4 = "Gemma4ForConditionalGeneration"
 
@@ -132,15 +133,19 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     target_file, invalid = get_target_file(args, context)
     edits = args.get("edits")
     unused_anonymous_edits = []
+
+    if isinstance(edits, str):
+        edits, _ = try_to_parse_json(edits)
+
     if edits:
         unused_anonymous_edits = handle_edits(edits)
+    else:
+        edits = {}
 
     # recheck edits fullness:
     global_new_text = args.get("new_text")
     if global_new_text:
         if not "new_text" in edits:
-            if not edits:
-                edits = {}
             edits["new_text"] = global_new_text
         else:
             is_set_new_text = False
@@ -154,8 +159,6 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     global_old_text = args.get("old_text")
     if global_old_text:
         if not "old_text" in edits:
-            if not edits:
-                edits = {}
             edits["old_text"] = global_old_text
         else:
             is_set_old_text = False

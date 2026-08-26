@@ -14,8 +14,8 @@ class PreprocessToolCallCase(unittest.TestCase):
     adapter = TypeAdapter(list[ChatCompletionMessageParam])
 
     def test_check_loop_calls(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls.json")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls.json")
+        tool_call_text = tool_call_file.read_text(encoding="utf-8")
         messages = self.adapter.validate_json(tool_call_text)
         preprocess_tool_call = PreprocessToolCall()
         loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
@@ -25,8 +25,8 @@ class PreprocessToolCallCase(unittest.TestCase):
         self.assertEqual('{"result":"warning","warning":"Directory does not exist: test_dir"}', loop_call.result)
 
     def test_check_loop_multitools_calls(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls_multiple.json")
-        tool_call_text = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls_multiple.json")
+        tool_call_text = tool_call_file.read_text(encoding="utf-8")
         try:
             messages = self.adapter.validate_json(tool_call_text)
         except Exception as e:
@@ -39,10 +39,10 @@ class PreprocessToolCallCase(unittest.TestCase):
         self.assertEqual('{"result":"success with json content","content":{"results":[]}}', loop_call.result)
 
     def test_markdown_render(self):
-        tool_cal_file_src = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.json")
-        tool_cal_file_expected = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.md")
-        tool_call_json = tool_cal_file_src.read_text(encoding="utf-8")
-        tool_call_md = tool_cal_file_expected.read_text(encoding="utf-8")
+        tool_call_file_src = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.json")
+        tool_call_file_expected = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.md")
+        tool_call_json = tool_call_file_src.read_text(encoding="utf-8")
+        tool_call_md = tool_call_file_expected.read_text(encoding="utf-8")
         messages = self.adapter.validate_json(tool_call_json)
 
         tool_call_result = messages[-1]

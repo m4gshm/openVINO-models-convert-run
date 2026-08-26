@@ -1,7 +1,6 @@
 import logging
-import logging
 import re
-from typing import Any
+from typing import Any, Iterable
 
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser import fill_state_by_prompt_tail
@@ -31,7 +30,7 @@ def parse_name(parameters_block) -> tuple[str | None, str | None]:
         return None, None
 
 
-def get_arguments(arguments_block: str) -> tuple[
+def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> tuple[
     dict[str, Any], bool]:
     arguments: dict[str, Any] = {}
     partial = False
@@ -58,23 +57,14 @@ def get_arguments(arguments_block: str) -> tuple[
                 partial = True
                 param_value_norm = param_tail_norm.strip()
 
-            is_like_json = param_value_norm.startswith("[") or param_value_norm.startswith("{")
-            if is_like_json:
+            expected_param = expected_parameters.get(param_name_norm) if expected_parameters else None
+            expected_type = expected_param['type'] if expected_param and 'type' in expected_param else None
+            is_expected_array = is_expected_type('array', expected_type)
+            is_expected_object = is_expected_type('object', expected_type)
+            is_like_json_array = param_value_norm.startswith("[")
+            is_like_json_object = param_value_norm.startswith("{")
+            if (is_expected_array and is_like_json_array) or (is_expected_object and is_like_json_object):
                 result_parameter, _ = try_to_parse_json(param_value_norm)
-                # try:
-                #     result_parameter = json.loads(param_value_norm)
-                # except json.decoder.JSONDecodeError as e:
-                #     log.debug(
-                #         f"function parameter parsing error, parameter='{param_name}', value='{param_value_norm}', "
-                #         f"type '{type(param_value_norm)}': {e}")
-                #     try:
-                #         result_parameter = json_repair.loads(param_value_norm)
-                #         log.debug(f"repaired parameter value '{result_parameter}'")
-                #     except Exception as e:
-                #         log.debug(
-                #             f"fail to repaired parameter value, parameter='{param_name}', value='{param_value_norm}', "
-                #             f"type '{type(param_value_norm)}': {e}")
-                #         result_parameter = param_value_norm
                 arguments[param_name_norm] = result_parameter
             else:
                 arguments[param_name_norm] = param_value_norm
@@ -82,14 +72,24 @@ def get_arguments(arguments_block: str) -> tuple[
     return arguments, partial
 
 
-def parse_function_call(function_block: str, partial: bool) -> tuple[ParsedFunctionCall, bool]:
+def is_expected_type(exp_type: str, possible_types: Any) -> bool | Any:
+    if isinstance(possible_types, Iterable):
+        return exp_type in possible_types
+    return exp_type == possible_types
+
+
+def parse_function_call(state: ParserState, function_block: str, partial: bool) -> tuple[ParsedFunctionCall, bool]:
     function_block_rstrip = function_block.rstrip()
     if function_block_rstrip.endswith(FUNCTION_END):
         function_block = function_block_rstrip[:-len(FUNCTION_END)]
 
     func_name, tail = parse_name(function_block)
     if not func_name is None:
-        arguments, partial_param = get_arguments(tail or "")
+        expected_parameters: dict[str, Any] = state.get_function_parameters(func_name)
+        expected_properties = expected_parameters[
+            'properties'] if expected_parameters and 'properties' in expected_parameters else None
+        expected_properties_dict = expected_properties if isinstance(expected_properties, dict) else None
+        arguments, partial_param = get_arguments(expected_properties_dict, tail or "")
         if partial_param:
             partial = True
 
@@ -129,7 +129,7 @@ class Qwen3MoeParser(QwenBaseParser):
             for function_block in function_blocks:
                 if len(function_block) == 0:
                     continue
-                parsed_function_call, partial = parse_function_call(function_block, partial)
+                parsed_function_call, partial = parse_function_call(state, function_block, partial)
 
                 if parsed_function_call:
                     parsed_calls.append(parsed_function_call)

@@ -28,13 +28,13 @@ class StateEvent(Enum):
 class ParserState:
     def __init__(self, supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()
-        self.supported_functions = supported_functions if supported_functions else {}
+        self.supported_functions = supported_functions if supported_functions else dict[str, FunctionDefinition]()
         self.__events: list[StateEvent] = []
         self.role: Literal["developer", "system", "user", "assistant", "tool"] | None = None
         self.prefill_tokens: list[str] | None = None
         self.probably_tool_call = False
 
-    def get_function_parameters(self, func_name: str) -> dict[str, Any] | dict[Any, Any]:
+    def get_function_parameters(self, func_name: str) -> dict[str, Any]:
         supported_functions = self.supported_functions
         function = supported_functions.get(func_name)
         parameters = function.parameters if function is not None else {}

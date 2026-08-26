@@ -1,0 +1,80 @@
+{
+  "name": "run_configuration",
+  "parameters": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+      "target_file": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "configuration_name": {
+        "type": "string"
+      },
+      "is_background": {
+        "type": "boolean"
+      },
+      "line_number": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "configuration_run_arguments": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        }
+      },
+      "configuration_environment_variables": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "object",
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "first",
+            "second"
+          ]
+        }
+      },
+      "files_to_collect_coverage": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "target_file",
+      "configuration_name",
+      "is_background",
+      "line_number",
+      "configuration_run_arguments",
+      "configuration_environment_variables",
+      "files_to_collect_coverage"
+    ]
+  },
+  "strict": true
+}

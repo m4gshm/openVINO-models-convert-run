@@ -18,8 +18,8 @@ class Lfm2TestCases(unittest.TestCase):
         super().__init__(*args, **kwargs)
 
     def test_list_dir(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("list_dir", first.name)
@@ -28,8 +28,8 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     def test_edit_file(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         first_fixed = fix_edit_file(first)
@@ -53,8 +53,8 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     def test_list_dir_probably_tool_call_parsing(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")
-        tool_call_json = tool_cal_file.read_text(encoding="utf-8")
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")
+        tool_call_json = tool_call_file.read_text(encoding="utf-8")
         tokens = json.loads(tool_call_json)
 
         processor = TokenProcessor(prompt="", parser=parser, init_chat_events=True, config=TokenHandlerConfig(),
@@ -69,8 +69,8 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertEqual({'depth': 2, 'directory_path': '.'}, arguments)
 
     def test_read_file_tuple(self):
-        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")
-        tool_call_text = tool_cal_file.read_text()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")
+        tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         self.assertEqual(len(calls), 2)
         first = calls[0]
