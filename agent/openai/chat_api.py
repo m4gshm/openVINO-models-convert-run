@@ -5,8 +5,7 @@ from typing import Optional, List, Literal
 
 import openai
 from openai.types.chat import ChatCompletionChunk
-from openai.types.chat import ChatCompletionChunk, ChatCompletion, ChatCompletionMessage, \
-    ChatCompletionMessageToolCallUnion
+from openai.types.chat import ChatCompletionChunk, ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
 
 from agent.openai.chat_completions_api import CHAT_COMPLETION_CHUNK, CHAT_COMPLETION
