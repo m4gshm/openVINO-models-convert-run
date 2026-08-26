@@ -2,11 +2,17 @@ from agent.openai.chat_completions_api import ChatCompletionMessageParam
 
 
 class UserContextFiles:
+    def __init__(self, file_content: dict[str, bytes] | None = None):
+        self.file_content: dict[str, bytes] = file_content if file_content else {}
+
     def get_files(self) -> list[str]:
-        return []
+        return list(self.file_content.keys())
+
+    def get_file_content(self, file_name: str) -> bytes | None:
+        return self.file_content.get(file_name)
 
 
-class UserContext():
+class UserContext:
 
     def __init__(self, model_architectures: set[str] | None = None):
         super().__init__()
