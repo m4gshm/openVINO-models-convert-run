@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from json import JSONDecodeError
-from typing import Any
+from typing import Any, Iterable
 
 import json_repair
 
@@ -323,6 +323,10 @@ def handle_edits(edits: Any):
     old_text_i = None
     on_delete_i = []
     anonymous_edits = []
+    if isinstance(edits, dict):
+        edits = [edits]
+    elif not isinstance(edits, Iterable):
+        log.warning(f"unexpected edits type='{type(edits)}', edits='{edits}'")
     for i, edit in enumerate(edits):
         if isinstance(edit, dict):
             if len(edit) == 0:
@@ -362,7 +366,6 @@ def handle_edits(edits: Any):
                         on_delete_i.append(old_text_i)
                     old_text_i = None
                     new_text_i = None
-
         elif isinstance(edit, list) or isinstance(edit, set):
             first = next(iter(edit)) if len(edit) > 0 else None
             second = next(iter(edit)) if len(edit) > 1 else None

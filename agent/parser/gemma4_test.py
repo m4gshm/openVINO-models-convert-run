@@ -779,6 +779,43 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file20_parse(self):
+        state = parser.new_state()
+        tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_20.txt")
+        tool_call_text = tool_cal_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': {'new_text': 'dependencies {\n'
+                                                '    // Existing dependencies...\n'
+                                                '\n'
+                                                '    // Test dependencies (Ensuring JUnit 5 is '
+                                                'present)\n'
+                                                '    testImplementation '
+                                                "'org.junit.jupiter:junit-jupiter-api:5.10.2'\n"
+                                                '    testRuntimeOnly '
+                                                "'org.junit.jupiter:junit-jupiter-engine:5.10.2'\n"
+                                                '\n'
+                                                '    // Testcontainers dependencies for PostgreSQL '
+                                                'integration testing\n'
+                                                '    testImplementation '
+                                                "'org.testcontainers:junit-jupiter:1.19.7'\n"
+                                                '    testImplementation '
+                                                "'org.testcontainers:postgresql:1.19.7'\n"
+                                                '    // Ensure PostgreSQL driver is available for the '
+                                                'container connection\n'
+                                                '    testImplementation '
+                                                "'org.postgresql:postgresql:42.7.3' \n"
+                                                '}'},
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
     def test_write_file_2_parse(self):
         state = parser.new_state()
         tool_cal_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")
