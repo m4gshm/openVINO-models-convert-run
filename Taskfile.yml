@@ -13,6 +13,10 @@ tasks:
     - test -d .venv
     cmds:
       - "{{.SYS_PYTHON}} -m venv {{.VENV_DIR}}"
+  install:
+    deps:
+      - init-venv
+    cmds:
       - "{{.VENV_BIN}}python -m pip install --upgrade pip"
       - "{{.VENV_BIN}}pip install -v -r {{.REQ_TXT}}"
     sources:
