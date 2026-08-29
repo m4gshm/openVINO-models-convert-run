@@ -9,6 +9,8 @@ from agent.client import is_agent
 from agent.client.user_context import UserContext, UserContextFiles
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
 
+TEXT = "text"
+
 PROJECT_ABSOLUTE_PATH_ = "Project absolute path:"
 OS_INFO_ = "OS info:"
 
@@ -172,20 +174,16 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
             text = ""
             for i in sorted_start_lines:
                 chunk = start_lines[i]
-                text += chunk
-            file_content_result[file_name] = text.encode('utf-8')
+                chunk_text = chunk.get(TEXT, None)
+                text += chunk_text if chunk_text else ""
+            if text:
+                file_content_result[file_name] = text.encode('utf-8')
         else:
             call_id = call_ids[0]
             content = read_contents.get(call_id)
-            if content:
-                text = content.get("text")
-                # file_line_count = content.get("file_line_count")
-                # lines_read = content.get("lines_read")
-                # if file_line_count is not None and lines_read == file_line_count:
-                #     file_content_fullness.add(file_name)
+            text = content.get(TEXT, None) if content else None
+            if text:
                 file_content_result[file_name] = text.encode('utf-8')
-                # else:
-                #     pass
 
     return UserContextFiles(file_content_result)
 
