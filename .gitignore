@@ -16,6 +16,7 @@ agent/build/
 build
 bin/
 src_models/venv*
+src_models/emperio-ai
 src_models/Qwen
 src_models/microsoft
 src_models/allenai
@@ -30,6 +31,7 @@ src_models/codellama
 src_models/sakmkmk2
 src_models/ornith-ai
 src_models/Fara*
+src_models/LiquidAI*
 models_cache
 models/lfm*
 models/LFM*

@@ -1,0 +1,4 @@
+<|tool_call>call:edit_file{content:<|"|>    testImplementation("org.testcontainers:postgresql:1.19.7")
+    testImplementation("org.testcontainers:junit-jupiter:1.19.7")
+    testImplementation("org.testcontainers:containers:1.19.7")
+    testImplementation("org.testcontainers:postgresql-module-java:1.19.7")<|"|>,file_path: "java/idempotent-consumer-jdbc/build.gradle.kts",old_text:<|"|>    implementation("org.jooq:jooq-postgres-extensions")<|"|>}<tool_call|>

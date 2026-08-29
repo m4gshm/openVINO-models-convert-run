@@ -22,15 +22,14 @@ from starlette.responses import StreamingResponse, JSONResponse
 from agent import inference
 from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
-from agent.client.veai import is_veai_agent, get_veai_context
+from agent.client.veai import is_veai_agent, get_veai_context, read_list_dir
+from agent.client.veai.tool.list_dir import ListDir
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
 from agent.inference.token_handler import markdown_bold, markdown_back_tick
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam
-# from agent.openai.chat_completions_api import ToolDefinition, FunctionDefinition, \
-#     ChatCompletionMessageParam, ChatCompletionChoice, ChatCompletionRequest
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.tool_call import PreprocessToolCall
@@ -173,6 +172,15 @@ class BaseController(ABC):
         log.info(f"inbound history messages {len(messages)}")
 
         is_veai = is_veai_agent(messages)
+
+        # if is_veai:
+        #     for message in messages:
+        #         if message.name == ListDir.name():
+        #             dumped_dirs = read_list_dir(message)
+        #             if dumped_dirs:
+        #                 result_json = ListDir.new_result_json(dumped_dirs)
+        #                 message.content = result_json
+        #             pass
 
         user_context = get_veai_context(messages) if is_veai else UserContext()
         user_context.messages = messages

@@ -35,7 +35,7 @@ class Lfm2TestCases(unittest.TestCase):
         first_fixed = fix_edit_file(first)
         self.assertEqual("edit_file", first_fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': {'new_text': 'dependencies {\n'
+                          'edits': [{'new_text': 'dependencies {\n'
                                                 '    '
                                                 'implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")\n'
                                                 '    '
@@ -47,7 +47,7 @@ class Lfm2TestCases(unittest.TestCase):
                                                 '    '
                                                 'testcontainers-dependency:testcontainers:junit-jupiter:2.19.0\n'
                                                 '}',
-                                    'old_text': 'dependencies {\n    // Existing dependencies...\n}'},
+                                    'old_text': 'dependencies {\n    // Existing dependencies...\n}'}],
                           'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/build.gradle.kts'},
                          first_fixed.arguments)
         self.assertFalse(partial)

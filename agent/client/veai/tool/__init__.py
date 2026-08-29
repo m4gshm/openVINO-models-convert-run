@@ -2,10 +2,11 @@ from abc import ABC, abstractmethod
 
 
 class Tool(ABC):
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        pass
+    pass
+    # @staticmethod
+    # @abstractmethod
+    # def name(self) -> str:
+    #     pass
 
     # @property
     # @abstractmethod

@@ -684,7 +684,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': {'new_text': 'dependencies {\n'
+                          'edits': [{'new_text': 'dependencies {\n'
                                                 '    // ... existing dependencies ...\n'
                                                 '\n'
                                                 '    // Testcontainers for PostgreSQL\n'
@@ -696,7 +696,7 @@ class TestAddFunction(unittest.TestCase):
                                                 'testImplementation("org.testcontainers:docker-compose:1.19.7")\n'
                                                 '\n'
                                                 '    // ... other dependencies ...\n'
-                                                '}'},
+                                                '}'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
                          fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
@@ -713,7 +713,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': {'new_text': 'dependencies {\n'
+                          'edits': [{'new_text': 'dependencies {\n'
                                                 '    api(project(":idempotent-consumer"))\n'
                                                 '    api(project(":storage-api-reactive"))\n'
                                                 '    api(project(":postgres-jdbc"))\n'
@@ -739,7 +739,7 @@ class TestAddFunction(unittest.TestCase):
                                                 '    '
                                                 'testImplementation("org.testcontainers:containers:1.19.7")\n'
                                                 '\n'
-                                                '}\n'},
+                                                '}\n'}],
                           },
                          fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
@@ -790,7 +790,7 @@ class TestAddFunction(unittest.TestCase):
 
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': {'new_text': 'dependencies {\n'
+                          'edits': [{'new_text': 'dependencies {\n'
                                                 '    // Existing dependencies...\n'
                                                 '\n'
                                                 '    // Test dependencies (Ensuring JUnit 5 is '
@@ -810,7 +810,33 @@ class TestAddFunction(unittest.TestCase):
                                                 'container connection\n'
                                                 '    testImplementation '
                                                 "'org.postgresql:postgresql:42.7.3' \n"
-                                                '}'},
+                                                '}'}],
+                          'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file21_parse(self):
+        state = parser.new_state()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_21.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    '
+                                                 'testImplementation("org.testcontainers:postgresql:1.19.7")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter:1.19.7")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:containers:1.19.7")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql-module-java:1.19.7")',
+                                     'old_text': '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")'}],
                           'target_file': 'java/idempotent-consumer-jdbc/build.gradle.kts'},
                          fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)

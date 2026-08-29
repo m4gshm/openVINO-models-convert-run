@@ -15,7 +15,7 @@
     <module name="" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-asym-g128-se-awq --pip VLM --cache_precision u8" />
+    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq --pip VLM" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

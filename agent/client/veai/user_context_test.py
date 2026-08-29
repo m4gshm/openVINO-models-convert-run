@@ -1,5 +1,6 @@
 import unittest
 from importlib.resources import files
+from pathlib import Path
 
 from agent.client.veai import _get_context
 
@@ -13,7 +14,7 @@ class UserContextCase(unittest.TestCase):
         context = _get_context(veai_project_information)
         self.assertIsNotNone("", context)
         self.assertEqual('Windows 11, version: 10.0, arch: amd64', context.os)
-        self.assertEqual('C:\\project', context.workdir)
+        self.assertEqual(Path('C:\\project'), context.workdir)
 
 
 if __name__ == '__main__':

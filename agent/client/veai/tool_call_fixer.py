@@ -132,21 +132,23 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
     edits = args.get("edits")
-    unused_anonymous_edits = []
 
     if isinstance(edits, str):
         edits, _ = try_to_parse_json(edits)
 
     if edits:
-        unused_anonymous_edits = handle_edits(edits)
+        edits, unused_anonymous_edits = handle_edits(edits)
     else:
-        edits = {}
+        edits = [{}]
+        unused_anonymous_edits = []
+
+    first_edit = edits[0]
 
     # recheck edits fullness:
-    global_new_text = args.get("new_text")
+    global_new_text = get_one_of(args, ["new_text", "new_content", "content"])
     if global_new_text:
-        if not "new_text" in edits:
-            edits["new_text"] = global_new_text
+        if not "new_text" in first_edit:
+            first_edit["new_text"] = global_new_text
         else:
             is_set_new_text = False
             for edit in edits:
@@ -158,8 +160,8 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
 
     global_old_text = args.get("old_text")
     if global_old_text:
-        if not "old_text" in edits:
-            edits["old_text"] = global_old_text
+        if not "old_text" in first_edit:
+            first_edit["old_text"] = global_old_text
         else:
             is_set_old_text = False
             for edit in edits:
@@ -195,22 +197,22 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         if target_file:
             del args["file_path"]
 
-    if not edits:
-        edits = {}
-        # lfm 2.5 case
-        old_text = args.get("old_text")
-        if old_text:
-            edits["old_text"] = old_text
-            del args["old_text"]
-        new_text = args.get("new_text")
-        if new_text:
-            edits["new_text"] = new_text
-            del args["new_text"]
-        else:
-            content = args.get("content")
-            if content:
-                edits["new_text"] = content
-                del args["content"]
+    # if not edits:
+    #     edits = {}
+    #     # lfm 2.5 case
+    #     old_text_lies = args.get("old_text")
+    #     if old_text_lies:
+    #         edits["old_text"] = old_text_lies
+    #         del args["old_text"]
+    #     new_text_lines = args.get("new_text")
+    #     if new_text_lines:
+    #         edits["new_text"] = new_text_lines
+    #         del args["new_text"]
+    #     else:
+    #         content = args.get("content")
+    #         if content:
+    #             edits["new_text"] = content
+    #             del args["content"]
 
     if target_file or edits:
         allow_multiple_matches = as_bool_or_none(args.get("allow_multiple_matches"), "allow_multiple_matches")
@@ -224,46 +226,46 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
             invalid = True
             allow_multiple_matches = False
         # qwen3.5 case
-        if isinstance(edits, str):
-            log.debug(f"convert string edits to json object, function='{function.name}', edist='{edits}'")
-            try:
-                edits = json.loads(edits)
-            except json.decoder.JSONDecodeError as e:
-                log.info(f"bad json edits of function='{function.name}', edits='{edits}': {e}")
-                edits = json_repair.loads(str(edits))
-                log.info(f"repaired edits type='{type(edits)}', payload='{json.dumps(edits)}'")
+        # if isinstance(edits, str):
+        #     log.debug(f"convert string edits to json object, function='{function.name}', edist='{edits}'")
+        #     try:
+        #         edits = json.loads(edits)
+        #     except json.decoder.JSONDecodeError as e:
+        #         log.info(f"bad json edits of function='{function.name}', edits='{edits}': {e}")
+        #         edits = json_repair.loads(str(edits))
+        #         log.info(f"repaired edits type='{type(edits)}', payload='{json.dumps(edits)}'")
 
-        # qwen2 case
         if isinstance(edits, list):
-            for i, edit in enumerate(edits):
-                if isinstance(edit, list):
-                    invalid = True
-                    edit = edit[0] if edit else None
-                elif isinstance(edit, dict):
-                    # valid
-                    pass
-                else:
-                    edit_str: str | None = None
-                    if isinstance(edits, bytes):
-                        edit_str = bytearray(edits).decode()
-                    elif isinstance(edits, bytearray):
-                        edit_str = edits.decode()
-                    elif isinstance(edits, str):
-                        edit_str = edits
-                    invalid = True
-                    if edit_str is None:
-                        edit = edits
-                        log.error(
-                            f"unexpected edits element type, function='{function.name}', element_{i}='{edit}', type {type(edit)}")
-                    else:
-                        try:
-                            edit = json.loads(edit_str)
-                        except json.decoder.JSONDecodeError as e:
-                            log.info(f"bad edits of function='{function.name}', element_{i}='{edit_str}': {e}")
-                            edit = json_repair.loads(str(edit_str))
-                            log.info(f"repaired element_{i}='{json.dumps(edit)}'")
-
-                edits[i] = edit
+            # # qwen2 case
+            # for i, edit in enumerate(edits):
+            #     if isinstance(edit, list):
+            #         invalid = True
+            #         edit = edit[0] if edit else None
+            #     elif isinstance(edit, dict):
+            #         # valid
+            #         pass
+            #     else:
+            #         edit_str: str | None = None
+            #         if isinstance(edits, bytes):
+            #             edit_str = bytearray(edits).decode()
+            #         elif isinstance(edits, bytearray):
+            #             edit_str = edits.decode()
+            #         elif isinstance(edits, str):
+            #             edit_str = edits
+            #         invalid = True
+            #         if edit_str is None:
+            #             edit = edits
+            #             log.error(
+            #                 f"unexpected edits element type, function='{function.name}', element_{i}='{edit}', type {type(edit)}")
+            #         else:
+            #             try:
+            #                 edit = json.loads(edit_str)
+            #             except json.decoder.JSONDecodeError as e:
+            #                 log.info(f"bad edits of function='{function.name}', element_{i}='{edit_str}': {e}")
+            #                 edit = json_repair.loads(str(edit_str))
+            #                 log.info(f"repaired element_{i}='{json.dumps(edit)}'")
+            #
+            #     edits[i] = edit
 
             if len(edits) > 1:
                 # gemma 4
@@ -274,21 +276,22 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
                 prev_new_text = None
                 for edit in edits:
                     if isinstance(edit, dict):
-                        old_text = edit.get("old_text")
-                        new_text = edit.get("new_text")
+                        old_text_lies = edit.get("old_text")
+                        new_text_lines = edit.get("new_text")
                         if prev_old_text is None and prev_new_text is None:
                             set_prev = True
-                            prev_old_text = old_text
-                            prev_new_text = new_text
+                            prev_old_text = old_text_lies
+                            prev_new_text = new_text_lines
                         else:
-                            if prev_old_text and old_text and isinstance(old_text, str) and isinstance(prev_old_text,
-                                                                                                       str):
-                                in_prev = old_text.startswith(prev_old_text)
+                            if prev_old_text and old_text_lies and isinstance(old_text_lies, str) and isinstance(
+                                    prev_old_text,
+                                    str):
+                                in_prev = old_text_lies.startswith(prev_old_text)
                                 if in_prev:
                                     log.debug(
-                                        f"merge in pre, new_text '{prev_new_text}' with '{new_text}' for old_text '{prev_old_text}' and '{old_text}'")
-                                    prev_new_text = prev_new_text + new_text
-                                    prev_old_text = old_text
+                                        f"merge in pre, new_text '{prev_new_text}' with '{new_text_lines}' for old_text '{prev_old_text}' and '{old_text_lies}'")
+                                    prev_new_text = prev_new_text + new_text_lines
+                                    prev_old_text = old_text_lies
                                     merged = True
                     elif isinstance(edit, list):
                         log.error(f"unexpected edit type in edits: type={type(edit)} edit={edit}, edits={edits}")
@@ -304,10 +307,95 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         target_file = clean_file_path(target_file)
         if not target_file:
             log.error(f"tool call error: tool={function.name}, target_file is empty but required")
+        else:
+            for edit in edits:
+                if "old_text" not in edit:
+                    new_text = edit.get("new_text", None)
+                    if new_text:
+                        old_text, new_text_rebuild = rebuild_edit_texts_using_file_content(new_text, target_file,
+                                                                                           context)
+                        if not old_text:
+                            log.debug(
+                                f"cannot reconstruct old_text from file content, target_file='{target_file}'")
+                        else:
+                            log.debug(
+                                f"edits reconstructed from file content, "
+                                f"target_file='{target_file}':\nold_text:\n{old_text}new_text:\n{new_text}")
+                            edit["new_text"] = new_text_rebuild
+                            edit["old_text"] = old_text
 
         return EditFile().new_call(target_file, edits, allow_multiple_matches=allow_multiple_matches)
     else:
         return function
+
+
+def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, context: UserContext) -> tuple[
+    str | None, str]:
+    file_content_bytes: bytes | None = context.files.get_file_content(target_file)
+    file_content_str: str | None = file_content_bytes.decode("utf-8") if file_content_bytes else None
+    file_content_lines: list[str] = split_lines(file_content_str) if file_content_str else []
+
+    if not file_content_lines:
+        return None, ""
+
+    stop = False
+    new_text_lines = split_lines(new_text)
+    new_text_merge_point_start = 0
+    old_text_merge_point_start = -1
+    old_text_merge_point_end = -1
+    while not stop and new_text_merge_point_start < len(new_text_lines):
+        first_new_text_line = new_text_lines[new_text_merge_point_start]
+        i = old_text_merge_point_end + 1
+        while i < len(file_content_lines):
+            old_line = file_content_lines[i]
+            if old_line == first_new_text_line:
+                if old_text_merge_point_start == -1:
+                    old_text_merge_point_start = i
+                old_text_merge_point_end = i
+                break
+            elif not old_text_merge_point_start == -1:
+                # new_text_merge_point_start -= 1
+                stop = True
+                break
+            else:
+                i += 1
+        if not stop:
+            new_text_merge_point_start += 1
+
+    # start is found
+    old_text_lines = file_content_lines[
+        old_text_merge_point_start: old_text_merge_point_end + 1] if not old_text_merge_point_start == -1 else None
+
+    new_text_merge_point_end = len(new_text_lines) - 1
+    if not old_text_merge_point_start == -1 and len(new_text_lines) > 2:
+        old_text_point = len(file_content_lines) - 1
+        i = new_text_merge_point_end
+        stop = False
+        while old_text_point > old_text_merge_point_end and not stop and i > new_text_merge_point_start:
+            last_new_text_line = new_text_lines[i]
+            while old_text_point > old_text_merge_point_end:
+                old_line = file_content_lines[old_text_point]
+                if old_line == last_new_text_line:
+                    # go up
+                    old_text_point -= 1
+                    new_text_merge_point_end = i - 1
+                    break
+                elif i < new_text_merge_point_end:
+                    stop = True
+                    break
+                else:
+                    old_text_point -= 1
+            if not stop:
+                i -= 1
+
+    new_text_lines = new_text_lines[new_text_merge_point_start: new_text_merge_point_end + 1]
+    old_text_join = "\n".join(old_text_lines)
+    new_text_join = "\n".join(new_text_lines)
+    return old_text_join, old_text_join + new_text_join
+
+
+def split_lines(file_content_str: str) -> list[str]:
+    return file_content_str.split("\r\n" if "\r\n" in file_content_str else "\n")
 
 
 def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], context: UserContext,
@@ -319,7 +407,7 @@ def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], conte
     return target_file, None
 
 
-def handle_edits(edits: Any):
+def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]], list]:
     new_text = None
     new_text_i = None
     old_text = None
@@ -424,7 +512,7 @@ def handle_edits(edits: Any):
         if isinstance(edits, list):
             edits.extend(dirty_edits)
             unused_anonymous_edits.extend(handle_edits(edits))
-    return unused_anonymous_edits
+    return edits, unused_anonymous_edits
 
 
 def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
@@ -553,24 +641,21 @@ def get_target_file(args, context: UserContext = UserContext()) -> tuple[str, bo
 
     invalid = not target_file
     if invalid:
-        # gemma4 case
-        target_file = args.get("file_path")
-
-        # gemma4 case 2
-        if not target_file:
-            invalid = True
-            target_file = args.get("file")
-
-        # gemma4 case 3
-        if not target_file:
-            invalid = True
-            target_file = args.get("path")
+        target_file = get_one_of(args, ["file_path", "file", "path", "edit_scope"])
 
     target_file, fixed = fix_windows_path(target_file, context)
     if fixed:
         invalid = True
 
     return target_file, invalid
+
+
+def get_one_of(args: dict[str, Any], one_of_field: list[str]) -> str | None:
+    for field in one_of_field:
+        target_file = args.get(field)
+        if not target_file is None:
+            return target_file
+    return None
 
 
 def find_target_file_from_prev_tool_call(args, context: UserContext, function_name: str,

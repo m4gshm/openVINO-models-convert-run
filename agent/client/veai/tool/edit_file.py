@@ -7,8 +7,8 @@ function_name = "edit_file"
 
 
 class EditFile(Tool):
-    @property
-    def name(self) -> str:
+    @staticmethod
+    def name() -> str:
         return function_name
 
     @staticmethod
