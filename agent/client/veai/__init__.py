@@ -1,6 +1,7 @@
 import json
 import logging
 from collections import defaultdict
+from collections.abc import dict_values
 from logging import Logger
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 from agent.client import is_agent
 from agent.client.user_context import UserContext, UserContextFiles
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
+
+END_LINE = "end_line"
 
 TEXT = "text"
 
@@ -89,9 +92,9 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
     write_file = "write_file"
     edit_file = "edit_file"
     read_contents = {}
-    read_files: dict[Path, list[str]] = {}
-    lines = {}
+    read_files: dict[Path, dict[int, tuple[int, str]]] = {}
     write_statuses = dict[str, str]()
+    START_LINE = "start_line"
     for message in messages:
         is_tool = message.role == "tool"
         if is_tool:
@@ -111,7 +114,9 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                 parsed_content = parse_content(message)
                 result = parsed_content.get("result")
                 write_statuses[tool_call_id] = result
+                # reset prev read file
             elif message.name == edit_file:
+                # reset prev read file
                 # '{"result":"success with json content","content":{"file_path":"agent/requirements.txt","failed_edits":[]}}'
                 pass
 
@@ -133,13 +138,13 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                     content = arguments.get("content")
                     if target_file:
                         file_content_result[target_file] = content.encode('utf-8') if content else None
-                        read_files.pop(target_file, None)
+                        clean_read_files(target_file, read_files)
             elif function_name == edit_file:
                 arguments = parse_arguments(function)
                 if isinstance(arguments, dict):
                     target_file = get_target_file_as_path(arguments)
                     if target_file:
-                        removed_file_content = read_files.pop(target_file, None)
+                        removed_file_content = clean_read_files(target_file, read_files)
                         if removed_file_content:
                             log.debug(f"file content removed from context by {edit_file}, file={target_file}")
             elif function_name == read_file:
@@ -147,11 +152,11 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                 if isinstance(arguments, dict):
                     target_file = get_target_file_as_path(arguments)
                     if target_file:
-                        read_files.setdefault(target_file, []).append(call_id)
-                        lines[call_id] = {
-                            "start_line": arguments.get("start_line"),
-                            "end_line": arguments.get("end_line"),
-                        }
+                        start_line_int = as_int_or_none(arguments.get(START_LINE))
+                        end_line_int = as_int_or_none(arguments.get(END_LINE))
+                        if not (start_line_int is None or end_line_int is None):
+                            lines_ranges = read_files.setdefault(target_file, {})
+                            lines_ranges.setdefault(start_line_int, (end_line_int, call_id))
 
     files_hierarchy = tree_structure()
     if root:
@@ -160,14 +165,11 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
         if dir != ".":
             add_path_to_dict(files_hierarchy, dir)
 
-    # file_content_fullness = set[str]()
-    for file_name, call_ids in read_files.items():
-        if len(call_ids) > 1:
+    for file_name, line_ranges_with_call_id in read_files.items():
+        if len(line_ranges_with_call_id) > 1:
             # merge
             start_lines = {}
-            for call_id in call_ids:
-                line_info = lines[call_id]
-                start_line = line_info.get("start_line")
+            for start_line, (end_line, call_id) in line_ranges_with_call_id.items():
                 content = read_contents.get(call_id)
                 start_lines[start_line] = content
             sorted_start_lines = sorted(start_lines.keys())
@@ -179,13 +181,27 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
             if text:
                 file_content_result[file_name] = text.encode('utf-8')
         else:
-            call_id = call_ids[0]
+            items = line_ranges_with_call_id.items()
+            start_line, (end_line, call_id) = next(iter(items))
             content = read_contents.get(call_id)
             text = content.get(TEXT, None) if content else None
             if text:
                 file_content_result[file_name] = text.encode('utf-8')
 
     return UserContextFiles(file_content_result)
+
+
+def clean_read_files(target_file: Path, read_files: dict[Path, dict[int, tuple[int, str]]]) -> dict[int, tuple[
+    int, str]] | None:
+    return read_files.pop(target_file, None)
+
+
+def as_int_or_none(val: Any | None) -> int | None:
+    if isinstance(val, str):
+        return int(val)
+    elif isinstance(val, int):
+        return val
+    return None
 
 
 def read_list_dir(message: ChatCompletionMessageParam) -> list[str] | None:

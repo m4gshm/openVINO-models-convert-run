@@ -128,6 +128,7 @@ class TokenHandler:
     def __init__(self,
                  tokenizer: Tokenizer,
                  prompt: str,
+                 prompt_tokens_amount: int,
                  parser: Parser,
                  init_chat_events: bool,
                  is_stop: Callable[[], bool] | None,
@@ -136,7 +137,8 @@ class TokenHandler:
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()
-        self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
+        self.processor = TokenProcessor(prompt=prompt, prompt_tokens_amount=prompt_tokens_amount,
+                                        parser=parser, init_chat_events=init_chat_events,
                                         config=config, is_veai=is_veai, user_context=user_context,
                                         supported_functions=supported_functions)
         self.start_time: datetime | None = None
@@ -164,6 +166,10 @@ class TokenHandler:
         return self.processor.process_tokens(decoded_tokens)
 
 
+def end(amount: int) -> str:
+    return "s" if amount != 1 else ""
+
+
 class TokenProcessor:
     def __clean_phrase(self):
         print_log(self.phrase)
@@ -179,6 +185,7 @@ class TokenProcessor:
 
     def __init__(self,
                  prompt: str,
+                 prompt_tokens_amount: int,
                  parser: Parser,
                  init_chat_events: bool,
                  config: TokenHandlerConfig,
@@ -212,6 +219,7 @@ class TokenProcessor:
         self.stop_inference = False
         self.token_counter = 0
         self.role_initialized = False
+        self.prompt_tokens_amount = prompt_tokens_amount
 
     def get_stat_info(self) -> str | None:
         stat_info = None
@@ -221,9 +229,12 @@ class TokenProcessor:
             time_delta = now - start_time
             amount = self.token_counter
             total_seconds = time_delta.total_seconds()
-            end = "s" if amount != 1 else ""
             ftt = (start_time - self.create_time).total_seconds()
-            stat_info = f"{amount} token{end} in {time_delta} ({amount / total_seconds} t/sec), {ftt} sec. to first token"
+            prompt_tokens_amount = self.prompt_tokens_amount
+            stat_info = (
+                f"generated {amount} token{end(amount)} in {time_delta}, {amount / total_seconds} t/sec), "
+                f"prompt processed {prompt_tokens_amount} token{end(prompt_tokens_amount)} in {ftt} ({prompt_tokens_amount / ftt} t/sec)"
+            )
         return stat_info
 
     def process_tokens(self, decoded_tokens: list[str]) -> tuple[
@@ -296,7 +307,8 @@ class TokenProcessor:
                 self.thinking_start(state)
         elif parser.is_think_end(state, token):
             self.thinking_end(state)
-        elif not self.state.probably_tool_call and parser.is_probably_tool_call_start(state, token) and current_event == StateEvent.CONVERSATION:
+        elif not self.state.probably_tool_call and parser.is_probably_tool_call_start(state,
+                                                                                      token) and current_event == StateEvent.CONVERSATION:
             log.info(f"probably tool call is started by token '{token}'")
             self.tool_call_start(state, token)
             self.state.probably_tool_call = True

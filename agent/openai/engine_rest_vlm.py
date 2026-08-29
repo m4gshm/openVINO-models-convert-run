@@ -42,9 +42,9 @@ class VlmController(BaseController):
                         ) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
-        encode_size = self.get_tokens_size(prompt)
+        prompt_tokens_amount = self.get_tokens_size(prompt)
         max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=encode_size,
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
         if over_limit_response:
             yield over_limit_response
@@ -56,7 +56,7 @@ class VlmController(BaseController):
             start_stream_handling: queue.Queue[bool] = queue.Queue()
             before_generate_mem = get_current_memory()
 
-            encode_size = self.get_tokens_size(prompt)
+            prompt_tokens_amount = self.get_tokens_size(prompt)
             max_length = generation_config.max_length
 
             def run_inference():
@@ -65,7 +65,7 @@ class VlmController(BaseController):
                         self.log_inference.debug(
                             f"inference start: "
                             f"pipe_type={type(self.pipe)}, "
-                            f"prompt_tokens={encode_size}, "
+                            f"prompt_tokens_amount={prompt_tokens_amount}, "
                             f"do_sample={generation_config.do_sample}, "
                             f"max_length={max_length}, "
                             f"max_new_tokens={generation_config.max_new_tokens}, "
@@ -77,9 +77,9 @@ class VlmController(BaseController):
                         )
                     else:
                         self.log_inference.info(f"inference start")
-
                     token_handler = TokenHandler(tokenizer=tokenizer,
                                                  prompt=prompt,
+                                                 prompt_tokens_amount=prompt_tokens_amount,
                                                  parser=self.parser,
                                                  init_chat_events=init_chat_events,
                                                  is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
@@ -107,12 +107,12 @@ class VlmController(BaseController):
 
                     if metrics:
                         log_msg += (
-                                    f"num_input_tokens={metrics.get_num_input_tokens()}, "
-                                    f"generated_tokens={metrics.get_num_generated_tokens()}, "
-                                    f"generate_duration={to_str(metrics.get_generate_duration())}, "
-                                    f"inference_duration={to_str(metrics.get_inference_duration())}, "
-                                    f"ttft={to_str(metrics.get_ttft())}, "
-                                    f"throughput={to_str(metrics.get_throughput())}")
+                            f"num_input_tokens={metrics.get_num_input_tokens()}, "
+                            f"generated_tokens={metrics.get_num_generated_tokens()}, "
+                            f"generate_duration={to_str(metrics.get_generate_duration())}, "
+                            f"inference_duration={to_str(metrics.get_inference_duration())}, "
+                            f"ttft={to_str(metrics.get_ttft())}, "
+                            f"throughput={to_str(metrics.get_throughput())}")
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         texts = generate_result.texts if isinstance(generate_result,
                                                                     DecodedResults) else generate_result

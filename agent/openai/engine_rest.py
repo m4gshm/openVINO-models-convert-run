@@ -90,9 +90,9 @@ class ContinuousBatchingController(BaseController):
         model_name = self.config.model_name
         stop_response = new_stop_response(response_id=response_id, model=model_name, role=None)
 
-        encode_size = self.get_tokens_size(prompt)
+        prompt_tokens_amount = self.get_tokens_size(prompt)
         max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=encode_size,
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
         if over_limit_response:
             yield over_limit_response
@@ -101,7 +101,7 @@ class ContinuousBatchingController(BaseController):
             self.log_inference.debug(
                 f"inference start: request={request_id}, "
                 f"pipe_type={type(self.pipe)}, "
-                f"prompt_tokens={encode_size}, "
+                f"prompt_tokens_amount={prompt_tokens_amount}, "
                 f"do_sample={generation_config.do_sample}, "
                 f"max_length={max_length}, "
                 f"max_new_tokens={generation_config.max_new_tokens}, "
@@ -116,6 +116,7 @@ class ContinuousBatchingController(BaseController):
 
         token_handler = TokenHandler(tokenizer=tokenizer,
                                      prompt=prompt,
+                                     prompt_tokens_amount=prompt_tokens_amount,
                                      parser=self.parser,
                                      init_chat_events=init_chat_events,
                                      is_stop=is_stop,
