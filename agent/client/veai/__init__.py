@@ -106,10 +106,10 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                 result = parsed_content.get("result")
                 if result == "success with json content":
                     file_content = parsed_content.get("content")
+                    if file_content:
+                        read_contents[tool_call_id] = file_content
                 else:
-                    file_content = None
                     pass
-                read_contents[tool_call_id] = file_content
             elif message.name == write_file:
                 parsed_content = parse_content(message)
                 result = parsed_content.get("result")
@@ -171,7 +171,8 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
             start_lines = {}
             for start_line, (end_line, call_id) in line_ranges_with_call_id.items():
                 content = read_contents.get(call_id)
-                start_lines[start_line] = content
+                if content:
+                    start_lines[start_line] = content
             sorted_start_lines = sorted(start_lines.keys())
             text = ""
             for i in sorted_start_lines:
