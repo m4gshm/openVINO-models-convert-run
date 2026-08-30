@@ -364,6 +364,12 @@ def main():
     npu_generate_hint = args.npu_generate_hint
     performance_hint = args.performance_hint
 
+    cpu_pipeline_properties = {
+        "CACHE_DIR": model_cache_dir,
+        "PERFORMANCE_HINT": performance_hint,
+        "ENABLE_MMAP": "YES",
+    }
+
     gpu_enable_large_allocations = args.gpu_enable_large_allocations
     gpu_priorities = args.gpu_priorities
     gpu_pipeline_properties = {
@@ -424,7 +430,9 @@ def main():
     if not model_path.exists():
         log.error(f"model path is not existed: {model_path}")
 
-    pipeline_properties = npu_pipeline_properties if is_device_npu else gpu_pipeline_properties
+    pipeline_properties = npu_pipeline_properties if is_device_npu \
+        else gpu_pipeline_properties if device == DeviceType.GPU \
+        else cpu_pipeline_properties
     kv_cache_precision = args.kv_cache_precision
     if kv_cache_precision:
         pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
