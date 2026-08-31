@@ -4,6 +4,7 @@ import logging
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
 from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick, markdown_file_content
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
+from agent.openai.middleware_checkpoint import is_middleware_checkpoint
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class PreprocessToolCall:
         for i, message in enumerate(reversed(messages)):
             if not over_all_messages and i >= self.max_messages_to_check - 1:
                 break
-            if message.role == ROLE_TOOL:
+            if message.role == ROLE_TOOL and not is_middleware_checkpoint(message):
                 result_tool_call_id = message.tool_call_id
                 result = message.content
                 if result_tool_call_id:

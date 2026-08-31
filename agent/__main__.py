@@ -150,6 +150,8 @@ def main():
     args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--fix_tool_type", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--detect_cycled_tool_call", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
                              help="%(default)s")
@@ -345,10 +347,8 @@ def main():
         log.error(f"need define --pipe for model architectures={model_architectures}")
         sys.exit(1)
 
-    if args.fix_tool_type == Turn.off:
-        is_fix_tool_type = False
-    else:
-        is_fix_tool_type = True  # parser_type == ParserType.gemma4
+    is_fix_tool_type = args.fix_tool_type != Turn.off.value
+    if_detect_cycled_tool_call = args.detect_cycled_tool_call != Turn.off.value
 
     model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
@@ -454,6 +454,7 @@ def main():
                                      chat_template=chat_template,
                                      pipeline_properties=pipeline_properties,
                                      is_fix_tool_type=is_fix_tool_type,
+                                     if_detect_cycled_tool_call=if_detect_cycled_tool_call,
                                      stop_signal=stop_signal)
     else:
         app = init_continuous_batching_engine(model=model_name,
@@ -469,6 +470,7 @@ def main():
                                               chat_template=chat_template,
                                               tokenizer_properties=tokenizer_properties,
                                               is_fix_tool_type=is_fix_tool_type,
+                                              if_detect_cycled_tool_call=if_detect_cycled_tool_call,
                                               stop_signal=stop_signal
                                               )
 

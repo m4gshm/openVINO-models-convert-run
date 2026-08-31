@@ -29,6 +29,7 @@ from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam
+from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.tool_call import PreprocessToolCall
@@ -43,7 +44,6 @@ WARN_GENERATION_IS_INTERRUPTED_ = "Generating is interrupted."
 
 USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
-MIDDLEWARE_CHEKPOINT = "middleware_checkpoint"
 
 
 class ControllerConfig(BaseModel):
@@ -51,6 +51,9 @@ class ControllerConfig(BaseModel):
     max_prompt_len: int
     model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
+    is_fix_tool_type: bool = True
+    if_detect_cycled_tool_call: bool = True
+    chat_template: str = ''
 
 
 def new_http_response(stream: bool,
@@ -68,17 +71,14 @@ def new_http_response(stream: bool,
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateOpts, is_fix_tool_type: bool, stop_signal: threading.Event,
-                 chat_template: str = ''):
+                 generate_config: GenerateOpts, stop_signal: threading.Event):
         self.parser = parser
         self.generate_config = generate_config
         self.config = config
         self.tokenizer = tokenizer
-        self.chat_template = chat_template
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
-        self.is_fix_tool_type = is_fix_tool_type
         self.closed = threading.Event()
         self.stop_signal = stop_signal
 
@@ -199,7 +199,7 @@ class BaseController(ABC):
         if invalid_response:
             return new_http_response(stream, [invalid_response])
 
-        tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.is_fix_tool_type)
+        tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.config.is_fix_tool_type)
 
         tokenizer = self.tokenizer
         extra_context = {}
@@ -216,7 +216,7 @@ class BaseController(ABC):
                                                     tools=tools_raw,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,
-                                                    chat_template=self.chat_template)
+                                                    chat_template=self.config.chat_template)
 
         self.log_inference_prompt.debug(full_prompt)
 
@@ -242,31 +242,32 @@ class BaseController(ABC):
         pass
 
     def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
-        request_user_select = detect_select_options(tools)
-        preprocess_tool_call = PreprocessToolCall()
-        looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
-        if looped_function:
-            # log
-            msg = looped_function.render_markdown()
-            tool_calls = []
-            content = ""
-            if request_user_select:
+        if self.config.if_detect_cycled_tool_call:
+            request_user_select = detect_select_options(tools)
+            preprocess_tool_call = PreprocessToolCall()
+            looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
+            if looped_function:
                 # log
-                question = request_user_select.new_call(
-                    msg +
-                    "\n\n" +
-                    "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
-                    "\n\n" + markdown_bold("What to do next?"),
-                    [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
-                tool_call = new_tool_call(call_id=MIDDLEWARE_CHEKPOINT + "_" + str(uuid.uuid4()),
-                                          function=question.to_openai_function_call())
-                tool_calls.append(tool_call)
-            else:
-                content = (msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_)
-            return new_chat_completion_chunk(finish_reason=STOP,
-                                             role=ROLE_ASSISTANT,
-                                             content=content,
-                                             tool_calls=tool_calls)
+                msg = looped_function.render_markdown()
+                tool_calls = []
+                content = ""
+                if request_user_select:
+                    # log
+                    question = request_user_select.new_call(
+                        msg +
+                        "\n\n" +
+                        "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
+                        "\n\n" + markdown_bold("What to do next?"),
+                        [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
+                    tool_call = new_tool_call(call_id=new_middleware_call_id(),
+                                              function=question.to_openai_function_call())
+                    tool_calls.append(tool_call)
+                else:
+                    content = (msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_)
+                return new_chat_completion_chunk(finish_reason=STOP,
+                                                 role=ROLE_ASSISTANT,
+                                                 content=content,
+                                                 tool_calls=tool_calls)
         return None
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
@@ -389,11 +390,3 @@ def group_function_by_name(tools: list[ChatCompletionToolUnionParam] | None, is_
 def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:
     for chunk in chunk_generator:
         yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
-
-
-def is_middleware_checkpoint(last_message: ChatCompletionMessageParam) -> str | None | bool:
-    is_tool = last_message.role == ROLE_TOOL
-    if not is_tool:
-        return False
-    tool_call_id = last_message.tool_call_id
-    return tool_call_id and tool_call_id.startswith(MIDDLEWARE_CHEKPOINT)

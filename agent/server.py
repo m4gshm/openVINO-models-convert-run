@@ -25,7 +25,9 @@ log = logging.getLogger(__name__)
 def init_continuous_batching_engine(model: str, model_path: str, model_architectures: set[str],
                                     max_prompt_len: int | None,
                                     device: str, parser: Parser,
-                                    is_fix_tool_type: bool, stop_signal: threading.Event,
+                                    is_fix_tool_type: bool,
+                                    if_detect_cycled_tool_call: bool,
+                                    stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
                                     generate_config=GenerateOpts(), handler_config=TokenHandlerConfig(),
                                     pipeline_properties: dict[str, Any] | None = None,
@@ -63,35 +65,22 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
 
     return new_app(ContinuousBatchingController(config=ControllerConfig(model_name=model,
                                                                         max_prompt_len=max_prompt_len,
-                                                                        model_architectures=model_architectures),
+                                                                        model_architectures=model_architectures,
+                                                                        is_fix_tool_type=is_fix_tool_type,
+                                                                        if_detect_cycled_tool_call=if_detect_cycled_tool_call,
+                                                                        chat_template=chat_template,
+                                                                        ),
                                                 parser=parser, pipe=pipe,
-                                                chat_template=chat_template,
                                                 generate_config=generate_config, handler_config=handler_config,
-                                                is_fix_tool_type=is_fix_tool_type, stop_signal=stop_signal))
-
-
-def new_app(controller: BaseController) -> FastAPI:
-    async def lifespan(app: FastAPI):
-        app.state.main_loop = asyncio.get_running_loop()
-        # stop_signal.is_set()
-        yield
-        log.info("controller is shutdown")
-        controller.shutdown()
-
-    app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
-    app_router = app.router
-    app_router.route_class = LoggingRoute
-    app_router.post("/v1/completions", response_model_exclude_none=True)(controller.completions)
-    app_router.post("/v1/chat/completions", response_model_exclude_none=True)(controller.chat)
-    app_router.get(path="/v1/models", response_model_exclude_none=True)(controller.models)
-    app.add_exception_handler(RequestValidationError, controller.validation_exception_handler)
-    return app
+                                                stop_signal=stop_signal))
 
 
 def init_sequential_engine(model_name: str, model_path: str, model_architectures: set[str],
                            max_prompt_len: int | None,
                            device: str, vlm: bool, parser: Parser,
-                           is_fix_tool_type: bool, stop_signal: threading.Event,
+                           is_fix_tool_type: bool,
+                           if_detect_cycled_tool_call: bool,
+                           stop_signal: threading.Event,
                            generate_config=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
                            pipeline_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
@@ -118,8 +107,29 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
 
     return new_app(VlmController(config=ControllerConfig(model_name=model_name,
                                                          max_prompt_len=max_prompt_len,
-                                                         model_architectures=model_architectures),
+                                                         model_architectures=model_architectures,
+                                                         is_fix_tool_type=is_fix_tool_type,
+                                                         if_detect_cycled_tool_call=if_detect_cycled_tool_call,
+                                                         chat_template=chat_template,
+                                                         ),
                                  parser=parser, pipe=pipe,
-                                 generate_config=generate_config, chat_template=chat_template,
-                                 handler_config=handler_config, is_fix_tool_type=is_fix_tool_type,
-                                 stop_signal=stop_signal))
+                                 generate_config=generate_config,
+                                 handler_config=handler_config, stop_signal=stop_signal))
+
+
+def new_app(controller: BaseController) -> FastAPI:
+    async def lifespan(app: FastAPI):
+        app.state.main_loop = asyncio.get_running_loop()
+        # stop_signal.is_set()
+        yield
+        log.info("controller is shutdown")
+        controller.shutdown()
+
+    app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
+    app_router = app.router
+    app_router.route_class = LoggingRoute
+    app_router.post("/v1/completions", response_model_exclude_none=True)(controller.completions)
+    app_router.post("/v1/chat/completions", response_model_exclude_none=True)(controller.chat)
+    app_router.get(path="/v1/models", response_model_exclude_none=True)(controller.models)
+    app.add_exception_handler(RequestValidationError, controller.validation_exception_handler)
+    return app
