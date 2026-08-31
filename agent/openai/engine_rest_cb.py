@@ -18,7 +18,7 @@ from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
 from agent.openai.chat_completions_api import FunctionDefinition
-from agent.openai.engine_rest_common import ControllerConfig, BaseController
+from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal
 from agent.parser import Parser, StateEvent
 
 log = logging.getLogger(__name__)
