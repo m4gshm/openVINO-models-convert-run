@@ -24,9 +24,9 @@ from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
-from agent.inference.token_handler import markdown_bold, markdown_back_tick
+from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str
 from agent.openai import GenerateOpts, completions_api
-from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
+from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
@@ -390,3 +390,16 @@ def group_function_by_name(tools: list[ChatCompletionToolUnionParam] | None, is_
 def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:
     for chunk in chunk_generator:
         yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
+
+
+def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSignal):
+    choices = responses[-1].choices if responses else None
+    finish_reason = get_finish_str(stop_signal)
+    if choices:
+        last_choice = choices[-1]
+        last_choice.finish_reason = finish_reason
+        log.debug(f"add finish_reason to the last choice, finish_reason={finish_reason}")
+    else:
+        log.debug(f"add stop message at the end, finish_reason={finish_reason}")
+        responses.append(new_stop_response(finish_reason=finish_reason, role=None))
+    return responses

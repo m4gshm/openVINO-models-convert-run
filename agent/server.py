@@ -13,7 +13,7 @@ from openvino_genai import py_openvino_genai
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import GenerateOpts
-from agent.openai.engine_rest import ContinuousBatchingController, ControllerConfig
+from agent.openai.engine_rest_cb import ContinuousBatchingController, ControllerConfig
 from agent.openai.engine_rest_common import BaseController
 from agent.openai.engine_rest_vlm import VlmController
 from agent.openai.logger_rest import LoggingRoute

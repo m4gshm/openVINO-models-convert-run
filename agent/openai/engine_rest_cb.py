@@ -14,7 +14,7 @@ from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, Generat
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
-    markdown_bold, get_finish_str, StopSignal
+    markdown_bold, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
 from agent.openai.chat_completions_api import FunctionDefinition
@@ -24,19 +24,6 @@ from agent.parser import Parser, StateEvent
 log = logging.getLogger(__name__)
 
 request_counter = itertools.count(start=0)
-
-
-def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSignal):
-    choices = responses[-1].choices if responses else None
-    finish_reason = get_finish_str(stop_signal)
-    if choices:
-        last_choice = choices[-1]
-        last_choice.finish_reason = finish_reason
-        log.debug(f"add finish_reason to the last choice, finish_reason={finish_reason}")
-    else:
-        log.debug(f"add stop message at the end, finish_reason={finish_reason}")
-        responses.append(new_stop_response(finish_reason=finish_reason, role=None))
-    return responses
 
 
 class ContinuousBatchingController(BaseController):
