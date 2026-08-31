@@ -21,8 +21,8 @@ class Lfm2Parser(Parser):
             fill_state_by_prompt_tail(init_chat_events, prompt, state, self.is_assistant)
         return state
 
-    def is_probably_tool_call_start(self, state: ParserState, token: str) -> bool:
-        return TOOL_CALL_START_PROBABLY == token
+    # def is_probably_tool_call_start(self, state: ParserState, token: str) -> bool:
+    #     return TOOL_CALL_START_PROBABLY == token
 
     def is_tool_call_start(self, state: ParserState, token: str) -> bool:
         return TOOL_CALL_START == token.strip()

@@ -232,8 +232,8 @@ class TokenProcessor:
             ftt = (start_time - self.create_time).total_seconds()
             prompt_tokens_amount = self.prompt_tokens_amount
             stat_info = (
-                f"generated {amount} token{end(amount)} in {time_delta}, {amount / total_seconds} t/sec), "
-                f"prompt processed {prompt_tokens_amount} token{end(prompt_tokens_amount)} in {ftt} ({prompt_tokens_amount / ftt} t/sec)"
+                f"generated {amount} token{end(amount)} in {time_delta} sec, {amount / total_seconds} t/sec), "
+                f"prompt processed {prompt_tokens_amount} token{end(prompt_tokens_amount)} in {ftt} sec"
             )
         return stat_info
 
