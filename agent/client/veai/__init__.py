@@ -1,7 +1,6 @@
 import json
 import logging
 from collections import defaultdict
-from collections.abc import dict_values
 from logging import Logger
 from pathlib import Path
 from typing import Any
