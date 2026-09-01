@@ -34,40 +34,49 @@ def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> 
     dict[str, Any], bool]:
     arguments: dict[str, Any] = {}
     partial = False
-    parameter_blocks = arguments_block.split(PARAMETER_START_PREF)
-    for parameter_block in parameter_blocks:
-        parameter_block = parameter_block.lstrip()
-        if len(parameter_block) == 0:
-            continue
-        param_pattern = f"=(.*?){OPEN_TAG_SUF}(.*)"
-        parameters = re.findall(param_pattern, parameter_block, re.DOTALL)
+    if arguments_block.startswith("parameter="):
+        # try to parse as json
+        arguments_block = arguments_block[len("parameter="):]
+        if arguments_block.endswith(PARAMETER_END):
+            arguments_block = arguments_block[:len(arguments_block) - len(PARAMETER_END)]
+        json_args, _ = try_to_parse_json(arguments_block)
         partial = False
-        for param_name, param_tail in parameters:
-            param_name_norm: str = param_name.strip()
-            param_tail_norm: str = param_tail.strip()
+        arguments = json_args
+    else:
+        parameter_blocks = arguments_block.split(PARAMETER_START_PREF)
+        for parameter_block in parameter_blocks:
+            parameter_block = parameter_block.lstrip()
+            if len(parameter_block) == 0:
+                continue
+            param_pattern = f"=(.*?){OPEN_TAG_SUF}(.*)"
+            parameters = re.findall(param_pattern, parameter_block, re.DOTALL)
+            partial = False
+            for param_name, param_tail in parameters:
+                param_name_norm: str = param_name.strip()
+                param_tail_norm: str = param_tail.strip()
 
-            parameter_end_i = param_tail_norm.find(PARAMETER_END)
-            full_parameter = param_tail_norm[:parameter_end_i] if parameter_end_i >= 0 else None
-            if not full_parameter is None:
-                next_param_i = parameter_end_i + len(PARAMETER_END)
-                next_tail = param_tail_norm[next_param_i:]
-                param_tail_norm = next_tail
-                param_value_norm = full_parameter.strip()
-            else:
-                partial = True
-                param_value_norm = param_tail_norm.strip()
+                parameter_end_i = param_tail_norm.find(PARAMETER_END)
+                full_parameter = param_tail_norm[:parameter_end_i] if parameter_end_i >= 0 else None
+                if not full_parameter is None:
+                    next_param_i = parameter_end_i + len(PARAMETER_END)
+                    next_tail = param_tail_norm[next_param_i:]
+                    param_tail_norm = next_tail
+                    param_value_norm = full_parameter.strip()
+                else:
+                    partial = True
+                    param_value_norm = param_tail_norm.strip()
 
-            expected_param = expected_parameters.get(param_name_norm) if expected_parameters else None
-            expected_type = expected_param['type'] if expected_param and 'type' in expected_param else None
-            is_expected_array = is_expected_type('array', expected_type)
-            is_expected_object = is_expected_type('object', expected_type)
-            is_like_json_array = param_value_norm.startswith("[")
-            is_like_json_object = param_value_norm.startswith("{")
-            if (is_expected_array and is_like_json_array) or (is_expected_object and is_like_json_object):
-                result_parameter, _ = try_to_parse_json(param_value_norm)
-                arguments[param_name_norm] = result_parameter
-            else:
-                arguments[param_name_norm] = param_value_norm
+                expected_param = expected_parameters.get(param_name_norm) if expected_parameters else None
+                expected_type = expected_param['type'] if expected_param and 'type' in expected_param else None
+                is_expected_array = is_expected_type('array', expected_type)
+                is_expected_object = is_expected_type('object', expected_type)
+                is_like_json_array = param_value_norm.startswith("[")
+                is_like_json_object = param_value_norm.startswith("{")
+                if (is_expected_array and is_like_json_array) or (is_expected_object and is_like_json_object):
+                    result_parameter, _ = try_to_parse_json(param_value_norm)
+                    arguments[param_name_norm] = result_parameter
+                else:
+                    arguments[param_name_norm] = param_value_norm
 
     return arguments, partial
 

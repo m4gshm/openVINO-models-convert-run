@@ -218,6 +218,20 @@ Target.py
                          fixed.arguments)
         self.assertFalse(partial)
 
+    def test_read_file(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/read_file.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_write_file(first, USER_CONTEXT)
+        self.assertEqual("read_file", fixed.name)
+        self.assertEqual({'end_line': 500,
+                          'start_line': 1,
+                          'target_file': 'C:/file.txt'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+
 
 if __name__ == '__main__':
     unittest.main()
