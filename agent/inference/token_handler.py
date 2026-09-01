@@ -185,11 +185,11 @@ class TokenProcessor:
 
     def __init__(self,
                  prompt: str,
-                 prompt_tokens_amount: int,
                  parser: Parser,
                  init_chat_events: bool,
                  config: TokenHandlerConfig,
                  is_veai: bool,
+                 prompt_tokens_amount: int = 0,
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, FunctionDefinition] | None = None):
         super().__init__()

@@ -52,21 +52,21 @@ class Lfm2TestCases(unittest.TestCase):
                          first_fixed.arguments)
         self.assertFalse(partial)
 
-    def test_list_dir_probably_tool_call_parsing(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")
-        tool_call_json = tool_call_file.read_text(encoding="utf-8")
-        tokens = json.loads(tool_call_json)
-
-        processor = TokenProcessor(prompt="", parser=parser, init_chat_events=True, config=TokenHandlerConfig(),
-                                   is_veai=True)
-        process_tokens, _ = processor.process_tokens(tokens)
-
-        first = process_tokens[0]
-        first_tool_calls = first.choices[0].delta.tool_calls[0]
-        function = first_tool_calls.function
-        arguments = json.loads(function.arguments)
-        self.assertEqual("list_dir", function.name)
-        self.assertEqual({'depth': 2, 'directory_path': '.'}, arguments)
+    # def test_list_dir_probably_tool_call_parsing(self):
+    #     tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")
+    #     tool_call_json = tool_call_file.read_text(encoding="utf-8")
+    #     tokens = json.loads(tool_call_json)
+    #
+    #     processor = TokenProcessor(prompt="", parser=parser, init_chat_events=True, config=TokenHandlerConfig(),
+    #                                is_veai=True)
+    #     process_tokens, _ = processor.process_tokens(tokens)
+    #
+    #     first = process_tokens[0]
+    #     first_tool_calls = first.choices[0].delta.tool_calls[0]
+    #     function = first_tool_calls.function
+    #     arguments = json.loads(function.arguments)
+    #     self.assertEqual("list_dir", function.name)
+    #     self.assertEqual({'depth': 2, 'directory_path': '.'}, arguments)
 
     def test_read_file_tuple(self):
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")

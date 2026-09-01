@@ -1,0 +1,15 @@
+<tool_call>
+<function=run_command>
+<parameter=command>
+powershell -ExecutionPolicy Bypass -File _check_runtime.ps1
+</parameter>
+<parameter=working_directory>
+</parameter>
+<parameter=is_background>
+False
+</parameter>
+<parameter=safe_to_run>
+False
+</parameter>
+</function>
+</tool_call>

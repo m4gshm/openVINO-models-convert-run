@@ -15,7 +15,7 @@ optimum-cli export openvino ^
   --backup-precision int8_sym ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
-  --dataset textvqa ^
+  --dataset textvqa ^ 
   --sym ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
 

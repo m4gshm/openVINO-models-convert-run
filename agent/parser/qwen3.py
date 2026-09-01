@@ -48,7 +48,7 @@ def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> 
 
             parameter_end_i = param_tail_norm.find(PARAMETER_END)
             full_parameter = param_tail_norm[:parameter_end_i] if parameter_end_i >= 0 else None
-            if full_parameter:
+            if not full_parameter is None:
                 next_param_i = parameter_end_i + len(PARAMETER_END)
                 next_tail = param_tail_norm[next_param_i:]
                 param_tail_norm = next_tail

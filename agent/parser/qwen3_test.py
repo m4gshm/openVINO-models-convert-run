@@ -204,6 +204,20 @@ Target.py
                          fixed.arguments)
         self.assertFalse(partial)
 
+    def test_run_command(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/run_command.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_write_file(first, USER_CONTEXT)
+        self.assertEqual("run_command", fixed.name)
+        self.assertEqual({'command': 'powershell -ExecutionPolicy Bypass -File _check_runtime.ps1',
+                          'is_background': 'False',
+                          'safe_to_run': 'False',
+                          'working_directory': ''},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
 
 if __name__ == '__main__':
     unittest.main()
