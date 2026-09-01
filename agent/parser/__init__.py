@@ -38,7 +38,7 @@ class ParserState:
         supported_functions = self.supported_functions
         function = supported_functions.get(func_name)
         parameters = function.parameters if function is not None else {}
-        return parameters
+        return parameters['properties'] if parameters and 'properties' in parameters else parameters
 
     def start_event(self, event: StateEvent):
         return self.__events.append(event)

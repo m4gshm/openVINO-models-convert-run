@@ -95,9 +95,9 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
     func_name, tail = parse_name(function_block)
     if not func_name is None:
         expected_parameters: dict[str, Any] = state.get_function_parameters(func_name)
-        expected_properties = expected_parameters[
-            'properties'] if expected_parameters and 'properties' in expected_parameters else None
-        expected_properties_dict = expected_properties if isinstance(expected_properties, dict) else None
+        if expected_parameters:
+            log.debug(f"found expected_parameters={expected_parameters}")
+        expected_properties_dict = expected_parameters if isinstance(expected_parameters, dict) else None
         arguments, partial_param = get_arguments(expected_properties_dict, tail or "")
         if partial_param:
             partial = True
