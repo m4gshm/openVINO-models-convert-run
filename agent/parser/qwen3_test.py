@@ -231,6 +231,22 @@ Target.py
                          fixed.arguments)
         self.assertFalse(partial)
 
+    def test_move(self):
+        tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move_tool.json")
+        json_data = tool_call_desc.read_text()
+        supported_function = FunctionDefinition.model_validate_json(json_data)
+        state = parser.new_state()
+        state.supported_functions = {supported_function.name: supported_function}
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        self.assertEqual("move", first.name)
+        self.assertEqual({'dry_run': 'true',
+                          'sources': ['java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java'],
+                          'target_dir': 'java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/idempotent/consumer'},
+                         first.arguments)
+        self.assertFalse(partial)
 
 
 if __name__ == '__main__':

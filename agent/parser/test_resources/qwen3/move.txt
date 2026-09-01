@@ -1,0 +1,13 @@
+<tool_call>
+<function=move>
+<parameter=sources>
+["java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java"]
+</parameter>
+<parameter=target_dir>
+java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/idempotent/consumer
+</parameter>
+<parameter=dry_run>
+true
+</parameter>
+</function>
+</tool_call>

@@ -1,0 +1,27 @@
+{
+  "name": "move",
+  "parameters": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "target_dir": {
+        "type": "string"
+      },
+      "dry_run": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "sources",
+      "target_dir",
+      "dry_run"
+    ]
+  },
+  "strict": true
+}
