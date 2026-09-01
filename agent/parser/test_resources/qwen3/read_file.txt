@@ -1,0 +1,6 @@
+<tool_call>
+<function=read_file>
+parameter={"target_file": "C:/file.txt", "start_line": 1, "end_line": 500}
+</parameter>
+</function>
+</tool_call>
