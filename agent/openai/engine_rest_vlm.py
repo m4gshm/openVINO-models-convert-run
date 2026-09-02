@@ -35,7 +35,7 @@ class VlmController(BaseController):
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
+                        function_parameters: dict[str, dict] | None = None, user_context=None,
                         ) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
@@ -80,7 +80,7 @@ class VlmController(BaseController):
                                                  parser=self.parser,
                                                  init_chat_events=init_chat_events,
                                                  is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
-                                                 supported_functions=function_by_name, user_context=user_context)
+                                                 supported_functions=function_parameters, user_context=user_context)
                     streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,

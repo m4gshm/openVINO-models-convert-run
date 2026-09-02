@@ -4,12 +4,12 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from datetime import timedelta
 from typing import Any, Callable, Literal, Iterable
 
 from fastapi.exceptions import RequestValidationError
-from openai.types import FunctionDefinition
-from openai.types.chat import ChatCompletionChunk, ChatCompletion, ChatCompletionToolUnionParam
+from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
@@ -28,7 +28,8 @@ from agent.inference.token_handler import markdown_bold, markdown_back_tick, Sto
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
-from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam
+from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
+    ChatCompletionFunctionToolParam
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
@@ -199,7 +200,7 @@ class BaseController(ABC):
         if invalid_response:
             return new_http_response(stream, [invalid_response])
 
-        tools_raw, function_by_name = group_function_by_name(tools, is_veai, self.config.is_fix_tool_type)
+        tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
 
         tokenizer = self.tokenizer
         extra_context = {}
@@ -230,13 +231,13 @@ class BaseController(ABC):
                                            top_p=body.top_p, frequency_penalty=body.frequency_penalty,
                                            logprobs=body.logprobs, stop=body.stop)), tokenizer=tokenizer,
             init_chat_events=True, is_stop=is_stop,
-            is_veai=is_veai, user_context=user_context, function_by_name=function_by_name)
+            is_veai=is_veai, user_context=user_context, function_parameters=function_parameters)
         return new_http_response(stream, chunk_generator)
 
     @abstractmethod
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None,
+                        function_parameters: dict[str, dict] | None = None,
                         user_context: UserContext | None = None,
                         ) -> Iterable[ChatCompletionChunk]:
         pass
@@ -373,18 +374,30 @@ def new_chat_history(messages: list[ChatCompletionMessageParam],
     return chat_history
 
 
-def group_function_by_name(tools: list[ChatCompletionToolUnionParam] | None, is_veai: bool,
-                           is_fix_tool_type: bool = False) -> tuple[
-    list[dict[str, Any]], dict[str, FunctionDefinition]]:
-    function_by_name: dict[str, FunctionDefinition] = {}
+def is_function_tool(tool: Any) -> bool:
+    return getattr(tool, "type", None) == "function"
+
+
+def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam] | None, is_veai: bool,
+                                    is_fix_tool_type: bool = False) -> tuple[
+    list[dict[str, Any]], dict[str, dict]]:
+    function_parameters: dict[str, dict] = {}
     tools_raw: list[dict[str, Any]] = []
     is_fix = is_veai and is_fix_tool_type
     for tool in (tools or []):
         tool_ = veai_fix_tool_definition_optional_property_as_null_type(tool) if is_fix else tool
         tools_raw.append(tool_.model_dump())
-        function = tool.function
-        function_by_name[function.name] = function
-    return tools_raw, function_by_name
+        if is_function_tool(tool_):
+            function = tool_.function
+            parameters = getattr(function, "parameters", None)
+            if parameters:
+                parameters = deepcopy(parameters)
+                for param_desc in parameters.values():
+                    if "description" in param_desc:
+                        del param_desc["description"]
+                function_name = function.name
+                function_parameters[function_name] = parameters
+    return tools_raw, function_parameters
 
 
 def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:

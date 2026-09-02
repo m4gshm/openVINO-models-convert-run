@@ -94,9 +94,8 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
 
     func_name, tail = parse_name(function_block)
     if not func_name is None:
-        expected_parameters: dict[str, Any] = state.get_function_parameters(func_name)
-        if expected_parameters:
-            log.debug(f"found expected_parameters={expected_parameters}")
+        expected_parameters = state.get_function_parameters(func_name)
+        log.debug(f"found expected_parameters: function={func_name}, expected_parameters={expected_parameters}")
         expected_properties_dict = expected_parameters if isinstance(expected_parameters, dict) else None
         arguments, partial_param = get_arguments(expected_properties_dict, tail or "")
         if partial_param:
@@ -109,13 +108,14 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
 
 
 class Qwen3MoeParser(QwenBaseParser):
-    def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
+    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+                  init_chat_events=True) -> ParserState:
         if not prompt:
-            state = super().new_state(prompt, init_chat_events)
+            state = super().new_state(prompt, supported_functions, init_chat_events)
             if init_chat_events:
                 state.start_event(StateEvent.THINK)
         else:
-            state = self._new_state()
+            state = self._new_state(supported_functions)
             fill_state_by_prompt_tail(init_chat_events, prompt, state, self.is_assistant)
         return state
 

@@ -3,8 +3,9 @@ from importlib.resources import files
 
 from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file
-from agent.openai.chat_completions_api import FunctionDefinition
-from agent.parser.qwen3 import EXPECTED_PARAMETERS_PROPERTIES, EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
+from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam
+from agent.openai.engine_rest_common import get_function_parameters_by_name
+from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
 USER_CONTEXT = UserContext()
 TEST_RESOURCES = "test_resources"
@@ -82,12 +83,9 @@ Target.py
 
     def test_functions_with_invalid_json_parameter(self):
         function_name = "select"
-        state = parser.new_state()
-        state.supported_functions = {
-            function_name: FunctionDefinition(name=function_name, parameters={
-                EXPECTED_PARAMETERS_PROPERTIES: {"options": {EXPECTED_PROPERTY_TYPE: "array"}}
-            })
-        }
+        state = parser.new_state(supported_functions={
+            function_name: {"options": {EXPECTED_PROPERTY_TYPE: "array"}}
+        })
         calls, partial = parser.parse_tool_calls(state, self.function_with_invalid_json_parameter)
 
         first = calls[0]
@@ -235,15 +233,17 @@ Target.py
         tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move_tool.json")
         json_data = tool_call_desc.read_text()
         supported_function = FunctionDefinition.model_validate_json(json_data)
-        state = parser.new_state()
-        state.supported_functions = {supported_function.name: supported_function}
+        tools = [ChatCompletionFunctionToolParam(function=supported_function, type="function")]
+        _, function_parameters = get_function_parameters_by_name(tools, True, True)
+        state = parser.new_state(supported_functions=function_parameters)
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move.txt")
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
         self.assertEqual("move", first.name)
         self.assertEqual({'dry_run': 'true',
-                          'sources': ['java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java'],
+                          'sources': [
+                              'java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java'],
                           'target_dir': 'java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/idempotent/consumer'},
                          first.arguments)
         self.assertFalse(partial)

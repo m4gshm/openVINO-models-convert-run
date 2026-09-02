@@ -135,7 +135,7 @@ class TokenHandler:
                  config: TokenHandlerConfig,
                  is_veai: bool,
                  user_context: UserContext | None = None,
-                 supported_functions: dict[str, FunctionDefinition] | None = None):
+                 supported_functions: dict[str, dict] | None = None):
         super().__init__()
         self.processor = TokenProcessor(prompt=prompt, prompt_tokens_amount=prompt_tokens_amount,
                                         parser=parser, init_chat_events=init_chat_events,
@@ -191,7 +191,7 @@ class TokenProcessor:
                  is_veai: bool,
                  prompt_tokens_amount: int = 0,
                  user_context: UserContext | None = None,
-                 supported_functions: dict[str, FunctionDefinition] | None = None):
+                 supported_functions: dict[str, dict] | None = None):
         super().__init__()
         self.create_time = datetime.now(timezone.utc)
         self.start_time: datetime | None = None
@@ -199,9 +199,9 @@ class TokenProcessor:
         self.is_veai = is_veai
 
         self.parser = parser
-        state = parser.new_state(prompt, init_chat_events)
-        if state:
-            state.supported_functions = supported_functions if supported_functions else {}
+        state = parser.new_state(prompt, supported_functions, init_chat_events)
+        # if state:
+        #     state.supported_functions = supported_functions if supported_functions else {}
         self.state = state
         self.is_chat_mode = init_chat_events
         self.config = config

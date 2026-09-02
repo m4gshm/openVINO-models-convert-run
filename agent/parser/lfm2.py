@@ -1,6 +1,7 @@
 import ast
 import logging
 
+from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail
 from agent.parser.gemma4 import unescape
 
@@ -13,11 +14,12 @@ TOOL_CALL_END = "<|tool_call_end|>"
 
 
 class Lfm2Parser(Parser):
-    def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
+    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+                  init_chat_events=True) -> ParserState:
         if not prompt:
-            state = super().new_state(prompt, init_chat_events)
+            state = super().new_state(prompt,supported_functions, init_chat_events)
         else:
-            state = self._new_state()
+            state = self._new_state(supported_functions)
             fill_state_by_prompt_tail(init_chat_events, prompt, state, self.is_assistant)
         return state
 

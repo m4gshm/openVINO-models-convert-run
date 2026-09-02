@@ -67,7 +67,7 @@ class ContinuousBatchingController(BaseController):
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_by_name: dict[str, FunctionDefinition] | None = None, user_context=None,
+                        function_parameters: dict[str, dict] | None = None, user_context=None,
                         ) -> Iterable[ChatCompletionChunk]:
         before_generate_mem = get_current_memory()
         request_id = next(request_counter)
@@ -107,7 +107,7 @@ class ContinuousBatchingController(BaseController):
                                      is_stop=is_stop,
                                      is_veai=is_veai,
                                      config=self.handler_config,
-                                     supported_functions=function_by_name,
+                                     supported_functions=function_parameters,
                                      )
 
         generation_handle: GenerationHandle

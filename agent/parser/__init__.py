@@ -26,19 +26,18 @@ class StateEvent(Enum):
 
 
 class ParserState:
-    def __init__(self, supported_functions: dict[str, FunctionDefinition] | None = None):
+    def __init__(self, supported_functions: dict[str, dict] | None = None):
         super().__init__()
-        self.supported_functions = supported_functions if supported_functions else dict[str, FunctionDefinition]()
+        self.supported_functions = supported_functions if supported_functions else dict[str, dict]()
         self.__events: list[StateEvent] = []
         self.role: Literal["developer", "system", "user", "assistant", "tool"] | None = None
         self.prefill_tokens: list[str] | None = None
         self.probably_tool_call = False
 
-    def get_function_parameters(self, func_name: str) -> dict[str, Any]:
+    def get_function_parameters(self, func_name: str) -> dict:
         supported_functions = self.supported_functions
-        function = supported_functions.get(func_name)
-        parameters = function.parameters if function is not None else {}
-        return parameters['properties'] if parameters and 'properties' in parameters else parameters
+        parameters = supported_functions.get(func_name, {})
+        return parameters
 
     def start_event(self, event: StateEvent):
         return self.__events.append(event)
@@ -81,8 +80,9 @@ class ParsedFunctionCall(BaseModel):
 
 
 class Parser[State: ParserState]():
-    def new_state(self, prompt: str = "", init_chat_events=True) -> State:
-        state = self._new_state()
+    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+                  init_chat_events=True) -> State:
+        state = self._new_state(supported_functions)
         if init_chat_events:
             state.start_event(StateEvent.CONVERSATION)
             state.role = ROLE_ASSISTANT
@@ -91,8 +91,8 @@ class Parser[State: ParserState]():
     def process_chat_prompt(self, prompt: str) -> str:
         return prompt
 
-    def _new_state(self) -> ParserState:
-        return ParserState()
+    def _new_state(self, supported_functions: dict[str, dict] | None = None) -> ParserState:
+        return ParserState(supported_functions=supported_functions)
 
     def is_end(self, state: State, token: str) -> bool:
         return False

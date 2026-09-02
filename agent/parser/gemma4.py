@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 class ParserState(agent.parser.ParserState):
 
-    def __init__(self, supported_functions: dict[str, FunctionDefinition] | None = None):
+    def __init__(self, supported_functions: dict[str, dict] | None = None):
         super().__init__(supported_functions)
         self.prev_token: str | None = None
 
@@ -494,8 +494,9 @@ def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
-    def new_state(self, prompt: str = "", init_chat_events=True) -> ParserState:
-        state = super().new_state(prompt, init_chat_events)
+    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+                  init_chat_events=True) -> ParserState:
+        state = super().new_state(prompt, supported_functions, init_chat_events)
         return state
 
     def process_chat_prompt(self, prompt: str) -> str:
@@ -505,8 +506,8 @@ class Gemma4ChannelParser(Parser[ParserState]):
             prompt += expected
         return prompt
 
-    def _new_state(self) -> ParserState:
-        return ParserState()
+    def _new_state(self, supported_functions: dict[str, dict] | None = None) -> ParserState:
+        return ParserState(supported_functions)
 
     def is_erase(self, state: ParserState, token: str) -> bool:
         return super().is_erase(state, token) or token in spec
