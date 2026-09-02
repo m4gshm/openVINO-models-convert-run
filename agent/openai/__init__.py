@@ -30,6 +30,7 @@ class SchedulerOpts(BaseModel):
     max_num_seqs: int | None = None
     dynamic_split_fuse: bool = False
     enable_prefix_caching: bool = True
+    use_sparse_attention: bool = False
 
 
 def get_default_scheduler_opts() -> SchedulerOpts:

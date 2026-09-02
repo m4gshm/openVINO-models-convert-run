@@ -1,5 +1,5 @@
 {
-  "max_num_seqs": 4,
+  "max_num_seqs": 8,
 
   "dynamic_split_fuse": true,
   "max_num_batched_tokens": 2048,

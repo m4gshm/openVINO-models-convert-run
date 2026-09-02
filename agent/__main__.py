@@ -156,7 +156,7 @@ def main():
                              default=".config/generate_config.json",
                              help="%(default)s")
     args_parser.add_argument("--scheduler_config_file", type=str, required=False,
-                             default=".config/scheduler_config_file.json",
+                             default=".config/scheduler_config.json",
                              help="%(default)s")
     args_parser.add_argument("--npu_compiler_type", type=str, required=False,
                              default=enum_value(NpuCompilerType.DRIVER), choices=enum_values(NpuCompilerType),
@@ -281,9 +281,10 @@ def main():
     generate_opts.max_prompt_tokens = max_prompt_len
 
     scheduler_config = SchedulerConfig()
-    dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts
+    use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
+    dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts.dynamic_split_fuse
     num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens
-    if dynamic_split_fuse == True and num_batched_tokens:
+    if dynamic_split_fuse and num_batched_tokens:
         scheduler_config.max_num_batched_tokens = num_batched_tokens
     else:
         scheduler_config.max_num_batched_tokens = max_prompt_len
@@ -296,12 +297,11 @@ def main():
     opts_max_num_seqs = scheduler_opts.max_num_seqs or default_scheduler_opts.max_num_seqs
     if opts_max_num_seqs:
         scheduler_config.max_num_seqs = opts_max_num_seqs
-    if not dynamic_split_fuse is None:
-        scheduler_config.dynamic_split_fuse = dynamic_split_fuse == True
+    scheduler_config.dynamic_split_fuse = dynamic_split_fuse
     # scheduler_config.num_kv_blocks = 2048
     # scheduler_config.num_linear_attention_blocks = 256
-    # scheduler_config.use_sparse_attention = True
-    # scheduler_config.sparse_attention_config
+    scheduler_config.use_sparse_attention = use_sparse_attention
+    # scheduler_config.sparse_attention_config = SparseAttentionConfig()
     prefix_caching = scheduler_opts.enable_prefix_caching or default_scheduler_opts.enable_prefix_caching
     if prefix_caching:
         scheduler_config.enable_prefix_caching = prefix_caching
