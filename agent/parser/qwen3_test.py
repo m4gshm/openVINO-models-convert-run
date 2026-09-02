@@ -2,7 +2,7 @@ import unittest
 from importlib.resources import files
 
 from agent.client.user_context import UserContext
-from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file
+from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete
 from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam
 from agent.openai.engine_rest_common import get_function_parameters_by_name
 from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
@@ -12,6 +12,15 @@ TEST_RESOURCES = "test_resources"
 
 parser = Qwen3MoeParser()
 state = parser.new_state()
+
+
+def get_required_function_parameters(tool_json_file: str) -> dict[str, dict]:
+    tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, tool_json_file)
+    json_data = tool_call_desc.read_text()
+    supported_function = FunctionDefinition.model_validate_json(json_data)
+    tools = [ChatCompletionFunctionToolParam(function=supported_function, type="function")]
+    _, function_parameters = get_function_parameters_by_name(tools, True, True)
+    return function_parameters
 
 
 class Qwen3TestCases(unittest.TestCase):
@@ -230,12 +239,7 @@ Target.py
         self.assertFalse(partial)
 
     def test_move(self):
-        tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move_tool.json")
-        json_data = tool_call_desc.read_text()
-        supported_function = FunctionDefinition.model_validate_json(json_data)
-        tools = [ChatCompletionFunctionToolParam(function=supported_function, type="function")]
-        _, function_parameters = get_function_parameters_by_name(tools, True, True)
-        state = parser.new_state(supported_functions=function_parameters)
+        state = parser.new_state(supported_functions=(get_required_function_parameters("qwen3/move_tool.json")))
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move.txt")
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
@@ -246,6 +250,23 @@ Target.py
                               'java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java'],
                           'target_dir': 'java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/idempotent/consumer'},
                          first.arguments)
+        self.assertFalse(partial)
+
+    def test_safe_delete(self):
+        function_parameters = get_required_function_parameters("qwen3/safe_delete_tool.json")
+        state = parser.new_state(supported_functions=(function_parameters))
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/safe_delete.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_safe_delete(first, USER_CONTEXT)
+        self.assertEqual("safe_delete", fixed.name)
+        self.assertEqual({'dry_run': False,
+                          'force': False,
+                          'targets': [{'line': 1,
+                                       'name': 'MessageStorageTestConfig',
+                                       'path': 'C:/Test.java'}]},
+                         fixed.arguments)
         self.assertFalse(partial)
 
 

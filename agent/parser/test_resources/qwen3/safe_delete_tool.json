@@ -1,0 +1,44 @@
+{
+  "name": "safe_delete",
+  "parameters": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+      "targets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "name",
+            "line"
+          ]
+        }
+      },
+      "force": {
+        "type": "boolean"
+      },
+      "dry_run": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "targets",
+      "force",
+      "dry_run"
+    ]
+  },
+  "strict": true
+}

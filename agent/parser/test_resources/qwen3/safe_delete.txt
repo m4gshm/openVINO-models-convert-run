@@ -1,0 +1,7 @@
+<tool_call>
+<function=safe_delete>
+<parameter=targets>
+[{"file_path": "C:/Test.java", "name": "MessageStorageTestConfig", "line": 1}]
+</parameter>
+</function>
+</tool_call>
