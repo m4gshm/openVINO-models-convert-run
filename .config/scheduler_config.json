@@ -4,5 +4,7 @@
   "dynamic_split_fuse": true,
   "max_num_batched_tokens": 2048,
 
+  "cache_interval_multiplier": 64,
+
   "enable_prefix_caching": true
 }
