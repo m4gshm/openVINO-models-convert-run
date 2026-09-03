@@ -59,9 +59,9 @@ def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext 
 
     content = first_message.content
 
-    context: UserContext = _get_context(content)
-
-    context.files = _get_files(context.workdir, messages)
+    context = _get_context(content)
+    if context:
+        context.files = _get_files(context.workdir, messages)
     return context
 
 

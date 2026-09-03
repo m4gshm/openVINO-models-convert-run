@@ -34,8 +34,8 @@ log = logging.getLogger(__name__)
 
 
 def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
-                                 user_context: UserContext | None = UserContext()) -> list[
-                                                                                          ParsedFunctionCall] | ParsedFunctionCall:
+                                 user_context: UserContext | None = None) -> list[
+                                                                                 ParsedFunctionCall] | ParsedFunctionCall:
     if run_command.function_name == function.name:
         return fix_run_command(function, user_context)
     elif list_dir.function_name == function.name:
@@ -61,7 +61,7 @@ def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
     return function
 
 
-def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     options_raw = args.get("options")
     is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
@@ -96,7 +96,7 @@ def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext
     return function
 
 
-def fix_file_structure(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_file_structure(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
     target_file, found = try_find_target_file_from_prev_tool_call_if_need(args, context, function, target_file)
@@ -130,8 +130,8 @@ def clean_file_path(target_file):
     return cleaned_target_file
 
 
-def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> list[
-                                                                                             ParsedFunctionCall] | ParsedFunctionCall:
+def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None = None) -> list[
+                                                                                           ParsedFunctionCall] | ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
     edits = args.get("edits")
@@ -332,9 +332,9 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext = UserConte
         return function
 
 
-def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, context: UserContext) -> tuple[
+def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, context: UserContext | None) -> tuple[
     str | None, str]:
-    file_content_bytes: bytes | None = context.files.get_file_content(target_file)
+    file_content_bytes: bytes | None = context.files.get_file_content(target_file) if context else None
     file_content_str: str | None = file_content_bytes.decode("utf-8") if file_content_bytes else None
     file_content_lines: list[str] = split_lines(file_content_str) if file_content_str else []
 
@@ -518,7 +518,7 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
     return edits, unused_anonymous_edits
 
 
-def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_write_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
     content = args.get("content")
@@ -544,7 +544,7 @@ def fix_write_file(function: ParsedFunctionCall, context: UserContext = UserCont
     return function
 
 
-def fix_safe_delete(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_safe_delete(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     targets = args.get("targets")
     invalid = False
@@ -566,7 +566,7 @@ def fix_safe_delete(function: ParsedFunctionCall, context: UserContext = UserCon
     return function
 
 
-def fix_search_for_text(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
     text_snippet = args.get("text_snippet")
@@ -581,7 +581,7 @@ def fix_search_for_text(function: ParsedFunctionCall, context: UserContext = Use
     return function
 
 
-def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     glob_pattern = args.get("glob_pattern")
     invalid = not glob_pattern
@@ -616,7 +616,7 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext =
     return function
 
 
-def fix_read_file(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
 
@@ -661,7 +661,7 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext = UserConte
     return function
 
 
-def get_target_file(args, context: UserContext = UserContext()) -> tuple[str, bool]:
+def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
     target_file = args.get(TARGET_FILE)
 
     invalid = not target_file
@@ -683,7 +683,7 @@ def get_one_of(args: dict[str, Any], one_of_field: list[str]) -> str | None:
     return None
 
 
-def find_target_file_from_prev_tool_call(args, context: UserContext, function_name: str,
+def find_target_file_from_prev_tool_call(args, context: UserContext | None, function_name: str,
                                          target_file: Any | None) -> Any | None:
     if log.isEnabledFor(logging.DEBUG):
         log.debug(
@@ -691,7 +691,7 @@ def find_target_file_from_prev_tool_call(args, context: UserContext, function_na
     else:
         log.info(f"no required target_file, trying to get from previous cool call of '{function_name}'")
 
-    messages = context.messages
+    messages = context.messages if context else []
     for i, message in enumerate(reversed(messages)):
         if message.role == ROLE_ASSISTANT:
             for tool_call in message.tool_calls or []:
@@ -711,7 +711,7 @@ def find_target_file_from_prev_tool_call(args, context: UserContext, function_na
     return target_file
 
 
-def fix_list_dir(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     directory_path = args.get("directory_path")
     invalid = False
@@ -749,7 +749,7 @@ def is_windows(context: UserContext | None):
     return "windows" in context.os.lower() if context and context.os else False
 
 
-def fix_run_command(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
 
     working_directory = args.get("working_directory")
@@ -779,7 +779,7 @@ def fix_run_command(function: ParsedFunctionCall, context: UserContext = UserCon
         return function
 
 
-def fix_windows_path(path: Any | None, context: UserContext = UserContext()) -> tuple[Any, bool]:
+def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any, bool]:
     fixed = False
     if path and isinstance(path, str) and is_windows(context):
         # SERA case
@@ -870,7 +870,7 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
     return properties
 
 
-def fix_run_configuration(function: ParsedFunctionCall, context: UserContext = UserContext()) -> ParsedFunctionCall:
+def fix_run_configuration(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
     target_file, invalid = get_target_file(args, context)
     configuration_name = args.get("configuration_name")
