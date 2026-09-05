@@ -31,6 +31,17 @@ class SchedulerOpts(BaseModel):
     dynamic_split_fuse: bool = False
     enable_prefix_caching: bool = True
     use_sparse_attention: bool = False
+    sparse_attention_config: SparseAttentionOpts | None = None
+
+
+class SparseAttentionOpts(BaseModel):
+    sparse_attention_mode: str = "TRISHAPE",
+    num_last_dense_tokens_in_prefill: int = 256
+    num_retained_start_tokens_in_cache: int = 12288
+    num_retained_recent_tokens_in_cache: int = 512
+    xattention_threshold: float = 0.65
+    xattention_block_size: int = 128
+    xattention_stride: int = 32
 
 
 def get_default_scheduler_opts() -> SchedulerOpts:

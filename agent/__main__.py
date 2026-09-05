@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from openvino_genai.py_openvino_genai import SchedulerConfig
+from openvino_genai.py_openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode
 from pydantic.json import pydantic_encoder
 
 from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
@@ -301,7 +301,18 @@ def main():
     # scheduler_config.num_kv_blocks = 2048
     # scheduler_config.num_linear_attention_blocks = 256
     scheduler_config.use_sparse_attention = use_sparse_attention
-    # scheduler_config.sparse_attention_config = SparseAttentionConfig()
+    attention_opts = scheduler_opts.sparse_attention_config
+    if use_sparse_attention and attention_opts:
+        sparse_attention_config = SparseAttentionConfig()
+        sparse_attention_config.mode = SparseAttentionMode.TRISHAPE if attention_opts.sparse_attention_mode == "TRISHAPE" else SparseAttentionMode.XATTENTION
+        sparse_attention_config.num_last_dense_tokens_in_prefill = attention_opts.num_last_dense_tokens_in_prefill
+        sparse_attention_config.num_retained_start_tokens_in_cache = attention_opts.num_retained_start_tokens_in_cache
+        sparse_attention_config.num_retained_recent_tokens_in_cache = attention_opts.num_retained_recent_tokens_in_cache
+        sparse_attention_config.xattention_threshold = attention_opts.xattention_threshold
+        sparse_attention_config.xattention_block_size = attention_opts.xattention_block_size
+        sparse_attention_config.xattention_stride = attention_opts.xattention_stride
+        scheduler_config.sparse_attention_config = sparse_attention_config
+
     prefix_caching = scheduler_opts.enable_prefix_caching or default_scheduler_opts.enable_prefix_caching
     if prefix_caching:
         scheduler_config.enable_prefix_caching = prefix_caching

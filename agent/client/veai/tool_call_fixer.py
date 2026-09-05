@@ -426,19 +426,9 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
             if len(edit) == 0:
                 on_delete_i.append(i)
             else:
-                edit_new_text = edit.get("new_text")
-                if edit_new_text is None:
-                    edit_new_text = edit.get("new_config")
-                    if edit_new_text:
-                        edit["new_text"] = edit_new_text
-                        del edit["new_config"]
+                edit_new_text = replace_by_possibles("new_text", ["new_config", "new_text="], edit)
+                edit_old_text = replace_by_possibles("old_text", ["old_config", "old_text="], edit)
 
-                edit_old_text = edit.get("old_text")
-                if edit_old_text is None:
-                    edit_old_text = edit.get("old_config")
-                    if edit_old_text:
-                        edit["old_text"] = edit_old_text
-                        del edit["old_config"]
                 if not new_text_i:
                     if edit_new_text:
                         new_text = edit_new_text
@@ -516,6 +506,24 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
             edits.extend(dirty_edits)
             unused_anonymous_edits.extend(handle_edits(edits))
     return edits, unused_anonymous_edits
+
+
+def replace_by_possibles(expected_key: str, possible_keys: list[str], object: dict[str, Any]) -> Any:
+    edit_new_text = object.get(expected_key)
+    if edit_new_text is None:
+        for key in possible_keys:
+            replaced = find_and_replace(key, object)
+            if not replaced is None:
+                return replaced
+    return None
+
+
+def find_and_replace(key: str, edit: dict[str, Any]) -> Any | None:
+    edit_new_text = edit.get(key)
+    if edit_new_text:
+        edit["new_text"] = edit_new_text
+        del edit[key]
+    return edit_new_text
 
 
 def fix_write_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
@@ -666,7 +674,7 @@ def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
 
     invalid = not target_file
     if invalid:
-        target_file = get_one_of(args, ["file_path", "file", "path", "edit_scope"])
+        target_file = get_one_of(args, ["file_path", "file", "path", "edit_scope", "directory_path"])
 
     target_file, fixed = fix_windows_path(target_file, context)
     if fixed:

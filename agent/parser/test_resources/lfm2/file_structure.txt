@@ -1,0 +1,1 @@
+<|tool_call_start|>[file_structure(directory_path="C:/src", depth=4)]<|tool_call_end|>
