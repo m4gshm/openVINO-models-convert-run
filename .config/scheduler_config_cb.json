@@ -1,11 +1,11 @@
 {
-  "max_num_seqs": 8,
+  "max_num_seqs": 4,
 
   "dynamic_split_fuse": true,
-  "max_num_batched_tokens": 2048,
+  "max_num_batched_tokens": 1024,
 
   "enable_prefix_caching": true,
-  "use_sparse_attention": true,
+  "use_sparse_attention": false,
   "sparse_attention_config": {
     "sparse_attention_mode": "TRISHAPE",
     "num_last_dense_tokens_in_prefill": 256,
