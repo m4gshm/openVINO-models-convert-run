@@ -515,7 +515,7 @@ def replace_by_possibles(expected_key: str, possible_keys: list[str], object: di
             replaced = find_and_replace(key, object)
             if not replaced is None:
                 return replaced
-    return None
+    return edit_new_text
 
 
 def find_and_replace(key: str, edit: dict[str, Any]) -> Any | None:
