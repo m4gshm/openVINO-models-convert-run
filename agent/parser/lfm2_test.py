@@ -61,16 +61,34 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertEqual("edit_file", first_fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': 'dependencies {\n'
-                                                  '    '
-                                                  'testImplementation("org.testcontainers:junit-jupiter:2.2.0")\n'
-                                                  '    '
-                                                  'testImplementation("org.testcontainers:postgresql:latest")\n'
-                                                  '}',
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter:2.2.0")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql:latest")\n'
+                                                 '}',
                                      'old_text': ''}],
                           'target_file': 'build.gradle.kts'},
                          first_fixed.arguments)
         self.assertFalse(partial)
 
+    # def test_edit_file_3(self):
+    #     tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file_3.txt")
+    #     tool_call_text = tool_call_file.read_text()
+    #     calls, partial = parser.parse_tool_calls(state, tool_call_text)
+    #     first = calls[0]
+    #     first_fixed = fix_edit_file(first)
+    #     self.assertEqual("edit_file", first_fixed.name)
+    #     self.assertEqual({'allow_multiple_matches': False,
+    #                       'edits': [{'new_text': 'dependencies {\n'
+    #                                              '    '
+    #                                              'testImplementation("org.testcontainers:junit-jupiter:2.2.0")\n'
+    #                                              '    '
+    #                                              'testImplementation("org.testcontainers:postgresql:latest")\n'
+    #                                              '}',
+    #                                  'old_text': ''}],
+    #                       'target_file': 'build.gradle.kts'},
+    #                      first_fixed.arguments)
+    #     self.assertFalse(partial)
 
     # def test_list_dir_probably_tool_call_parsing(self):
     #     tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")

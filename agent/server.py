@@ -29,7 +29,7 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
                                     if_detect_cycled_tool_call: bool,
                                     stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
-                                    generate_config=GenerateOpts(), handler_config=TokenHandlerConfig(),
+                                    generate_opts=GenerateOpts(), handler_config=TokenHandlerConfig(),
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None,
@@ -71,7 +71,7 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
                                                                         chat_template=chat_template,
                                                                         ),
                                                 parser=parser, pipe=pipe,
-                                                generate_config=generate_config, handler_config=handler_config,
+                                                generate_opts=generate_opts, handler_config=handler_config,
                                                 stop_signal=stop_signal))
 
 
@@ -81,7 +81,7 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
                            is_fix_tool_type: bool,
                            if_detect_cycled_tool_call: bool,
                            stop_signal: threading.Event,
-                           generate_config=GenerateOpts(),
+                           generate_opts=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
                            pipeline_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
     if not pipeline_properties:
@@ -113,7 +113,7 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
                                                          chat_template=chat_template,
                                                          ),
                                  parser=parser, pipe=pipe,
-                                 generate_config=generate_config,
+                                 generate_opts=generate_opts,
                                  handler_config=handler_config, stop_signal=stop_signal))
 
 

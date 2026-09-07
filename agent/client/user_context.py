@@ -2,6 +2,11 @@ from pathlib import Path
 
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
 
+DEFAULT_DEPTH = 1
+MAX_DEPTH = 4
+
+ROOT = "."
+
 
 class UserContextFiles:
     def __init__(self, file_content: dict[Path, bytes] | None = None):
@@ -24,3 +29,8 @@ class UserContext:
         self.model_architectures: set[str] = model_architectures if model_architectures else {}
         self.messages: list[ChatCompletionMessageParam] = []
         self.files: UserContextFiles = UserContextFiles()
+
+    def max_list_dir_depth(self, dir: str) -> int | None:
+        if dir == ROOT or dir == str(self.workdir):
+            return DEFAULT_DEPTH
+        return None

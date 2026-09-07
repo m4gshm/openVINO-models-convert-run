@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 
 class GenerateOpts(BaseModel):
+    do_sample: bool = True
+
     max_new_tokens: int | None = None
     max_prompt_tokens: int | None = None
     temperature: float | None = None
@@ -15,6 +17,14 @@ class GenerateOpts(BaseModel):
     presence_penalty: float | None = None
     preprocess_prompt_by_parser: bool = True
     model_parameters: dict[str, Any] = None
+
+    num_beams: int | None = None
+    num_beam_groups: int | None = None
+    diversity_penalty: float | None = None
+    length_penalty: float | None = None
+    no_repeat_ngram_size: float | None = None
+
+    num_return_sequences: int | None = None
 
 
 def get_default_generate_opts():

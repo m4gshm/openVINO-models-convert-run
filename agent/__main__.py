@@ -396,6 +396,8 @@ def main():
         "MODEL_PRIORITY": gpu_priorities,
         "GPU_HOST_TASK_PRIORITY": gpu_priorities,
         "GPU_QUEUE_PRIORITY": gpu_priorities,
+
+        # "INFERENCE_PRECISION_HINT": 'dynamic'
     }
 
     npu_prefill_hint = args.npu_prefill_hint
@@ -460,7 +462,7 @@ def main():
                                      device=device.value,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
-                                     generate_config=generate_opts,
+                                     generate_opts=generate_opts,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
                                      pipeline_properties=pipeline_properties,
@@ -474,7 +476,7 @@ def main():
                                               model_architectures=model_architectures,
                                               device=device.value,
                                               parser=model_parser,
-                                              generate_config=generate_opts,
+                                              generate_opts=generate_opts,
                                               handler_config=handler_config,
                                               scheduler_config=scheduler_config,
                                               pipeline_properties=pipeline_properties,

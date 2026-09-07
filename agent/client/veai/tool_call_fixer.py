@@ -2,11 +2,12 @@ import json
 import logging
 import re
 from json import JSONDecodeError
+from pathlib import Path
 from typing import Any, Iterable
 
 import json_repair
 
-from agent.client.user_context import UserContext
+from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
     search_file_by_name, file_structure, run_command, run_configuration, safe_delete
 from agent.client.veai.tool.edit_file import EditFile
@@ -27,8 +28,6 @@ from agent.parser.gemma4 import try_to_parse_json
 GEMMA_4 = "Gemma4ForConditionalGeneration"
 
 TARGET_FILE = "target_file"
-
-ROOT = "."
 
 log = logging.getLogger(__name__)
 
@@ -610,7 +609,16 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext |
     search_directory = args.get("search_directory")
     if not search_directory:
         invalid = True
-        search_directory = ROOT
+        # try to find by partial equality
+        target_path_or_url = args.get("target_path_or_url")
+        if not target_path_or_url is None:
+            path = Path(target_path_or_url)
+            if glob_pattern is None:
+                glob_pattern = str(path.name)
+            search_directory = str(path.parent)
+        else:
+            search_directory = ROOT
+        invalid = True
     else:
         search_directory, fixed = fix_windows_path(search_directory, context)
         if fixed:
@@ -730,15 +738,14 @@ def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> P
 
     if not directory_path:
         invalid = True
-        root = True
         directory_path = ROOT
-    else:
-        root = False
 
     depth = args.get("depth")
     if not depth:
         invalid = True
-        depth = 5 if root else 2
+        depth = context.max_list_dir_depth(depth) if context else None
+        if depth is None:
+            depth = DEFAULT_DEPTH
 
     directory_path, fixed = fix_windows_path(directory_path, context)
     if fixed:

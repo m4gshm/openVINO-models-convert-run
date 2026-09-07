@@ -4,7 +4,6 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from datetime import timedelta
 from typing import Any, Callable, Literal, Iterable
 
@@ -72,9 +71,9 @@ def new_http_response(stream: bool,
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
-                 generate_config: GenerateOpts, stop_signal: threading.Event):
+                 generate_opts: GenerateOpts, stop_signal: threading.Event):
         self.parser = parser
-        self.generate_config = generate_config
+        self.generate_opts = generate_opts
         self.config = config
         self.tokenizer = tokenizer
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
@@ -113,45 +112,67 @@ class BaseController(ABC):
                               stop: list[str] | str | None = None,
                               ) -> GenerationConfig:
         generation_config = GenerationConfig()
-        max_new_tokens = max_completion_tokens or self.generate_config.max_new_tokens
-        if max_new_tokens:
+        generate_opts = self.generate_opts
+        max_new_tokens = max_completion_tokens or generate_opts.max_new_tokens
+        if not max_new_tokens is None:
             generation_config.max_new_tokens = max_new_tokens
-        max_length = max_prompt_tokens or self.generate_config.max_prompt_tokens
-        if max_length:
+        max_length = max_prompt_tokens or generate_opts.max_prompt_tokens
+        if not max_length is None:
             generation_config.max_length = max_length
         generation_config.apply_chat_template = apply_chat_template
 
-        temp = temperature or self.generate_config.temperature
-        if not temp or temp <= 0.0:
-            # Greedy Search
-            generation_config.do_sample = False
-        else:
-            generation_config.do_sample = True
+        temp = temperature or generate_opts.temperature
+
+        generation_config.do_sample = generate_opts.do_sample
+        if not temp is None:
             generation_config.temperature = temp
-            generation_config.top_p = top_p or self.generate_config.top_p
-            generation_config.top_k = self.generate_config.top_k
-            generation_config.min_p = self.generate_config.min_p
 
-            if frequency_penalty:
+        _top_p = top_p or generate_opts.top_p
+        if not _top_p is None:
+            generation_config.top_p = _top_p
+
+        top_k = generate_opts.top_k
+        if not top_k is None:
+            generation_config.top_k = top_k
+        min_p = generate_opts.min_p
+        if not min_p is None:
+            generation_config.min_p = min_p
+
+        if not frequency_penalty is None:
+            generation_config.frequency_penalty = frequency_penalty
+        else:
+            frequency_penalty = generate_opts.frequency_penalty
+            if not frequency_penalty is None:
                 generation_config.frequency_penalty = frequency_penalty
-            else:
-                frequency_penalty = self.generate_config.frequency_penalty
-                if frequency_penalty:
-                    generation_config.frequency_penalty = frequency_penalty
 
-            if logprobs:
-                generation_config.logprobs = 1
+        if logprobs:
+            generation_config.logprobs = 1
 
-        repetition_penalty = self.generate_config.repetition_penalty
-        if repetition_penalty:
+        repetition_penalty = generate_opts.repetition_penalty
+        if not repetition_penalty is None:
             generation_config.repetition_penalty = repetition_penalty
 
-        presence_penalty = self.generate_config.presence_penalty
-        if presence_penalty:
+        presence_penalty = generate_opts.presence_penalty
+        if not presence_penalty is None:
             generation_config.presence_penalty = presence_penalty
 
         stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
         generation_config.stop_strings = stop_set
+
+        if not generate_opts.num_return_sequences is None:
+            generation_config.num_return_sequences = generate_opts.num_return_sequences
+
+        if not generate_opts.num_beams is None:
+            generation_config.num_beams = generate_opts.num_beams
+        if not generate_opts.num_beam_groups is None:
+            generation_config.num_beam_groups = generate_opts.num_beam_groups
+        if not generate_opts.diversity_penalty is None:
+            generation_config.diversity_penalty = generate_opts.diversity_penalty
+        if not generate_opts.length_penalty is None:
+            generation_config.length_penalty = generate_opts.length_penalty
+        if not generate_opts.no_repeat_ngram_size is None:
+            generation_config.no_repeat_ngram_size = generate_opts.no_repeat_ngram_size
+
         return generation_config
 
     async def chat(self, body: ChatCompletionRequest, request: Request):
@@ -204,7 +225,7 @@ class BaseController(ABC):
 
         tokenizer = self.tokenizer
         extra_context = {}
-        model_parameters = self.generate_config.model_parameters
+        model_parameters = self.generate_opts.model_parameters
         if model_parameters:
             extra_context = model_parameters
 
@@ -391,10 +412,10 @@ def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam]
             function = tool_.function
             parameters = getattr(function, "parameters", None)
             if parameters:
-                parameters = deepcopy(parameters)
-                for param_desc in parameters.values():
-                    if "description" in param_desc:
-                        del param_desc["description"]
+                # parameters = deepcopy(parameters)
+                # for param_desc in parameters.values():
+                #     if "description" in param_desc:
+                #         del param_desc["description"]
                 function_name = function.name
                 function_parameters[function_name] = parameters
     return tools_raw, function_parameters

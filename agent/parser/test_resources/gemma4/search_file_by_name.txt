@@ -1,0 +1,1 @@
+<|tool_call>call:search_file_by_name{target_path_or_url: "C:\idempotent-consumer-jdbc/build.gradle.kts"}<tool_call|>
