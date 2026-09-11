@@ -1,5 +1,5 @@
-set MODEL_NAME=Qwen3-Coder-30B-A3B-Instruct
-set MODEL_DEVELOPER=Qwen
+set MODEL_NAME=Qwen3-a3B_eagle3
+set MODEL_DEVELOPER=AngelSlim
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
@@ -9,7 +9,7 @@ set WEIGHT_FORMAT=int4
 
 optimum-cli export openvino ^
   --model %MODEL_PATH% ^
-  --task image-text-to-text ^
+  --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
   --backup-precision int8_sym ^
   --sym ^
@@ -23,9 +23,8 @@ pause
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
 @REM +===========================+=============================+========================================+
-@REM | int8_sym, per-channel     | 2% (2 / 386)                | 0% (0 / 384)                           |
+@REM | int8_sym, per-channel     | 83% (2 / 10)                | 0% (0 / 8)                             |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM | int4_sym, group size 128  | 98% (384 / 386)             | 100% (384 / 384)                       |
+@REM | int4_sym, group size 128  | 17% (8 / 10)                | 100% (8 / 8)                           |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:06:27 • 0:00:00
-
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:03 • 0:00:00
