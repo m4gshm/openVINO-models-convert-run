@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Any, Callable, Literal, Iterable
+from typing import Any, Literal, Iterable
 
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
@@ -23,7 +23,8 @@ from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
-from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str
+from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str, TokenHandler, \
+    TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
@@ -56,24 +57,130 @@ class ControllerConfig(BaseModel):
     chat_template: str = ''
 
 
-def new_http_response(stream: bool,
-                      chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
+def new_http_response_chat(stream: bool,
+                           chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
     if stream:
         return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
     else:
-        finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
-        return new_chat_completion(
-            finish_reason=finish_reason,
-            content=full_content,
-            reasoning_content=full_reasoning_content,
-            tool_calls=full_tool_calls)
+        return new_chat_completion_union(chunk_generator)
+
+
+def new_http_response_completions(stream: bool,
+                                  chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
+    def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
+        completions_api.CompletionResponse]:
+        def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
+            return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
+                convert_choice(c) for c in r.choices])
+
+        def convert_choice(chat_completion_choice: Choice) -> completions_api.CompletionChoice:
+            delta = chat_completion_choice.delta
+            content = delta.content if delta and delta.content else ""
+            reason: Literal["stop"] | None = "stop" if chat_completion_choice.finish_reason else None
+            return completions_api.CompletionChoice(text=content, finish_reason=reason)
+
+        for c in chunk_generator:
+            yield convert_response(c)
+
+    if stream:
+        return StreamingResponse(stream_generator(chunk_converter(chunk_generator)), media_type="text/event-stream")
+    else:
+        return new_chat_completion_union(chunk_generator)
+
+
+def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) -> ChatCompletion:
+    finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
+    response_id = str(uuid.uuid4())
+    return new_chat_completion(response_id=response_id, finish_reason=finish_reason, content=full_content,
+                               reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
+
+
+def new_generation_config(generate_opts: GenerateOpts,
+                          temperature: float | None,
+                          max_completion_tokens: int | None,
+                          max_prompt_tokens: int | None = None,
+                          top_p: float | None = None,
+                          frequency_penalty: float | None = None,
+                          apply_chat_template: bool = False,
+                          logprobs: bool | None = None,
+                          stop: list[str] | str | None = None,
+                          ) -> GenerationConfig:
+    generation_config = GenerationConfig()
+    max_new_tokens = max_completion_tokens or generate_opts.max_new_tokens
+    if not max_new_tokens is None:
+        generation_config.max_new_tokens = max_new_tokens
+    max_length = max_prompt_tokens or generate_opts.max_prompt_tokens
+    if not max_length is None:
+        generation_config.max_length = max_length
+    generation_config.apply_chat_template = apply_chat_template
+
+    temp = temperature or generate_opts.temperature
+
+    generation_config.do_sample = generate_opts.do_sample
+    if not temp is None:
+        generation_config.temperature = temp
+
+    _top_p = top_p or generate_opts.top_p
+    if not _top_p is None:
+        generation_config.top_p = _top_p
+
+    top_k = generate_opts.top_k
+    if not top_k is None:
+        generation_config.top_k = top_k
+    min_p = generate_opts.min_p
+    if not min_p is None:
+        generation_config.min_p = min_p
+
+    if not frequency_penalty is None:
+        generation_config.frequency_penalty = frequency_penalty
+    else:
+        frequency_penalty = generate_opts.frequency_penalty
+        if not frequency_penalty is None:
+            generation_config.frequency_penalty = frequency_penalty
+
+    if logprobs:
+        generation_config.logprobs = 1
+
+    repetition_penalty = generate_opts.repetition_penalty
+    if not repetition_penalty is None:
+        generation_config.repetition_penalty = repetition_penalty
+
+    presence_penalty = generate_opts.presence_penalty
+    if not presence_penalty is None:
+        generation_config.presence_penalty = presence_penalty
+
+    stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
+    generation_config.stop_strings = stop_set
+
+    if not generate_opts.num_return_sequences is None:
+        generation_config.num_return_sequences = generate_opts.num_return_sequences
+
+    if not generate_opts.num_beams is None:
+        generation_config.num_beams = generate_opts.num_beams
+    if not generate_opts.num_beam_groups is None:
+        generation_config.num_beam_groups = generate_opts.num_beam_groups
+    if not generate_opts.diversity_penalty is None:
+        generation_config.diversity_penalty = generate_opts.diversity_penalty
+    if not generate_opts.length_penalty is None:
+        generation_config.length_penalty = generate_opts.length_penalty
+    if not generate_opts.no_repeat_ngram_size is None:
+        generation_config.no_repeat_ngram_size = generate_opts.no_repeat_ngram_size
+
+    return generation_config
+
+
+def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
+    encode_size = tokenizer.encode(prompt).input_ids.size
+    return encode_size
 
 
 class BaseController(ABC):
     def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
+                 handler_config: TokenHandlerConfig,
                  generate_opts: GenerateOpts, stop_signal: threading.Event):
         self.parser = parser
         self.generate_opts = generate_opts
+        self.handler_config = handler_config
         self.config = config
         self.tokenizer = tokenizer
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
@@ -101,80 +208,6 @@ class BaseController(ABC):
             content={"detail": exc.errors()},
         )
 
-    def new_generation_config(self,
-                              temperature: float | None,
-                              max_completion_tokens: int | None,
-                              max_prompt_tokens: int | None = None,
-                              top_p: float | None = None,
-                              frequency_penalty: float | None = None,
-                              apply_chat_template: bool = False,
-                              logprobs: bool | None = None,
-                              stop: list[str] | str | None = None,
-                              ) -> GenerationConfig:
-        generation_config = GenerationConfig()
-        generate_opts = self.generate_opts
-        max_new_tokens = max_completion_tokens or generate_opts.max_new_tokens
-        if not max_new_tokens is None:
-            generation_config.max_new_tokens = max_new_tokens
-        max_length = max_prompt_tokens or generate_opts.max_prompt_tokens
-        if not max_length is None:
-            generation_config.max_length = max_length
-        generation_config.apply_chat_template = apply_chat_template
-
-        temp = temperature or generate_opts.temperature
-
-        generation_config.do_sample = generate_opts.do_sample
-        if not temp is None:
-            generation_config.temperature = temp
-
-        _top_p = top_p or generate_opts.top_p
-        if not _top_p is None:
-            generation_config.top_p = _top_p
-
-        top_k = generate_opts.top_k
-        if not top_k is None:
-            generation_config.top_k = top_k
-        min_p = generate_opts.min_p
-        if not min_p is None:
-            generation_config.min_p = min_p
-
-        if not frequency_penalty is None:
-            generation_config.frequency_penalty = frequency_penalty
-        else:
-            frequency_penalty = generate_opts.frequency_penalty
-            if not frequency_penalty is None:
-                generation_config.frequency_penalty = frequency_penalty
-
-        if logprobs:
-            generation_config.logprobs = 1
-
-        repetition_penalty = generate_opts.repetition_penalty
-        if not repetition_penalty is None:
-            generation_config.repetition_penalty = repetition_penalty
-
-        presence_penalty = generate_opts.presence_penalty
-        if not presence_penalty is None:
-            generation_config.presence_penalty = presence_penalty
-
-        stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
-        generation_config.stop_strings = stop_set
-
-        if not generate_opts.num_return_sequences is None:
-            generation_config.num_return_sequences = generate_opts.num_return_sequences
-
-        if not generate_opts.num_beams is None:
-            generation_config.num_beams = generate_opts.num_beams
-        if not generate_opts.num_beam_groups is None:
-            generation_config.num_beam_groups = generate_opts.num_beam_groups
-        if not generate_opts.diversity_penalty is None:
-            generation_config.diversity_penalty = generate_opts.diversity_penalty
-        if not generate_opts.length_penalty is None:
-            generation_config.length_penalty = generate_opts.length_penalty
-        if not generate_opts.no_repeat_ngram_size is None:
-            generation_config.no_repeat_ngram_size = generate_opts.no_repeat_ngram_size
-
-        return generation_config
-
     async def chat(self, body: ChatCompletionRequest, request: Request):
         headers = request.headers
         host = headers.get("host")
@@ -186,7 +219,6 @@ class BaseController(ABC):
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
         stream = body.stream == True
-
         messages = body.messages
         tools = body.tools
 
@@ -208,22 +240,20 @@ class BaseController(ABC):
         user_context.model_architectures = self.config.model_architectures
 
         last_message = messages[-1] if messages else None
-
         if last_message:
             if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
                     last_message.content).lower():
-                return new_http_response(stream, [
+                return new_http_response_chat(stream, [
                     new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
             elif last_message.role == ROLE_TOOL:
                 log_client_generated.debug(last_message.content)
 
         invalid_response = self.validate_messages(messages, tools)
         if invalid_response:
-            return new_http_response(stream, [invalid_response])
+            return new_http_response_chat(stream, [invalid_response])
 
         tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
 
-        tokenizer = self.tokenizer
         extra_context = {}
         model_parameters = self.generate_opts.model_parameters
         if model_parameters:
@@ -234,33 +264,42 @@ class BaseController(ABC):
         log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
                   f"extra_context={extra_context}")
 
-        full_prompt = tokenizer.apply_chat_template(history=chat_history,
+        prompt = self.tokenizer.apply_chat_template(history=chat_history,
                                                     tools=tools_raw,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,
                                                     chat_template=self.config.chat_template)
 
-        self.log_inference_prompt.debug(full_prompt)
+        self.log_inference_prompt.debug(prompt)
 
         def is_stop():
             return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
-        chunk_generator = self.chunk_generator(
-            prompt=full_prompt, generation_config=(
-                self.new_generation_config(temperature=body.temperature,
-                                           max_completion_tokens=(body.max_tokens or body.max_completion_tokens),
-                                           top_p=body.top_p, frequency_penalty=body.frequency_penalty,
-                                           logprobs=body.logprobs, stop=body.stop)), tokenizer=tokenizer,
-            init_chat_events=True, is_stop=is_stop,
-            is_veai=is_veai, user_context=user_context, function_parameters=function_parameters)
-        return new_http_response(stream, chunk_generator)
+        generation_config = new_generation_config(temperature=body.temperature,
+                                                  generate_opts=self.generate_opts,
+                                                  max_completion_tokens=(
+                                                          body.max_tokens or body.max_completion_tokens),
+                                                  top_p=body.top_p, frequency_penalty=body.frequency_penalty,
+                                                  logprobs=body.logprobs, stop=body.stop)
+
+        token_handler = TokenHandler(tokenizer=self.tokenizer,
+                                     prompt=prompt,
+                                     parser=self.parser,
+                                     init_chat_events=True,
+                                     is_stop=is_stop,
+                                     is_veai=is_veai,
+                                     config=self.handler_config,
+                                     supported_functions=function_parameters,
+                                     user_context=user_context,
+                                     )
+
+        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                               token_handler=token_handler)
+        return new_http_response_chat(stream, chunk_generator)
 
     @abstractmethod
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_parameters: dict[str, dict] | None = None,
-                        user_context: UserContext | None = None,
-                        ) -> Iterable[ChatCompletionChunk]:
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler) -> \
+            Iterable[ChatCompletionChunk]:
         pass
 
     def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
@@ -299,40 +338,27 @@ class BaseController(ABC):
 
         self.log_inference_prompt.debug(prompt)
 
-        generation_config = self.new_generation_config(temperature=body.temperature,
-                                                       max_completion_tokens=body.max_tokens)
-        response_id = str(uuid.uuid4())
-
         def is_stop():
             return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
+        generation_config = new_generation_config(temperature=body.temperature,
+                                                  generate_opts=self.generate_opts,
+                                                  max_completion_tokens=body.max_tokens)
+
+        token_handler = TokenHandler(tokenizer=self.tokenizer,
+                                     prompt=prompt,
+                                     parser=self.parser,
+                                     init_chat_events=True,
+                                     is_stop=is_stop,
+                                     is_veai=False,
+                                     config=self.handler_config,
+                                     )
+
         stream = body.stream
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               tokenizer=self.tokenizer, init_chat_events=True,
-                                               is_stop=is_stop, is_veai=False)
+                                               token_handler=token_handler)
 
-        def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
-            completions_api.CompletionResponse]:
-            def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
-                return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
-                    convert_choice(c) for c in r.choices])
-
-            def convert_choice(chat_completion_choice: Choice) -> completions_api.CompletionChoice:
-                delta = chat_completion_choice.delta
-                content = delta.content if delta and delta.content else ""
-                reason: Literal["stop"] | None = "stop" if chat_completion_choice.finish_reason else None
-                return completions_api.CompletionChoice(text=content, finish_reason=reason)
-
-            for c in chunk_generator:
-                yield convert_response(c)
-
-        if stream:
-            return StreamingResponse(stream_generator(chunk_converter(chunk_generator)), media_type="text/event-stream")
-        else:
-            finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
-            return new_chat_completion(response_id=response_id,
-                                       finish_reason=finish_reason, content=full_content,
-                                       reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
+        return new_http_response_completions(stream, chunk_generator)
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         if encode_size >= max_length:
@@ -340,10 +366,6 @@ class BaseController(ABC):
                                              model=self.config.model_name, finish_reason=LENGTH,
                                              content=f"prompt exceeds limit: {encode_size} >= {max_length}")
         return None
-
-    def get_tokens_size(self, prompt: str) -> int:
-        encode_size = self.tokenizer.encode(prompt).input_ids.size
-        return encode_size
 
 
 def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[

@@ -5,7 +5,6 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
-import openvino_genai
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from openvino_genai import py_openvino_genai
@@ -33,7 +32,8 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None,
-                                    chat_template='') -> FastAPI:
+                                    chat_template='',
+                                    draft_model_path: str | None = None) -> FastAPI:
     log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}, "
              f"scheduler_config {scheduler_config.to_string()}")
 
@@ -47,12 +47,14 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
     if not vision_encoder_properties:
         vision_encoder_properties = {}
     try:
-        pipe = openvino_genai.ContinuousBatchingPipeline(models_path=model_path,
-                                                         scheduler_config=scheduler_config,
-                                                         device=device,
-                                                         properties=pipeline_properties,
-                                                         tokenizer_properties=tokenizer_properties,
-                                                         vision_encoder_properties=vision_encoder_properties)
+        if draft_model_path:
+            pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device)
+        pipe = py_openvino_genai.ContinuousBatchingPipeline(models_path=model_path,
+                                                            scheduler_config=scheduler_config,
+                                                            device=device,
+                                                            properties=pipeline_properties,
+                                                            tokenizer_properties=tokenizer_properties,
+                                                            vision_encoder_properties=vision_encoder_properties)
         log.info(f"model loaded successfully, pipe {type(pipe)}")
 
         loaded_pipe_mem = get_current_memory()
@@ -81,23 +83,28 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
                            is_fix_tool_type: bool,
                            if_detect_cycled_tool_call: bool,
                            stop_signal: threading.Event,
+                           scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
-                           pipeline_properties: dict[str, Any] | None = None, chat_template='') -> FastAPI:
+                           pipeline_properties: dict[str, Any] | None = None, chat_template='',
+                           draft_model_path: str | None = None,
+                           ) -> FastAPI:
     if not pipeline_properties:
         pipeline_properties = {}
+    if scheduler_config:
+        pipeline_properties["scheduler_config"] = scheduler_config
 
     log.info(f"model loading {model_name}, device: {device}, properties: {pipeline_properties}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
-    if vlm:
-        pipe = openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties)
-    else:
-        pipe = openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
-    # if chat_template:
-    #     pipe.set_chat_template(chat_template)
+    if draft_model_path:
+        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device)
+    pipe = (
+        py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
+        py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
+    )
 
     log.info(f"model loaded successfully, pipe {type(pipe)}")
     loaded_pipe_mem = get_current_memory()

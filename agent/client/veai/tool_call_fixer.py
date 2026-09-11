@@ -338,6 +338,8 @@ def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, conte
     file_content_lines: list[str] = split_lines(file_content_str) if file_content_str else []
 
     if not file_content_lines:
+        log.debug(
+            f"no target_file content in context, target_file={target_file}, context_files={context.files.get_files()}")
         return None, ""
 
     stop = False

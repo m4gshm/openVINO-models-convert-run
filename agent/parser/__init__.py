@@ -32,7 +32,7 @@ class ParserState:
         self.__events: list[StateEvent] = []
         self.role: Literal["developer", "system", "user", "assistant", "tool"] | None = None
         self.prefill_tokens: list[str] | None = None
-        self.probably_tool_call = False
+        self.is_streaming_delayed = False
 
     def get_function_parameters(self, func_name: str) -> dict:
         supported_functions = self.supported_functions
@@ -115,7 +115,7 @@ class Parser[State: ParserState]():
     def is_text_end(self, state: State, token: str) -> bool:
         return False
 
-    def is_probably_tool_call_start(self, state: State, token: str) -> bool:
+    def is_delay_streaming(self, state: State, token: str) -> bool:
         return False
 
     def is_tool_call_start(self, state: State, token: str) -> bool:

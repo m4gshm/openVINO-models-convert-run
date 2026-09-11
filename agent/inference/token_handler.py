@@ -17,7 +17,6 @@ from agent.common.time import format_time
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import Phrase
 from agent.openai.chat_api import new_chat_completion_chunk, new_tool_call, new_stop_response, ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
@@ -128,7 +127,6 @@ class TokenHandler:
     def __init__(self,
                  tokenizer: Tokenizer,
                  prompt: str,
-                 prompt_tokens_amount: int,
                  parser: Parser,
                  init_chat_events: bool,
                  is_stop: Callable[[], bool] | None,
@@ -137,8 +135,7 @@ class TokenHandler:
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, dict] | None = None):
         super().__init__()
-        self.processor = TokenProcessor(prompt=prompt, prompt_tokens_amount=prompt_tokens_amount,
-                                        parser=parser, init_chat_events=init_chat_events,
+        self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
                                         config=config, is_veai=is_veai, user_context=user_context,
                                         supported_functions=supported_functions)
         self.start_time: datetime | None = None
@@ -178,8 +175,10 @@ class TokenProcessor:
         self.phrase_tick = None
 
     def __clean_tool_call_phrase(self):
-        print_log(self.tool_call_phrase)
-        self.tool_call_phrase = Phrase()
+        call_phrase = self.tool_call_phrase
+        print_log(call_phrase)
+        phrase = Phrase()
+        self.tool_call_phrase = phrase
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
 
@@ -189,7 +188,6 @@ class TokenProcessor:
                  init_chat_events: bool,
                  config: TokenHandlerConfig,
                  is_veai: bool,
-                 prompt_tokens_amount: int = 0,
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, dict] | None = None):
         super().__init__()
@@ -219,7 +217,6 @@ class TokenProcessor:
         self.stop_inference = False
         self.token_counter = 0
         self.role_initialized = False
-        self.prompt_tokens_amount = prompt_tokens_amount
 
     def get_stat_info(self) -> str | None:
         stat_info = None
@@ -229,11 +226,9 @@ class TokenProcessor:
             time_delta = now - start_time
             amount = self.token_counter
             total_seconds = time_delta.total_seconds()
-            ftt = (start_time - self.create_time).total_seconds()
-            prompt_tokens_amount = self.prompt_tokens_amount
+            ttft = (start_time - self.create_time).total_seconds()
             stat_info = (
-                f"generated {amount} token{end(amount)} in {time_delta} sec, {amount / total_seconds} t/sec), "
-                f"prompt processed {prompt_tokens_amount} token{end(prompt_tokens_amount)} in {ftt} sec"
+                f"generated {amount} token{end(amount)} in {time_delta} sec, {amount / total_seconds} t/sec), ttft {ttft} sec"
             )
         return stat_info
 
@@ -284,12 +279,6 @@ class TokenProcessor:
             # ignore stop signal
             result, _ = self.conversation_end(state, token_number)
         elif parser.is_sequence_end(state, token):
-            if self.state.probably_tool_call:
-                content = self.tool_call_phrase.full
-                delayed_chunk = new_chat_completion_chunk(role=state.role, content=content,
-                                                          thinking=(state.has_event(StateEvent.THINK)))
-                result.append(delayed_chunk)
-                self.state.probably_tool_call = False
             conversation_end_result, stop_signal = self.conversation_end(state, token_number)
             result.extend(conversation_end_result)
 
@@ -307,11 +296,6 @@ class TokenProcessor:
                 self.thinking_start(state)
         elif parser.is_think_end(state, token):
             self.thinking_end(state)
-        elif not self.state.probably_tool_call and parser.is_probably_tool_call_start(state,
-                                                                                      token) and current_event == StateEvent.CONVERSATION:
-            log.info(f"probably tool call is started by token '{token}'")
-            self.tool_call_start(state, token)
-            self.state.probably_tool_call = True
         elif parser.is_tool_call_start(state, token):
             if current_event == StateEvent.TOOL_CALL:
                 log.debug(f"tool call is finished by starting new tool call: '{token}'")
@@ -331,74 +315,73 @@ class TokenProcessor:
         elif parser.is_fim_middle(state, token):
             state.start_event(StateEvent.FIM_MIDDLE)
         elif parser.is_end(state, token):
-            # log
+            log.debug(f"parsed end: {token}")
             stop_signal = StopSignal.STOP
-        else:
-            if current_event == StateEvent.TOOL_CALL:
-                loop_error: str | None = None
-                try:
-                    self.tool_call_phrase.add_token(token)
-                except LoopError as e:
-                    log.error(f"tool call error: {e}")
-                    loop_error = markdown_tool_call_loop_error(e.message + " (tool call)", e.payload)
+        elif current_event == StateEvent.TOOL_CALL:
+            loop_error: str | None = None
+            try:
+                self.tool_call_phrase.add_token(token)
+            except LoopError as e:
+                log.error(f"tool call error: {e}")
+                loop_error = markdown_tool_call_loop_error(e.message + " (tool call)", e.payload)
 
-                if loop_error:
-                    tool_call, stop_signal = self.tool_call_end(state, token)
-                    result.append(new_chat_completion_chunk(role=state.role, content=loop_error))
-                    result.append(tool_call)
-                else:
-                    parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
-                    if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
-                        time = format_time(self.config.tool_call_parting_duration_warning)
-                        warning_msg = markdown_bold(f"WARNING: Long tool call calling({time})") + "\n"
-                        result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
-                        self.tool_call_parsing_long_time_warned = True
-                    elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
-                        time = format_time(self.config.tool_call_parting_duration_limit)
-                        warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {time}.\n"
-                                                    ) + markdown_file_content(self.tool_call_phrase.full)
-                        result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
-                        self.tool_call_parsing_max_time_warned = True
-                    tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
-                    if tool_call_snapshot_time >= 10:
-                        self.tool_call_parsing_tick = now_time
-                        log.debug(f"tool call part: {self.tool_call_phrase.full}")
+            if loop_error:
+                tool_call, stop_signal = self.tool_call_end(state, token)
+                result.append(new_chat_completion_chunk(role=state.role, content=loop_error))
+                result.append(tool_call)
             else:
-                loop_error: str | None = None
-                try:
-                    new_lines = self.phrase.add_token(token)
-                except LoopError as e:
-                    new_lines = None
-                    log.error(f"loop error: {e}")
-                    loop_error = markdown_tool_call_loop_error(e.message, e.payload)
+                parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
+                if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
+                    time = format_time(self.config.tool_call_parting_duration_warning)
+                    warning_msg = markdown_bold(f"WARNING: Long tool call calling({time})") + "\n"
+                    result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
+                    self.tool_call_parsing_long_time_warned = True
+                elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
+                    time = format_time(self.config.tool_call_parting_duration_limit)
+                    warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {time}.\n"
+                                                ) + markdown_file_content(self.tool_call_phrase.full)
+                    result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
+                    self.tool_call_parsing_max_time_warned = True
+                tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
+                if tool_call_snapshot_time >= 10:
+                    self.tool_call_parsing_tick = now_time
+                    log.debug(f"tool call part: {self.tool_call_phrase.full}")
+        else:
+            loop_error: str | None = None
+            try:
+                new_lines = self.phrase.add_token(token)
+            except LoopError as e:
+                new_lines = None
+                log.error(f"loop error: {e}")
+                loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
-                if loop_error:
-                    result.append(new_chat_completion_chunk(role=state.role, content=loop_error))
-                    stop_signal = StopSignal.CANCEL
-                else:
-                    if self.phrase_tick is None:
-                        self.phrase_tick = now_time
+            if loop_error:
+                result.append(new_chat_completion_chunk(role=state.role, content=loop_error))
+                stop_signal = StopSignal.CANCEL
+            else:
+                if self.phrase_tick is None:
+                    self.phrase_tick = now_time
 
-                    if new_lines and len(new_lines) > 0:
-                        log.info(f"{state.role} phrase: '{"".join(new_lines)}', last token num: {token_number}")
+                if new_lines and len(new_lines) > 0:
+                    log.info(f"{state.role} phrase: '{"".join(new_lines)}', last token num: {token_number}")
 
-                    if not self.is_chat_mode:
-                        result.append(new_chat_completion_chunk(role=state.role, content=token))
+                if not self.is_chat_mode:
+                    result.append(new_chat_completion_chunk(role=state.role, content=token))
 
-                    erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
-                    is_assistant = ROLE_ASSISTANT == self.state.role
-                    if not is_assistant:
-                        log.warning(f"unexpected role {state.role}")
-                    if is_assistant or not self.config.prevent_no_assistant_inference_output:
-                        if not erase:
-                            result.append(new_chat_completion_chunk(role=state.role, content=token,
-                                                                    thinking=(state.has_event(StateEvent.THINK))))
-                        else:
-                            log.debug(f"erase token: {token}")
-                            pass
+                erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
+                is_assistant = ROLE_ASSISTANT == state.role
+                if not is_assistant:
+                    log.warning(f"unexpected role {state.role}")
+                if is_assistant or not self.config.prevent_no_assistant_inference_output:
+                    if not erase:
+                        result.append(new_chat_completion_chunk(role=state.role, content=token,
+                                                                thinking=(state.has_event(StateEvent.THINK))))
                     else:
-                        log.warning(
-                            f"prevent generating by unexpected role {state.role}, token '{token}'")
+                        log.debug(f"erase token: {token}")
+                        pass
+                else:
+                    log.warning(
+                        f"prevent generating by unexpected role {state.role}, token '{token}'")
         state.finalize(token)
         return result, stop_signal
 
@@ -471,17 +454,21 @@ class TokenProcessor:
             self.expect_role = True
 
     def handle_tool_call(self, state: ParserState) -> tuple[ChatCompletionChunk, Literal[StopSignal.TOOL_CALL]]:
+        user_context = self.user_context
+        is_veai = self.is_veai
+        parser = self.parser
         tool_call_phrase = self.tool_call_phrase
+
         tool_call_expression = tool_call_phrase.full
-        parsed_function_calls, partial = self.parser.parse_tool_calls(state, tool_call_expression)
+        parsed_function_calls, partial = parser.parse_tool_calls(state, tool_call_expression)
         if len(parsed_function_calls) == 0:
             log.info(f"phrase like tool calls: {tool_call_expression}")
             chunk = new_chat_completion_chunk(role=state.role, content=tool_call_expression)
         else:
-            if self.is_veai:
+            if is_veai:
                 fixed_tool_calls = []
                 for tc in parsed_function_calls:
-                    arguments = veai_fix_incorrect_arguments(tc, user_context=self.user_context)
+                    arguments = veai_fix_incorrect_arguments(tc, user_context=user_context)
                     if isinstance(arguments, list):
                         for arg in arguments:
                             fixed_tool_calls.append(arg)
@@ -497,20 +484,20 @@ class TokenProcessor:
                 log.debug(f"tool calls: parsed={parsed_str}, fixed={fixed_str}")
             chunk = new_chat_completion_chunk(role=state.role,
                                               tool_calls=list(map(to_openai_tool_call, fixed_tool_calls)))
-
         self.__clean_tool_call_phrase()
         return chunk, StopSignal.TOOL_CALL
 
     def tool_call_end(self, state: ParserState, token: str | None) -> tuple[
         ChatCompletionChunk, Literal[StopSignal.TOOL_CALL]]:
         self.tool_call_parsing_start_time = None
+        tool_call_phrase = self.tool_call_phrase
         state.finish_current_event(expected_state=StateEvent.TOOL_CALL)
         if token:
             try:
-                self.tool_call_phrase.add_token(token)
+                tool_call_phrase.add_token(token)
             except LoopError as e:
-                log.warning(f"loop at the end of tool call {self.tool_call_phrase.full}")
-        log.debug(f"tool call end: {self.tool_call_phrase.full}")
+                log.warning(f"loop at the end of tool call {tool_call_phrase.full}")
+        log.debug(f"tool call end: {tool_call_phrase.full}")
 
         return self.handle_tool_call(state)
 

@@ -4,20 +4,20 @@ import threading
 import uuid
 from collections import abc
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Iterable
+from typing import Iterable
 from typing import SupportsInt, Literal
 
 from openai.types.chat import ChatCompletionChunk
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
-    Tokenizer, VLMDecodedResults, GenerationConfig
+    VLMDecodedResults, GenerationConfig
+from starlette.requests import Request
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal
+from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal, get_tokens_size
 from agent.parser import Parser
 
 log = logging.getLogger(__name__)
@@ -26,21 +26,18 @@ log = logging.getLogger(__name__)
 class VlmController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event, generate_opts: GenerateOpts):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_opts, stop_signal)
+        super().__init__(config, parser, pipe.get_tokenizer(), handler_config, generate_opts, stop_signal)
         self.pipe = pipe
-        self.handler_config = handler_config
-        self.config = config
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_parameters: dict[str, dict] | None = None, user_context=None,
-                        ) -> Iterable[ChatCompletionChunk]:
+                        token_handler: TokenHandler) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
-        prompt_tokens_amount = self.get_tokens_size(prompt)
+        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
         max_length = generation_config.max_length
+
         over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
         if over_limit_response:
@@ -52,8 +49,6 @@ class VlmController(BaseController):
             stop_stream_handling: queue.Queue[bool] = queue.Queue()
             start_stream_handling: queue.Queue[bool] = queue.Queue()
             before_generate_mem = get_current_memory()
-
-            prompt_tokens_amount = self.get_tokens_size(prompt)
             max_length = generation_config.max_length
 
             def run_inference():
@@ -74,13 +69,6 @@ class VlmController(BaseController):
                         )
                     else:
                         self.log_inference.info(f"inference start")
-                    token_handler = TokenHandler(tokenizer=tokenizer,
-                                                 prompt=prompt,
-                                                 prompt_tokens_amount=prompt_tokens_amount,
-                                                 parser=self.parser,
-                                                 init_chat_events=init_chat_events,
-                                                 is_stop=is_stop, is_veai=is_veai, config=self.handler_config,
-                                                 supported_functions=function_parameters, user_context=user_context)
                     streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
@@ -140,7 +128,6 @@ class VlmController(BaseController):
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
                     vlm_pipe: VLMPipeline = pipe
-
                     generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
                                                         streamer=streamer)
                 elif isinstance(pipe, LLMPipeline):
@@ -156,7 +143,7 @@ class VlmController(BaseController):
                 start_stream_handling.get()
                 stop_inference = False
                 while not stop_inference:
-                    if is_stop():
+                    if token_handler.is_stop():
                         log.info("inference stopped by signal")
                         break
                     try:

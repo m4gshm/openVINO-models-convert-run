@@ -3,22 +3,20 @@ import logging
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from typing import Callable, Iterable
+from typing import Iterable
 from typing import Literal
 
 from openai.types.chat import ChatCompletionChunk
 from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason, \
-    GenerationConfig, Tokenizer, GenerationStatus
+    GenerationConfig, GenerationStatus
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
     markdown_bold, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal
+from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal, get_tokens_size
 from agent.parser import Parser, StateEvent
 
 log = logging.getLogger(__name__)
@@ -29,11 +27,8 @@ request_counter = itertools.count(start=0)
 class ContinuousBatchingController(BaseController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event, generate_opts: GenerateOpts):
-        super().__init__(config, parser, pipe.get_tokenizer(), generate_opts, stop_signal)
+        super().__init__(config, parser, pipe.get_tokenizer(), handler_config, generate_opts, stop_signal)
         self.pipe = pipe
-        self.handler_config = handler_config
-        self.config = config
-        self.executor = ThreadPoolExecutor()
         self.active_handles_lock = threading.Lock()
         self.active_handles: dict[int, GenerationHandle] = {}
 
@@ -65,23 +60,25 @@ class ContinuousBatchingController(BaseController):
             self.pipe = None
             del pipe
 
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        tokenizer: Tokenizer, init_chat_events: bool, is_stop: Callable[[], bool], is_veai: bool,
-                        function_parameters: dict[str, dict] | None = None, user_context=None,
-                        ) -> Iterable[ChatCompletionChunk]:
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler) -> \
+            Iterable[ChatCompletionChunk]:
+        model_name = self.config.model_name
+
         before_generate_mem = get_current_memory()
         request_id = next(request_counter)
-        response_id = str(uuid.uuid4())
-        model_name = self.config.model_name
-        stop_response = new_stop_response(response_id=response_id, model=model_name, role=None)
 
-        prompt_tokens_amount = self.get_tokens_size(prompt)
+        response_id = str(uuid.uuid4())
+        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
         max_length = generation_config.max_length
+
         over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
         if over_limit_response:
             yield over_limit_response
             return
+
+        stop_response = new_stop_response(response_id=response_id, model=model_name, role=None)
+
         if self.log_inference.isEnabledFor(logging.DEBUG):
             self.log_inference.debug(
                 f"inference start: request={request_id}, "
@@ -98,17 +95,6 @@ class ContinuousBatchingController(BaseController):
             )
         else:
             self.log_inference.info(f"inference start: request={request_id}")
-
-        token_handler = TokenHandler(tokenizer=tokenizer,
-                                     prompt=prompt,
-                                     prompt_tokens_amount=prompt_tokens_amount,
-                                     parser=self.parser,
-                                     init_chat_events=init_chat_events,
-                                     is_stop=is_stop,
-                                     is_veai=is_veai,
-                                     config=self.handler_config,
-                                     supported_functions=function_parameters,
-                                     )
 
         generation_handle: GenerationHandle
         try:
@@ -143,8 +129,6 @@ class ContinuousBatchingController(BaseController):
             if response_timeout:
                 yield stop_response
             else:
-                unique_id = str(uuid.uuid4())
-
                 def read():
                     empty_tokens_limit = 100
                     empty_out_counter = 0
@@ -198,7 +182,7 @@ class ContinuousBatchingController(BaseController):
                                         add_stop_signal(responses, stop_signal)
 
                                     for response in responses:
-                                        response.id = unique_id
+                                        response.id = response_id
                                         response.model = model_name
                                         yield response
                                     if stop_signal:
@@ -216,7 +200,7 @@ class ContinuousBatchingController(BaseController):
                                 if stop_signal:
                                     add_stop_signal(responses, stop_signal)
                                 for response in responses:
-                                    response.id = unique_id
+                                    response.id = response_id
                                     response.model = model_name
                                     yield response
                             return

@@ -10,7 +10,7 @@ vars:
 tasks:
   init-venv:
     status:
-    - test -d .venv
+      - test -d .venv
     cmds:
       - "{{.SYS_PYTHON}} -m venv {{.VENV_DIR}}"
   install:
@@ -23,7 +23,9 @@ tasks:
       - "{{.PROJECT_DIR}}/requirements.txt"
     generates:
       - "{{.VENV_DIR}}/**/*"
-
+  instal-openvino-nightly:
+    - "{{.VENV_BIN}}pip install --pre -U openvino --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly
+  
   activate:
     deps:
       - init-venv
@@ -56,4 +58,3 @@ tasks:
       - '{{if eq OS "windows"}}rmdir /s /q {{.VENV_DIR}}{{else}}rm -rf {{.VENV_DIR}}{{end}}'
       - '{{if eq OS "windows"}}rmdir /s /q .pytest_cache{{else}}rm -rf .pytest_cache{{end}}'
     silent: true
-
