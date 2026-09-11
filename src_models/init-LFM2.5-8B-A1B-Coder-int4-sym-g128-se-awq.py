@@ -1,8 +1,11 @@
 import gc
+import json
 import os
 import shutil
 from pathlib import Path
 
+from openvino import save_model
+from openvino_tokenizers import convert_tokenizer
 from optimum.intel.openvino import OVQuantizer, OVModelForCausalLM
 from optimum.intel.openvino.configuration import OVConfig
 
@@ -85,6 +88,49 @@ finally:
             shutil.rmtree(TMP_FP16_DIR)
         except Exception:
             print(f"[!] Не удалось удалить временную папку {TMP_FP16_DIR}, удалите её вручную после завершения работы.")
+
+print("--> Восстановление chat_template для OpenVINO GenAI...")
+orig_config_path = Path(MODEL_ID) / "tokenizer_config.json"
+dest_config_path = Path(SAVE_DIR) / "tokenizer_config.json"
+
+if orig_config_path.exists() and dest_config_path.exists():
+    # Читаем оригинальный конфиг токенизатора
+    with open(orig_config_path, "r", encoding="utf-8") as f:
+        orig_data = json.load(f)
+
+    # Читаем созданный Optimum конфиг токенизатора
+    with open(dest_config_path, "r", encoding="utf-8") as f:
+        dest_data = json.load(f)
+
+    # Извлекаем шаблон чата. Проверяем стандартное поле и альтернативные варианты
+    chat_template = orig_data.get("chat_template")
+
+    if chat_template:
+        dest_data["chat_template"] = chat_template
+        # Записываем обратно исправленный файл в готовую модель
+        with open(dest_config_path, "w", encoding="utf-8") as f:
+            json.dump(dest_data, f, ensure_ascii=False, indent=2)
+        print("--> Шаблон чата успешно скопирован в итоговую модель!")
+    else:
+        print("[!] Ошибка: В исходном tokenizer_config.json не найден chat_template.")
+else:
+    print("[!] Не удалось найти файлы конфигурации токенизатора для восстановления.")
+
+# Путь к вашей готовой квантованной модели
+SAVE_DIR = "../models/LFM2.5-8B-A1B-Coder-int4-sym-g128-se-awq"
+
+print("--> Компиляция токенизатора в формат OpenVINO IR...")
+try:
+    # Загружаем JSON-токенизатор из папки и конвертируем его в OpenVINO структуру
+    ov_tokenizer_model = convert_tokenizer(SAVE_DIR, with_detokenizer=True)
+
+    # Сохраняем openvino_tokenizer.xml и openvino_tokenizer.bin прямо в папку модели
+    save_model(ov_tokenizer_model, Path(SAVE_DIR) / "openvino_tokenizer.xml")
+    print(f"--> Успешно! Файлы openvino_tokenizer.xml/.bin добавлены в {SAVE_DIR}")
+
+except Exception as e:
+    print(f"[!] Ошибка при конвертации токенизатора: {e}")
+    print("Проверьте, установлена ли библиотека: pip install openvino-tokenizers")
 
 # Statistics collection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 128/128 • 0:07:32 • 0:00:00
 # INFO:nncf:Statistics of the bitwidth distribution:
