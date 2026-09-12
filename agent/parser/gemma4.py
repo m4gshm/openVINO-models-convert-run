@@ -3,11 +3,9 @@ import logging
 import re
 from typing import Any
 
-import json_repair
-
 import agent
-from agent.openai.chat_completions_api import FunctionDefinition
 from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall
+from agent.parser.json_fixer import try_to_parse_json_arguments
 
 ROLE = "model"
 
@@ -56,10 +54,6 @@ class ParserState(agent.parser.ParserState):
 ARGS_DELIM = ','
 VALID_NAME_VAL_DELIM = ":"
 INVALID_BUT_POSSIBLE_DELIM = "="
-ARRAY_START = "["
-ARRAY_END = "]"
-OBJECT_START = "{"
-OBJECT_END = "}"
 
 VALUE_TAG_WRAPPER = "<|\"|>"
 STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
@@ -83,7 +77,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         if object_expect and arguments_block[-1] == OBJECT_END:
             arguments_block = arguments_block[:-1]
         possible_json_args = arguments_block.replace(VALUE_TAG_WRAPPER, "\"")
-        arguments, _ = try_to_parse_json(possible_json_args)
+        arguments = try_to_parse_json_arguments(possible_json_args)
 
         named_parameters: dict[str, Any] = {}
         if arguments:
@@ -240,85 +234,6 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
     return named_parameters, anonymous_parameters, unparsed_tail
 
 
-def error_on_duplicates(ordered_pairs):
-    result = {}
-    for key, value in ordered_pairs:
-        if key in result:
-            log.warning(f"duplicate key detected: key={key!r}, value={value!r}")
-        else:
-            result[key] = value
-    return result
-
-def try_to_parse_json(arguments_block: str, cycle_detect=0, last_inserted_pos: int | None = None,
-                      last_inserted_sym: str | None = None, last_replaced_sym: str | None = None) -> tuple[
-    Any, bool]:
-    repeat = False
-    if cycle_detect >= 1000:
-        raise Exception(f"try_to_parse is cycled on {arguments_block}")
-    log.debug(f"trying to parse as json: {arguments_block}")
-    arguments: Any | None = None
-    try:
-        arguments = json.loads(arguments_block, object_pairs_hook=error_on_duplicates)
-    except json.decoder.JSONDecodeError as e:
-        json_len = len(arguments_block)
-        pos = e.pos
-        sym = arguments_block[pos] if pos < json_len else None
-        prev_pos = pos - 1
-        prev_sym = arguments_block[prev_pos] if json_len > 1 and prev_pos < json_len else None
-        msg = e.msg
-        if msg == "Expecting ',' delimiter":
-            insert_sym = ','
-            if pos == last_inserted_pos:
-                if last_inserted_sym == OBJECT_END:
-                    insert_sym = ARRAY_END
-                elif last_inserted_sym == ARRAY_END:
-                    insert_sym = OBJECT_END
-            elif pos == json_len:
-                # end of object of array
-                if prev_sym == OBJECT_END:
-                    insert_sym = ARRAY_END
-                else:
-                    insert_sym = OBJECT_END
-            new_possible_json_args = arguments_block[:pos] + insert_sym + arguments_block[pos + 1:]
-            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
-            if repeat == True and sym == "\\":
-                # try to escape
-                prefix = arguments_block[:prev_pos] + "\\" + prev_sym
-                new_possible_json_args = prefix + arguments_block[prev_pos + 1:]
-                arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
-                pass
-        elif msg == "Illegal trailing comma before end of array":
-            new_possible_json_args = arguments_block[:pos] + arguments_block[pos + 1:]
-            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
-            pass
-        elif msg == "Expecting value":
-            if sym is None or sym == "]" or sym == "}" and prev_sym == ",":
-                new_possible_json_args = arguments_block[:prev_pos] + arguments_block[prev_pos + 1:]
-                arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
-            else:
-                arguments = None
-        elif msg == "Expecting property name enclosed in double quotes":
-            if last_inserted_sym == "," and last_replaced_sym == "\\":
-                return {}, True
-            else:
-                pass
-        elif msg == "Invalid control character at":
-            insert_sym = escape(sym)
-            new_possible_json_args = arguments_block[:pos] + insert_sym + arguments_block[pos + 1:]
-            arguments, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
-            pass
-        else:
-            pass
-        if not arguments:
-            try:
-                arguments = json_repair.loads(arguments_block)
-                if not isinstance(arguments, dict):
-                    log.error(f"unexpected type of repaired args '{type(arguments)}', arguments='{arguments}'")
-            except Exception as e:
-                arguments = {}
-    return arguments, repeat
-
-
 def parse_name(parameters_block) -> tuple[str | None, str | None]:
     pattern = r"(.*?)({.*})"
     match = re.search(pattern, parameters_block, re.DOTALL)
@@ -419,17 +334,6 @@ def unescape(val: str | Any):
         for k, v in val.items():
             dict_val[k] = unescape(v)
         return dict_val
-    return val
-
-
-def escape(val: str | Any):
-    if isinstance(val, str):
-        if val == "\n":
-            return "\\n"
-        elif val == "\t":
-            return "\\t"
-        elif val == "\r":
-            return "\\r"
     return val
 
 

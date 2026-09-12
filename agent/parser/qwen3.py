@@ -4,7 +4,7 @@ from typing import Any, Iterable
 
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser import fill_state_by_prompt_tail
-from agent.parser.gemma4 import try_to_parse_json
+from agent.parser.json_fixer import try_to_parse_json_arguments
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
 log = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> 
         arguments_block = arguments_block[len("parameter="):]
         if arguments_block.endswith(PARAMETER_END):
             arguments_block = arguments_block[:len(arguments_block) - len(PARAMETER_END)]
-        json_args, _ = try_to_parse_json(arguments_block)
+        json_args = try_to_parse_json_arguments(arguments_block)
         partial = False
         arguments = json_args
     else:
@@ -73,7 +73,7 @@ def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> 
                 is_like_json_array = param_value_norm.startswith("[")
                 is_like_json_object = param_value_norm.startswith("{")
                 if (is_expected_array and is_like_json_array) or (is_expected_object and is_like_json_object):
-                    result_parameter, _ = try_to_parse_json(param_value_norm)
+                    result_parameter = try_to_parse_json_arguments(param_value_norm)
                     arguments[param_name_norm] = result_parameter
                 else:
                     arguments[param_name_norm] = param_value_norm

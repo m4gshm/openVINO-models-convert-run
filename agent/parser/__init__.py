@@ -1,13 +1,13 @@
 import json
 import logging
 from enum import Enum
-from typing import Any, Literal, Callable
+from typing import Any, Literal, Callable, Tuple
 
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from pydantic import BaseModel
 
+from agent.inference.phrase import Phrase
 from agent.openai.chat_api import ROLE_ASSISTANT
-from agent.openai.chat_completions_api import FunctionDefinition
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +79,12 @@ class ParsedFunctionCall(BaseModel):
         return ChoiceDeltaToolCallFunction(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
 
 
+
+class DelayedResult(BaseModel):
+    content: str | None = None
+    tool_calls: list[ParsedFunctionCall] = []
+
+
 class Parser[State: ParserState]():
     def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
                   init_chat_events=True) -> State:
@@ -115,7 +121,10 @@ class Parser[State: ParserState]():
     def is_text_end(self, state: State, token: str) -> bool:
         return False
 
-    def is_delay_streaming(self, state: State, token: str) -> bool:
+    def is_delay_streaming_start(self, state: State, token: str) -> bool:
+        return False
+
+    def is_delay_streaming_end(self, state: State, token: str) -> bool:
         return False
 
     def is_tool_call_start(self, state: State, token: str) -> bool:
@@ -144,6 +153,9 @@ class Parser[State: ParserState]():
 
     def is_erase(self, state: State, token: str) -> bool:
         return False
+
+    def handle_delayed_phrase(self, phrase: Phrase) -> DelayedResult | None:
+        return None
 
 
 def fill_state_by_prompt_tail(init_chat_events: bool, prompt: str, state: ParserState,

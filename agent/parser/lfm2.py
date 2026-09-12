@@ -3,9 +3,10 @@ import logging
 import re
 from typing import Any
 
-from agent.openai.chat_completions_api import FunctionDefinition
-from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail
+from agent.inference.phrase import Phrase
+from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail, DelayedResult
 from agent.parser.gemma4 import unescape
+from agent.parser.json_fixer import try_to_parse_json, ARRAY_START, OBJECT_START, ARRAY_END, OBJECT_END
 
 TOOL_CALL_START_PROBABLY = "{\n"
 
@@ -19,7 +20,7 @@ class Lfm2Parser(Parser):
     def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
                   init_chat_events=True) -> ParserState:
         if not prompt:
-            state = super().new_state(prompt,supported_functions, init_chat_events)
+            state = super().new_state(prompt, supported_functions, init_chat_events)
         else:
             state = self._new_state(supported_functions)
             fill_state_by_prompt_tail(init_chat_events, prompt, state, self.is_assistant)
@@ -68,6 +69,59 @@ class Lfm2Parser(Parser):
 
         return parsed_calls, partial
 
+    def is_sequence_end(self, state: State, token: str) -> bool:
+        sequence_end = super().is_sequence_end(state, token)
+        return sequence_end
+
+    def is_delay_streaming_start(self, state: ParserState, token: str) -> bool:
+        token_rsplit = token.strip()
+        return token_rsplit == ARRAY_START or token_rsplit == OBJECT_START
+
+    def is_delay_streaming_end(self, state: ParserState, token: str) -> bool:
+        return False
+
+    def handle_delayed_phrase(self, phrase: Phrase) -> DelayedResult | None:
+        full = phrase.full
+        parsed_json, _ = try_to_parse_json(full)
+        if parsed_json is None:
+            return None
+        else:
+            handled_content: str | None = None
+            handled_tool_calls: list[ParsedFunctionCall] | None = None
+            if isinstance(parsed_json, dict):
+                content = parsed_json.get("content")
+                if not content is None:
+                    if isinstance(content, str):
+                        handled_content = content
+                    else:
+                        log.warning(f"unexpected content type='{type(content)}', content='{content}'")
+
+                tool_calls = parsed_json.get("tool_calls")
+                if not tool_calls is None:
+                    if isinstance(tool_calls, list):
+                        parsed_tool_calls = list[ParsedFunctionCall]()
+                        for tool_call in tool_calls:
+                            if not isinstance(tool_call, dict):
+                                log.warning(f"unexpected tool_call type='{type(tool_call)}', content='{tool_call}'")
+                            else:
+                                name = tool_call.get("name")
+                                arguments = tool_call.get("arguments")
+                                if not (name is None or arguments is None):
+                                    if not isinstance(name, str):
+                                        log.warning(f"unexpected tool_call name type='{type(name)}', content='{name}'")
+
+                                    if not isinstance(arguments, dict):
+                                        log.warning(f"unexpected tool_call arguments type='{type(arguments)}',"
+                                                    f" content='{arguments}'")
+                                parsed_tool_calls.append(ParsedFunctionCall(name=name, arguments=arguments))
+                        if len(parsed_tool_calls) > 0:
+                            handled_tool_calls = parsed_tool_calls
+                    else:
+                        log.warning(f"unexpected tool_calls type='{type(tool_calls)}', content='{tool_calls}'")
+
+            return DelayedResult(content=handled_content, tool_calls=handled_tool_calls) if (
+                        handled_content or handled_tool_calls) else None
+
 
 def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
     clean_function_block = function_block.strip("[]")
@@ -97,12 +151,12 @@ def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
                     opening_bracket = match.group("opening")
                     if opening_bracket == "{":
                         new_closing_bracket = "}"
-                    elif  opening_bracket == "[":
+                    elif opening_bracket == "[":
                         new_closing_bracket = "]"
                     else:
                         new_closing_bracket = None
                     if not new_closing_bracket is None:
-                        clean_function_block = insert_str(clean_function_block, new_closing_bracket, offset-1)
+                        clean_function_block = insert_str(clean_function_block, new_closing_bracket, offset - 1)
                     else:
                         raise e
                 else:

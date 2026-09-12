@@ -22,9 +22,10 @@ from agent import inference
 from agent.client.tool_select_options import detect_select_options
 from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
-from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type
+from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type, \
+    veai_fix_incorrect_arguments
 from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str, TokenHandler, \
-    TokenHandlerConfig
+    TokenHandlerConfig, ToolFixer
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
@@ -225,6 +226,7 @@ class BaseController(ABC):
         log.info(f"inbound history messages {len(messages)}")
 
         is_veai = is_veai_agent(messages)
+        tool_fixer: ToolFixer | None = veai_fix_incorrect_arguments if is_veai else None
 
         # if is_veai:
         #     for message in messages:
@@ -287,7 +289,7 @@ class BaseController(ABC):
                                      parser=self.parser,
                                      init_chat_events=True,
                                      is_stop=is_stop,
-                                     is_veai=is_veai,
+                                     tool_fixer=tool_fixer,
                                      config=self.handler_config,
                                      supported_functions=function_parameters,
                                      user_context=user_context,
