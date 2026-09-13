@@ -8,7 +8,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode
@@ -458,15 +458,16 @@ def main():
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
 
+    device_value: str = device.name
     if is_device_npu or pipe != Pipe.CB:
         app = init_sequential_engine(model_name=model_name,
                                      max_prompt_len=max_prompt_len,
                                      model_path=str(model_path),
                                      model_architectures=model_architectures,
-                                     device=device.value,
+                                     device=device_value,
                                      vlm=pipe == Pipe.VLM,
                                      parser=model_parser,
-                                     scheduler_config=scheduler_config,
+                                     scheduler_config=scheduler_config if not is_device_npu else None,
                                      generate_opts=generate_opts,
                                      handler_config=handler_config,
                                      chat_template=chat_template,
@@ -480,7 +481,7 @@ def main():
                                               max_prompt_len=max_prompt_len,
                                               model_path=str(model_path),
                                               model_architectures=model_architectures,
-                                              device=device.value,
+                                              device=device_value,
                                               parser=model_parser,
                                               generate_opts=generate_opts,
                                               handler_config=handler_config,

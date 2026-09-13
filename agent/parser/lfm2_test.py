@@ -1,8 +1,9 @@
 import unittest
 from importlib.resources import files
 
-from agent.client.user_context import UserContext
-from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure
+from agent.client.user_context import UserContext, OS
+from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure, fix_search_file_by_name
+from agent.parser import ParsedFunctionCall
 from agent.parser.lfm2 import Lfm2Parser
 
 TEST_RESOURCES = "test_resources"
@@ -90,21 +91,34 @@ class Lfm2TestCases(unittest.TestCase):
     #                      first_fixed.arguments)
     #     self.assertFalse(partial)
 
-    # def test_list_dir_probably_tool_call_parsing(self):
-    #     tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.json")
-    #     tool_call_json = tool_call_file.read_text(encoding="utf-8")
-    #     tokens = json.loads(tool_call_json)
-    #
-    #     processor = TokenProcessor(prompt="", parser=parser, init_chat_events=True, config=TokenHandlerConfig(),
-    #                                is_veai=True)
-    #     process_tokens, _ = processor.process_tokens(tokens)
-    #
-    #     first = process_tokens[0]
-    #     first_tool_calls = first.choices[0].delta.tool_calls[0]
-    #     function = first_tool_calls.function
-    #     arguments = json.loads(function.arguments)
-    #     self.assertEqual("list_dir", function.name)
-    #     self.assertEqual({'depth': 2, 'directory_path': '.'}, arguments)
+    def test_search_file_by_name(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/search_file_by_name.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        user_context = UserContext()
+        user_context.os_type = OS.Windows
+        fixed = [fix_search_file_by_name(c, context=user_context) for c in calls]
+        self.assertEqual("search_file_by_name", fixed[0].name)
+        self.assertEqual([ParsedFunctionCall(name='search_file_by_name',
+                                             arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                             anonymous_arguments=[]),
+                          ParsedFunctionCall(name='search_file_by_name',
+                                             arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                             anonymous_arguments=[]),
+                          ParsedFunctionCall(name='search_file_by_name', arguments={
+                              'search_directory': 'C:/alex/github/m4gshm/distributed-transactions-practice',
+                              'glob_pattern': '**/MessageStorageImpl*Test*.java'}, anonymous_arguments=[]),
+                          ParsedFunctionCall(name='search_file_by_name',
+                                             arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                             anonymous_arguments=[]),
+                          ParsedFunctionCall(name='search_file_by_name', arguments={
+                              'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice',
+                              'glob_pattern': '**/MessageStorageImpl*Test*.java'}, anonymous_arguments=[])],
+                         fixed)
+        self.assertFalse(partial)
 
     def test_read_file_tuple(self):
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")

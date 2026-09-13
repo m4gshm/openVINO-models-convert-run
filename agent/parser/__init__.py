@@ -1,13 +1,14 @@
 import json
 import logging
 from enum import Enum
-from typing import Any, Literal, Callable, Tuple
+from typing import Any, Literal, Callable
 
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from pydantic import BaseModel
 
 from agent.inference.phrase import Phrase
 from agent.openai.chat_api import ROLE_ASSISTANT
+from agent.openai.chat_completions_api import FunctionDefinitionParameters
 
 log = logging.getLogger(__name__)
 
@@ -26,9 +27,10 @@ class StateEvent(Enum):
 
 
 class ParserState:
-    def __init__(self, supported_functions: dict[str, dict] | None = None):
+    def __init__(self, supported_functions: dict[str, FunctionDefinitionParameters] | None = None):
         super().__init__()
-        self.supported_functions = supported_functions if supported_functions else dict[str, dict]()
+        self.supported_functions = supported_functions if supported_functions else dict[
+            str, FunctionDefinitionParameters]()
         self.__events: list[StateEvent] = []
         self.role: Literal["developer", "system", "user", "assistant", "tool"] | None = None
         self.prefill_tokens: list[str] | None = None
@@ -36,8 +38,8 @@ class ParserState:
 
     def get_function_parameters(self, func_name: str) -> dict:
         supported_functions = self.supported_functions
-        parameters = supported_functions.get(func_name, {})
-        return parameters
+        parameters = supported_functions.get(func_name)
+        return parameters.properties if parameters else {}
 
     def start_event(self, event: StateEvent):
         return self.__events.append(event)
@@ -79,14 +81,13 @@ class ParsedFunctionCall(BaseModel):
         return ChoiceDeltaToolCallFunction(name=self.name, arguments=json.dumps(self.arguments, ensure_ascii=False))
 
 
-
 class DelayedResult(BaseModel):
     content: str | None = None
     tool_calls: list[ParsedFunctionCall] = []
 
 
 class Parser[State: ParserState]():
-    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+    def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> State:
         state = self._new_state(supported_functions)
         if init_chat_events:
@@ -97,7 +98,7 @@ class Parser[State: ParserState]():
     def process_chat_prompt(self, prompt: str) -> str:
         return prompt
 
-    def _new_state(self, supported_functions: dict[str, dict] | None = None) -> ParserState:
+    def _new_state(self, supported_functions: dict[str, FunctionDefinitionParameters] | None = None) -> ParserState:
         return ParserState(supported_functions=supported_functions)
 
     def is_end(self, state: State, token: str) -> bool:

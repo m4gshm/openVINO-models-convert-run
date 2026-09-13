@@ -13,7 +13,7 @@ class UserContextCase(unittest.TestCase):
         veai_project_information = veai_project_information_file.read_text(encoding="utf-8")
         context = _get_context(veai_project_information)
         self.assertIsNotNone("", context)
-        self.assertEqual('Windows 11, version: 10.0, arch: amd64', context.os)
+        self.assertEqual('Windows 11, version: 10.0, arch: amd64', context.os_full)
         self.assertEqual(Path('C:\\project'), context.workdir)
 
 

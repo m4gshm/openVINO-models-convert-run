@@ -30,7 +30,7 @@ from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
-    ChatCompletionFunctionToolParam
+    ChatCompletionFunctionToolParam, FunctionDefinitionParameters
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
@@ -425,16 +425,16 @@ def is_function_tool(tool: Any) -> bool:
 
 def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam] | None, is_veai: bool,
                                     is_fix_tool_type: bool = False) -> tuple[
-    list[dict[str, Any]], dict[str, dict]]:
-    function_parameters: dict[str, dict] = {}
+    list[dict[str, Any]], dict[str, FunctionDefinitionParameters]]:
+    function_parameters: dict[str, FunctionDefinitionParameters] = {}
     tools_raw: list[dict[str, Any]] = []
     is_fix = is_veai and is_fix_tool_type
     for tool in (tools or []):
         tool_ = veai_fix_tool_definition_optional_property_as_null_type(tool) if is_fix else tool
-        tools_raw.append(tool_.model_dump())
+        tools_raw.append(tool_.model_dump(mode="json"))
         if is_function_tool(tool_):
             function = tool_.function
-            parameters = getattr(function, "parameters", None)
+            parameters = function.parameters
             if parameters:
                 # parameters = deepcopy(parameters)
                 # for param_desc in parameters.values():

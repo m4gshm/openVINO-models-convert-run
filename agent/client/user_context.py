@@ -1,3 +1,4 @@
+from enum import Enum
 from pathlib import Path
 
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
@@ -19,12 +20,20 @@ class UserContextFiles:
         path = Path(file_name)
         return self.file_content.get(path)
 
+class OS(Enum):
+    Windows = 'Windows'
+    MacOS = 'MacOS'
+    Linux = 'Linux'
+    TOOL_RESPONSE = 4
+    FIM_MIDDLE = 5
+
 
 class UserContext:
 
     def __init__(self, model_architectures: set[str] | None = None):
         super().__init__()
-        self.os: str | None = None
+        self.os_full: str | None = None
+        self.os_type: OS | None = None
         self.workdir: Path | None = None
         self.model_architectures: set[str] = model_architectures if model_architectures else {}
         self.messages: list[ChatCompletionMessageParam] = []

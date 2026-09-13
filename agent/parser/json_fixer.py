@@ -24,9 +24,14 @@ def try_to_parse_json_arguments(raw_json: str) -> Any:
     return arguments
 
 
-def try_to_parse_json(raw_json: str, cycle_detect=0, last_inserted_pos: int | None = None,
-                      last_inserted_sym: str | None = None, last_replaced_sym: str | None = None
-                      ) -> tuple[Any, bool]:
+def try_to_parse_json(raw_json: str) -> Any:
+    result, _ = _try_to_parse_json(raw_json)
+    return result
+
+
+def _try_to_parse_json(raw_json: str, cycle_detect=0, last_inserted_pos: int | None = None,
+                       last_inserted_sym: str | None = None, last_replaced_sym: str | None = None
+                       ) -> tuple[Any, bool]:
     repeat = False
     if cycle_detect >= 1000:
         raise Exception(f"try_to_parse is cycled on {raw_json}")
@@ -55,22 +60,22 @@ def try_to_parse_json(raw_json: str, cycle_detect=0, last_inserted_pos: int | No
                 else:
                     insert_sym = OBJECT_END
             new_possible_json_args = raw_json[:pos] + insert_sym + raw_json[pos + 1:]
-            parsed_object, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym,
-                                                      sym)
+            parsed_object, repeat = _try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym,
+                                                       sym)
             if repeat == True and sym == "\\":
                 # try to escape
                 prefix = raw_json[:prev_pos] + "\\" + prev_sym
                 new_possible_json_args = prefix + raw_json[prev_pos + 1:]
-                parsed_object, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
+                parsed_object, repeat = _try_to_parse_json(new_possible_json_args, cycle_detect + 1)
                 pass
         elif msg == "Illegal trailing comma before end of array":
             new_possible_json_args = raw_json[:pos] + raw_json[pos + 1:]
-            parsed_object, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
+            parsed_object, repeat = _try_to_parse_json(new_possible_json_args, cycle_detect + 1)
             pass
         elif msg == "Expecting value":
             if sym is None or sym == "]" or sym == "}" and prev_sym == ",":
                 new_possible_json_args = raw_json[:prev_pos] + raw_json[prev_pos + 1:]
-                parsed_object, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1)
+                parsed_object, repeat = _try_to_parse_json(new_possible_json_args, cycle_detect + 1)
             else:
                 parsed_object = None
         elif msg == "Expecting property name enclosed in double quotes":
@@ -81,7 +86,7 @@ def try_to_parse_json(raw_json: str, cycle_detect=0, last_inserted_pos: int | No
         elif msg == "Invalid control character at":
             insert_sym = escape(sym)
             new_possible_json_args = raw_json[:pos] + insert_sym + raw_json[pos + 1:]
-            parsed_object, repeat = try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
+            parsed_object, repeat = _try_to_parse_json(new_possible_json_args, cycle_detect + 1, pos, insert_sym, sym)
             pass
         else:
             pass

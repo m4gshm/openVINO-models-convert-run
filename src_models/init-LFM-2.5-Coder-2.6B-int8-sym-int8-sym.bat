@@ -1,6 +1,5 @@
-@REM transformers==5.7.0
-set MODEL_NAME=LFM2.5-8B-A1B-Coder
-set MODEL_DEVELOPER=josephmayo
+set MODEL_NAME=LFM-2.5-Coder-2.6B
+set MODEL_DEVELOPER=Schnuckade
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
@@ -21,8 +20,8 @@ pause
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
 @REM +===========================+=============================+========================================+
-@REM | float                     | 0% (1 / 174)                | 0% (0 / 173)                           |
+@REM | float                     | 0% (1 / 190)                | 0% (0 / 189)                           |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM | int8_sym, per-channel     | 100% (173 / 174)            | 100% (173 / 173)                       |
+@REM | int8_sym, per-channel     | 100% (189 / 190)            | 100% (189 / 189)                       |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:01:26 • 0:00:00
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:11 • 0:00:00

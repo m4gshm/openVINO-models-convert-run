@@ -4,9 +4,10 @@ import re
 from typing import Any
 
 from agent.inference.phrase import Phrase
+from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail, DelayedResult
 from agent.parser.gemma4 import unescape
-from agent.parser.json_fixer import try_to_parse_json, ARRAY_START, OBJECT_START, ARRAY_END, OBJECT_END
+from agent.parser.json_fixer import try_to_parse_json, ARRAY_START, OBJECT_START
 
 TOOL_CALL_START_PROBABLY = "{\n"
 
@@ -17,7 +18,7 @@ TOOL_CALL_END = "<|tool_call_end|>"
 
 
 class Lfm2Parser(Parser):
-    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+    def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         if not prompt:
             state = super().new_state(prompt, supported_functions, init_chat_events)
@@ -39,7 +40,7 @@ class Lfm2Parser(Parser):
         tool_call_expression = tool_call_expression.lstrip()
         tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
 
-        parsed_calls: list[ParsedFunctionCall] = []
+        parsed_calls = list[ParsedFunctionCall]()
         partial = False
         for call_block in tool_call_blocks:
             call_block_rstrip = call_block.rstrip()
@@ -65,7 +66,6 @@ class Lfm2Parser(Parser):
                     parsed_calls.extend(parsed_function_calls)
             except SyntaxError as e:
                 log.error(f"unparseable tool call: {function_block}")
-                pass
 
         return parsed_calls, partial
 
@@ -82,7 +82,7 @@ class Lfm2Parser(Parser):
 
     def handle_delayed_phrase(self, phrase: Phrase) -> DelayedResult | None:
         full = phrase.full
-        parsed_json, _ = try_to_parse_json(full)
+        parsed_json = try_to_parse_json(full)
         if parsed_json is None:
             return None
         else:
@@ -120,7 +120,7 @@ class Lfm2Parser(Parser):
                         log.warning(f"unexpected tool_calls type='{type(tool_calls)}', content='{tool_calls}'")
 
             return DelayedResult(content=handled_content, tool_calls=handled_tool_calls) if (
-                        handled_content or handled_tool_calls) else None
+                    handled_content or handled_tool_calls) else None
 
 
 def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:

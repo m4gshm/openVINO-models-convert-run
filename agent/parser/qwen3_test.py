@@ -3,7 +3,8 @@ from importlib.resources import files
 
 from agent.client.user_context import UserContext
 from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete
-from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam
+from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam, \
+    FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
 from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
@@ -14,10 +15,10 @@ parser = Qwen3MoeParser()
 state = parser.new_state()
 
 
-def get_required_function_parameters(tool_json_file: str) -> dict[str, dict]:
+def get_required_function_parameters(tool_json_file: str) -> dict[str, FunctionDefinitionParameters]:
     tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, tool_json_file)
     json_data = tool_call_desc.read_text()
-    supported_function = FunctionDefinition.model_validate_json(json_data)
+    supported_function = FunctionDefinition.model_validate_json(json_data, strict=False, extra='allow')
     tools = [ChatCompletionFunctionToolParam(function=supported_function, type="function")]
     _, function_parameters = get_function_parameters_by_name(tools, True, True)
     return function_parameters
@@ -92,9 +93,10 @@ Target.py
 
     def test_functions_with_invalid_json_parameter(self):
         function_name = "select"
-        state = parser.new_state(supported_functions={
-            function_name: {"options": {EXPECTED_PROPERTY_TYPE: "array"}}
-        })
+        supported_functions: dict[str, FunctionDefinitionParameters] = {
+            function_name: FunctionDefinitionParameters(properties={"options": {EXPECTED_PROPERTY_TYPE: "array"}})
+        }
+        state = parser.new_state(supported_functions=supported_functions)
         calls, partial = parser.parse_tool_calls(state, self.function_with_invalid_json_parameter)
 
         first = calls[0]
@@ -135,6 +137,7 @@ Target.py
         self.assertFalse(partial)
 
     def test_edit_file(self):
+        state = parser.new_state(supported_functions=get_required_function_parameters("qwen3/edit_file_tool.json"))
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/edit_file_1.txt")
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)

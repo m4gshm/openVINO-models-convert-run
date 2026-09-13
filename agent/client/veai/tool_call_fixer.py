@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 import json_repair
 
-from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH
+from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH, OS
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
     search_file_by_name, file_structure, run_command, run_configuration, safe_delete
 from agent.client.veai.tool.edit_file import EditFile
@@ -21,7 +21,7 @@ from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
 from agent.openai.chat_api import ROLE_ASSISTANT
-from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam
+from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam, FunctionDefinitionParameters
 from agent.parser import ParsedFunctionCall
 from agent.parser.json_fixer import try_to_parse_json_arguments
 
@@ -472,7 +472,11 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
             on_delete_i.append(i)
 
     for i in reversed(on_delete_i):
-        del edits[i]
+        try:
+            del edits[i]
+        except Exception as e:
+            log.error(f"error on del edits[{i}]: {e}, edits={edits}")
+            raise e
 
     unused_anonymous_edits = []
     if anonymous_edits:
@@ -590,7 +594,7 @@ def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | Non
     return function
 
 
-def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
     glob_pattern = args.get("glob_pattern")
     invalid = not glob_pattern
@@ -621,10 +625,10 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext |
         else:
             search_directory = ROOT
         invalid = True
-    else:
-        search_directory, fixed = fix_windows_path(search_directory, context)
-        if fixed:
-            invalid = True
+
+    search_directory, fixed = fix_windows_path(search_directory, context)
+    if fixed:
+        invalid = True
 
     if invalid:
         log.info(
@@ -762,10 +766,6 @@ def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> P
         return function
 
 
-def is_windows(context: UserContext | None):
-    return "windows" in context.os.lower() if context and context.os else False
-
-
 def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
 
@@ -798,11 +798,31 @@ def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -
 
 def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any, bool]:
     fixed = False
-    if path and isinstance(path, str) and is_windows(context):
+    if path and isinstance(path, str) and context and context.os_type == OS.Windows:
         # SERA case
         if path.startswith("/"):
             fixed = True
             path = path[1:]
+
+        p = Path(path)
+        parts = p.parts
+        if len(parts) > 0:
+            first = parts[0]
+            stripped = False
+            while first == "\\" and len(parts) > 1:
+                stripped = True
+                first = parts[1]
+                parts = parts[1:]
+
+            if not (first.endswith(":/") or first.endswith(":\\")):
+                new_first = first + (":/" if "/" in path else ":\\")
+                new_parts = (new_first,) + parts[1:]
+                path = str(Path().joinpath(*new_parts))
+                fixed = True
+                pass
+            elif stripped:
+                path = str(Path().joinpath(*parts))
+                fixed = True
     return path, fixed
 
 
@@ -853,9 +873,10 @@ def veai_fix_tool_definition_optional_property_as_null_type(
     return tool
 
 
-def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, Any], parent_name: str) -> dict[str, Any]:
-    properties = parameters.get("properties", {})
-    required: list | None = parameters.get("required")
+def _fix_tool_definition_optional_property_as_null_type(parameters: FunctionDefinitionParameters,
+                                                        parent_name: str) -> FunctionDefinitionParameters:
+    properties = parameters.properties
+    required = parameters.required
     for prop_name, prop_params in properties.items():
         params: dict[str, Any] = prop_params
         type = params.get("type")
@@ -872,19 +893,18 @@ def _fix_tool_definition_optional_property_as_null_type(parameters: dict[str, An
 
                 if opt and required:
                     required.remove(prop_name)
-                    parameters["required"] = required
+                    parameters.required = required
 
                 log.debug(
                     f"fix parameter type: parent object '{parent_name}', property '{prop_name}',"
                     f" new type '{new_type}', old type '{type}', optional {opt}")
-
+                type = new_type
                 if type == "object":
-                    sub_properties = params.get("properties")
-                    if isinstance(sub_properties, dict):
-                        params["properties"] = _fix_tool_definition_optional_property_as_null_type(sub_properties,
-                                                                                                   prop_name)
+                    parsed_params = FunctionDefinitionParameters.model_validate(params)
+                    fixed_params = _fix_tool_definition_optional_property_as_null_type(parsed_params, prop_name)
+                    properties[prop_name] = fixed_params.model_dump()
 
-    return properties
+    return parameters
 
 
 def fix_run_configuration(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:

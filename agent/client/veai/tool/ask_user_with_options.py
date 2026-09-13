@@ -27,8 +27,8 @@ class AskUserWithOptions(ToolSelectOptions, Tool):
 def detect(tool_definition: ChatCompletionFunctionToolParam) -> AskUserWithOptions | None:
     if tool_definition.type == "function" and tool_definition.function.name == function_name:
         parameters = tool_definition.function.parameters
-        type = parameters.get("type")
-        required = set(parameters.get("required"))
+        type = parameters.type
+        required = parameters.required
         if "object" == type and function_parameters == required:
             return AskUserWithOptions()
     return None

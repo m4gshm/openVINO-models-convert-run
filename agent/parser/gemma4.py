@@ -4,8 +4,9 @@ import re
 from typing import Any
 
 import agent
+from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall
-from agent.parser.json_fixer import try_to_parse_json_arguments
+from agent.parser.json_fixer import try_to_parse_json_arguments, OBJECT_START, OBJECT_END, ARRAY_START, ARRAY_END
 
 ROLE = "model"
 
@@ -398,7 +399,7 @@ def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
-    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+    def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         state = super().new_state(prompt, supported_functions, init_chat_events)
         return state
@@ -410,7 +411,7 @@ class Gemma4ChannelParser(Parser[ParserState]):
             prompt += expected
         return prompt
 
-    def _new_state(self, supported_functions: dict[str, dict] | None = None) -> ParserState:
+    def _new_state(self, supported_functions: dict[str, FunctionDefinitionParameters] | None = None) -> ParserState:
         return ParserState(supported_functions)
 
     def is_erase(self, state: ParserState, token: str) -> bool:

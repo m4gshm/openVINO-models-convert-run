@@ -1,0 +1,40 @@
+{
+  "name": "edit_file",
+  "parameters": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+      "target_file": {
+        "type": "string"
+      },
+      "edits": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "old_text": {
+              "type": "string"
+            },
+            "new_text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "old_text",
+            "new_text"
+          ]
+        }
+      },
+      "allow_multiple_matches": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "target_file",
+      "edits",
+      "allow_multiple_matches"
+    ]
+  },
+  "strict": true
+}

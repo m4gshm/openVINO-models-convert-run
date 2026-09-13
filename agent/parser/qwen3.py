@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Any, Iterable
 
+from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser import fill_state_by_prompt_tail
 from agent.parser.json_fixer import try_to_parse_json_arguments
@@ -108,7 +109,7 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
 
 
 class Qwen3MoeParser(QwenBaseParser):
-    def new_state(self, prompt: str = "", supported_functions: dict[str, dict] | None = None,
+    def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         if not prompt:
             state = super().new_state(prompt, supported_functions, init_chat_events)

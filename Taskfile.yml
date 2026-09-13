@@ -24,7 +24,8 @@ tasks:
     generates:
       - "{{.VENV_DIR}}/**/*"
   instal-openvino-nightly:
-    - "{{.VENV_BIN}}pip install --pre -U openvino --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly
+    cmds:
+      - "{{.VENV_BIN}}pip install --pre -U openvino --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly"
   
   activate:
     deps:

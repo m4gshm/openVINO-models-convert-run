@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.client import is_agent
-from agent.client.user_context import UserContext, UserContextFiles
+from agent.client.user_context import UserContext, UserContextFiles, OS
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
 
 END_LINE = "end_line"
@@ -74,10 +74,11 @@ def _get_context(system_prompt: str | list[dict[str, Any]] | None) -> UserContex
             project_info = system_prompt[has_start:has_end].splitlines()
             for line in project_info:
                 if line.startswith(OS_INFO_):
-                    context.os = line[len(OS_INFO_):].strip()
+                    os_full = line[len(OS_INFO_):].strip()
+                    context.os_full = os_full
+                    context.os_type = OS.Windows if "windows" in os_full.lower() else None
                 elif line.startswith(PROJECT_ABSOLUTE_PATH_):
                     context.workdir = Path(line[len(PROJECT_ABSOLUTE_PATH_):].strip())
-
     return context
 
 

@@ -132,7 +132,7 @@ class TokenHandler:
                  config: TokenHandlerConfig,
                  tool_fixer: ToolFixer | None,
                  user_context: UserContext | None = None,
-                 supported_functions: dict[str, dict] | None = None):
+                 supported_functions: dict[str, FunctionDefinitionParameters] | None = None):
         super().__init__()
         self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
                                         config=config, tool_fixer=tool_fixer, user_context=user_context,
@@ -239,7 +239,7 @@ class TokenProcessor:
                  config: TokenHandlerConfig,
                  tool_fixer: ToolFixer | None,
                  user_context: UserContext | None = None,
-                 supported_functions: dict[str, dict] | None = None):
+                 supported_functions: dict[str, FunctionDefinitionParameters] | None = None):
         super().__init__()
         self.no_conversation_counter = None
         self.create_time = datetime.now(timezone.utc)
@@ -371,7 +371,7 @@ class TokenProcessor:
             try:
                 tool_call_phrase.add_token(token)
             except LoopError as e:
-                log.error(f"tool call error: {e}")
+                log.error(f"tool call error (loop): {e}")
                 loop_error = markdown_tool_call_loop_error(e.message + " (tool call)", e.payload)
 
             if loop_error:

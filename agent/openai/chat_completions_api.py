@@ -1,6 +1,6 @@
 from typing import List, Optional, Union, Dict, Any
 
-from openai.types.chat import ChatCompletionContentPartTextParam, ChatCompletionToolChoiceOptionParam
+from openai.types.chat import ChatCompletionToolChoiceOptionParam
 from openai.types.chat.chat_completion_assistant_message_param import ContentArrayOfContentPart
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,7 +41,15 @@ class FunctionDefinition(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str
     description: Optional[str] = None
-    parameters: Dict[str, Any]  # JSON Schema object
+    parameters: FunctionDefinitionParameters
+
+
+class FunctionDefinitionParameters(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    type: str = "object"
+    properties: Dict[str, Any]
+    required: set[str] | None = None
+    additionalProperties: bool | None = False
 
 
 class ChatCompletionFunctionToolParam(BaseModel):
