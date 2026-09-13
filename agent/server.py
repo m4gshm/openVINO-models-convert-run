@@ -21,18 +21,14 @@ from agent.parser import Parser
 log = logging.getLogger(__name__)
 
 
-def init_continuous_batching_engine(model: str, model_path: str, model_architectures: set[str],
-                                    max_prompt_len: int | None,
-                                    device: str, parser: Parser,
-                                    is_fix_tool_type: bool,
-                                    if_detect_cycled_tool_call: bool,
+def init_continuous_batching_engine(controller_config: ControllerConfig,
+                                    model_path: str, device: str, parser: Parser,
                                     stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
                                     generate_opts=GenerateOpts(), handler_config=TokenHandlerConfig(),
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None,
-                                    chat_template='',
                                     draft_model_path: str | None = None) -> FastAPI:
     log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}, "
              f"scheduler_config {scheduler_config.to_string()}")
@@ -65,28 +61,20 @@ def init_continuous_batching_engine(model: str, model_path: str, model_architect
         log.error(f"instantiate pipeline error: {e}", exc_info=e)
         sys.exit(1)
 
-    return new_app(ContinuousBatchingController(config=ControllerConfig(model_name=model,
-                                                                        max_prompt_len=max_prompt_len,
-                                                                        model_architectures=model_architectures,
-                                                                        is_fix_tool_type=is_fix_tool_type,
-                                                                        if_detect_cycled_tool_call=if_detect_cycled_tool_call,
-                                                                        chat_template=chat_template,
-                                                                        ),
+    return new_app(ContinuousBatchingController(config=controller_config,
                                                 parser=parser, pipe=pipe,
-                                                generate_opts=generate_opts, handler_config=handler_config,
+                                                generate_opts=generate_opts,
+                                                handler_config=handler_config,
                                                 stop_signal=stop_signal))
 
 
-def init_sequential_engine(model_name: str, model_path: str, model_architectures: set[str],
-                           max_prompt_len: int | None,
+def init_sequential_engine(controller_config: ControllerConfig, model_path: str,
                            device: str, vlm: bool, parser: Parser,
-                           is_fix_tool_type: bool,
-                           if_detect_cycled_tool_call: bool,
                            stop_signal: threading.Event,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
                            handler_config=TokenHandlerConfig(),
-                           pipeline_properties: dict[str, Any] | None = None, chat_template='',
+                           pipeline_properties: dict[str, Any] | None = None,
                            draft_model_path: str | None = None,
                            ) -> FastAPI:
     if not pipeline_properties:
@@ -94,7 +82,7 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
     if scheduler_config:
         pipeline_properties["scheduler_config"] = scheduler_config
 
-    log.info(f"model loading {model_name}, device: {device}, properties: {pipeline_properties}")
+    log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}")
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
@@ -112,16 +100,11 @@ def init_sequential_engine(model_name: str, model_path: str, model_architectures
 
     log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
 
-    return new_app(VlmController(config=ControllerConfig(model_name=model_name,
-                                                         max_prompt_len=max_prompt_len,
-                                                         model_architectures=model_architectures,
-                                                         is_fix_tool_type=is_fix_tool_type,
-                                                         if_detect_cycled_tool_call=if_detect_cycled_tool_call,
-                                                         chat_template=chat_template,
-                                                         ),
+    return new_app(VlmController(config=controller_config,
                                  parser=parser, pipe=pipe,
                                  generate_opts=generate_opts,
-                                 handler_config=handler_config, stop_signal=stop_signal))
+                                 handler_config=handler_config,
+                                 stop_signal=stop_signal))
 
 
 def new_app(controller: BaseController) -> FastAPI:

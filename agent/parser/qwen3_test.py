@@ -1,14 +1,23 @@
 import unittest
 from importlib.resources import files
 
-from agent.client.user_context import UserContext
-from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete
+from agent.client.user_context import UserContext, OS
+from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete, \
+    fix_search_for_text, fix_search_file_by_name
 from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam, \
     FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
 from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
 
-USER_CONTEXT = UserContext()
+
+def new_windows_user_context() -> UserContext:
+    context = UserContext()
+    context.os_type = OS.Windows
+    return context
+
+
+USER_CONTEXT = new_windows_user_context()
+
 TEST_RESOURCES = "test_resources"
 
 parser = Qwen3MoeParser()
@@ -118,10 +127,11 @@ Target.py
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
-        self.assertEqual("search_file_by_name", first.name)
+        fixed = fix_search_file_by_name(first, USER_CONTEXT)
+        self.assertEqual("search_file_by_name", fixed.name)
         self.assertEqual({'glob_pattern': 'Properties.*',
                           'search_directory': 'consumer/config'},
-                         first.arguments)
+                         fixed.arguments)
         self.assertFalse(partial)
 
     def test_list_dir(self):
@@ -269,6 +279,21 @@ Target.py
                           'targets': [{'line': 1,
                                        'name': 'MessageStorageTestConfig',
                                        'path': 'C:/Test.java'}]},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_search_for_text(self):
+        # function_parameters = get_required_function_parameters("qwen3/safe_delete_tool.json")
+        # state = parser.new_state(supported_functions=(function_parameters))
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_search_for_text(first, USER_CONTEXT)
+        self.assertEqual("search_for_text", fixed.name)
+        self.assertEqual({'is_case_sensitive': False,
+                          'target_path_or_url': '.',
+                          'text_snippet': 'Testcontainers'},
                          fixed.arguments)
         self.assertFalse(partial)
 

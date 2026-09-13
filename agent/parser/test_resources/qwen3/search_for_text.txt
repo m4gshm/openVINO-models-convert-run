@@ -1,0 +1,13 @@
+<tool_call>
+<function=search_for_text>
+<parameter=is_case_sensitive>
+False
+</parameter>
+<parameter=target_path>
+.
+</parameter>
+<parameter=text_snippet>
+Testcontainers
+</parameter>
+</function>
+</tool_call>

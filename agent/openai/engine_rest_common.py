@@ -54,7 +54,8 @@ class ControllerConfig(BaseModel):
     model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
     is_fix_tool_type: bool = True
-    if_detect_cycled_tool_call: bool = True
+    is_detect_cycled_tool_call: bool = True
+    is_detect_looped_inference: bool = True
     chat_template: str = ''
 
 
@@ -288,6 +289,7 @@ class BaseController(ABC):
                                      prompt=prompt,
                                      parser=self.parser,
                                      init_chat_events=True,
+                                     is_detect_looped_inference=self.config.is_detect_looped_inference,
                                      is_stop=is_stop,
                                      tool_fixer=tool_fixer,
                                      config=self.handler_config,
@@ -305,7 +307,7 @@ class BaseController(ABC):
         pass
 
     def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
-        if self.config.if_detect_cycled_tool_call:
+        if self.config.is_detect_cycled_tool_call:
             request_user_select = detect_select_options(tools)
             preprocess_tool_call = PreprocessToolCall()
             looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
@@ -351,6 +353,7 @@ class BaseController(ABC):
                                      prompt=prompt,
                                      parser=self.parser,
                                      init_chat_events=True,
+                                     is_detect_looped_inference=self.config.is_detect_looped_inference,
                                      is_stop=is_stop,
                                      is_veai=False,
                                      config=self.handler_config,

@@ -8,7 +8,14 @@ from agent.parser.lfm2 import Lfm2Parser
 
 TEST_RESOURCES = "test_resources"
 
-user_context = UserContext()
+
+def new_windows_user_context() -> UserContext:
+    context = UserContext()
+    context.os_type = OS.Windows
+    return context
+
+
+user_context = new_windows_user_context()
 parser = Lfm2Parser()
 state = parser.new_state()
 

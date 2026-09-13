@@ -1,5 +1,5 @@
-set MODEL_NAME=Qwen3-a3B_eagle3
-set MODEL_DEVELOPER=AngelSlim
+set MODEL_NAME=Qwen3-8B_eagle3
+set MODEL_DEVELOPER=aoiandroid
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
@@ -23,8 +23,8 @@ pause
 @REM +---------------------------+-----------------------------+----------------------------------------+
 @REM | Weight compression mode   | % all parameters (layers)   | % ratio-defining parameters (layers)   |
 @REM +===========================+=============================+========================================+
-@REM | int8_sym, per-channel     | 83% (2 / 10)                | 0% (0 / 8)                             |
+@REM | int8_sym, per-channel     | 74% (2 / 10)                | 0% (0 / 8)                             |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM | int4_sym, group size 128  | 17% (8 / 10)                | 100% (8 / 8)                           |
+@REM | int4_sym, group size 128  | 26% (8 / 10)                | 100% (8 / 8)                           |
 @REM +---------------------------+-----------------------------+----------------------------------------+
-@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:03 • 0:00:00
+@REM Applying Weight Compression ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% • 0:00:04 • 0:00:00

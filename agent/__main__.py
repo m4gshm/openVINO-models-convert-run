@@ -8,13 +8,14 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode
 from pydantic.json import pydantic_encoder
 
 from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
+from agent.openai.engine_rest_common import ControllerConfig
 from agent.parser import Parser
 from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
@@ -152,6 +153,8 @@ def main():
     args_parser.add_argument("--fix_tool_type", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--detect_cycled_tool_call", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--detect_looped_inference", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,
                              default=".config/generate_config.json",
@@ -360,7 +363,8 @@ def main():
         sys.exit(1)
 
     is_fix_tool_type = args.fix_tool_type != Turn.off.value
-    if_detect_cycled_tool_call = args.detect_cycled_tool_call != Turn.off.value
+    is_detect_cycled_tool_call = args.detect_cycled_tool_call != Turn.off.value
+    is_detect_looped_inference = args.detect_looped_inference != Turn.off.value
 
     model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
@@ -458,42 +462,38 @@ def main():
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
 
+    controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
+                                         model_architectures=model_architectures,
+                                         is_fix_tool_type=is_fix_tool_type,
+                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call,
+                                         is_detect_looped_inference=is_detect_looped_inference,
+                                         chat_template=chat_template)
+
     device_value: str = device.name
-    if is_device_npu or pipe != Pipe.CB:
-        app = init_sequential_engine(model_name=model_name,
-                                     max_prompt_len=max_prompt_len,
-                                     model_path=str(model_path),
-                                     model_architectures=model_architectures,
-                                     device=device_value,
-                                     vlm=pipe == Pipe.VLM,
-                                     parser=model_parser,
-                                     scheduler_config=scheduler_config if not is_device_npu else None,
-                                     generate_opts=generate_opts,
-                                     handler_config=handler_config,
-                                     chat_template=chat_template,
-                                     pipeline_properties=pipeline_properties,
-                                     is_fix_tool_type=is_fix_tool_type,
-                                     if_detect_cycled_tool_call=if_detect_cycled_tool_call,
-                                     stop_signal=stop_signal,
-                                     draft_model_path=draft_model_path)
-    else:
-        app = init_continuous_batching_engine(model=model_name,
-                                              max_prompt_len=max_prompt_len,
-                                              model_path=str(model_path),
-                                              model_architectures=model_architectures,
-                                              device=device_value,
-                                              parser=model_parser,
-                                              generate_opts=generate_opts,
-                                              handler_config=handler_config,
-                                              scheduler_config=scheduler_config,
-                                              pipeline_properties=pipeline_properties,
-                                              chat_template=chat_template,
-                                              tokenizer_properties=tokenizer_properties,
-                                              is_fix_tool_type=is_fix_tool_type,
-                                              if_detect_cycled_tool_call=if_detect_cycled_tool_call,
-                                              stop_signal=stop_signal,
-                                              draft_model_path=draft_model_path
-                                              )
+    app = init_sequential_engine(
+        controller_config=controller_config,
+        model_path=str(model_path),
+        device=device_value,
+        vlm=pipe == Pipe.VLM,
+        parser=model_parser,
+        scheduler_config=scheduler_config if not is_device_npu else None,
+        generate_opts=generate_opts,
+        handler_config=handler_config,
+        pipeline_properties=pipeline_properties,
+        stop_signal=stop_signal,
+        draft_model_path=draft_model_path
+    ) if is_device_npu or pipe != Pipe.CB else init_continuous_batching_engine(
+        controller_config=controller_config,
+        model_path=str(model_path),
+        device=device_value,
+        parser=model_parser,
+        generate_opts=generate_opts,
+        handler_config=handler_config,
+        scheduler_config=scheduler_config,
+        pipeline_properties=pipeline_properties,
+        tokenizer_properties=tokenizer_properties,
+        stop_signal=stop_signal,
+        draft_model_path=draft_model_path)
 
     log.info(f"listening {args.host}:{args.port}")
 

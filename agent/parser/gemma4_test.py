@@ -1,11 +1,18 @@
 import unittest
 from importlib.resources import files
 
-from agent.client.user_context import UserContext
+from agent.client.user_context import UserContext, OS
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file, GEMMA_4, fix_search_file_by_name
 from agent.parser.gemma4 import Gemma4ChannelParser
 
-USER_CONTEXT = UserContext(model_architectures={GEMMA_4})
+
+def new_windows_user_context() -> UserContext:
+    context = UserContext(model_architectures={GEMMA_4})
+    context.os_type = OS.Windows
+    return context
+
+
+USER_CONTEXT = new_windows_user_context()
 TEST_RESOURCES = "test_resources"
 
 parser = Gemma4ChannelParser()

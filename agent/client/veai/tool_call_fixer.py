@@ -582,14 +582,15 @@ def fix_safe_delete(function: ParsedFunctionCall, context: UserContext | None) -
 def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
+    if not target_path_or_url:
+        target_path_or_url = get_one_of(args, ["target_path"])
+
     text_snippet = args.get("text_snippet")
     if target_path_or_url and text_snippet:
         target_path_or_url, fixed = fix_windows_path(target_path_or_url, context)
-        is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive")
-        if is_case_sensitive is None:
-            # log
-            new_function = SearchForText().new_call(target_path_or_url, text_snippet, True)
-            return new_function
+        is_case_sensitive = as_bool_or_none(args.get("is_case_sensitive"), "is_case_sensitive") or False
+        new_function = SearchForText().new_call(target_path_or_url, text_snippet, is_case_sensitive)
+        return new_function
 
     return function
 
@@ -814,7 +815,8 @@ def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any
                 first = parts[1]
                 parts = parts[1:]
 
-            if not (first.endswith(":/") or first.endswith(":\\")):
+            win_disk_letter_size = 1
+            if not (first.endswith(":/") or first.endswith(":\\")) and len(first) == win_disk_letter_size:
                 new_first = first + (":/" if "/" in path else ":\\")
                 new_parts = (new_first,) + parts[1:]
                 path = str(Path().joinpath(*new_parts))

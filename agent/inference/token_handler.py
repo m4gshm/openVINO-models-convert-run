@@ -16,6 +16,7 @@ from agent.common.time import format_time
 from agent.inference.loop_error import LoopError
 from agent.inference.phrase import Phrase
 from agent.openai.chat_api import new_chat_completion_chunk, new_tool_call, new_stop_response, ROLE_ASSISTANT, Role
+from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import Parser, StateEvent, ParserState, ParsedFunctionCall
 
 log = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ class TokenHandler:
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
+                 is_detect_looped_inference: bool,
                  is_stop: Callable[[], bool] | None,
                  config: TokenHandlerConfig,
                  tool_fixer: ToolFixer | None,
@@ -135,6 +137,7 @@ class TokenHandler:
                  supported_functions: dict[str, FunctionDefinitionParameters] | None = None):
         super().__init__()
         self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
+                                        is_detect_looped_inference=is_detect_looped_inference,
                                         config=config, tool_fixer=tool_fixer, user_context=user_context,
                                         supported_functions=supported_functions)
         self.start_time: datetime | None = None
@@ -218,7 +221,7 @@ def fix_and_chat_complete_parsed_tool_calls(tool_fixer: ToolFixer,
 class TokenProcessor:
     def __clean_phrase(self):
         print_log(self.phrase)
-        new_phrase = Phrase()
+        new_phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
         self.phrase = new_phrase
         self.empty_conversation_counter = 0
         self.phrase_tick = None
@@ -227,7 +230,7 @@ class TokenProcessor:
     def __clean_tool_call_phrase(self):
         call_phrase = self.tool_call_phrase
         print_log(call_phrase)
-        phrase = Phrase()
+        phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
         self.tool_call_phrase = phrase
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
@@ -236,6 +239,7 @@ class TokenProcessor:
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
+                 is_detect_looped_inference: bool,
                  config: TokenHandlerConfig,
                  tool_fixer: ToolFixer | None,
                  user_context: UserContext | None = None,
@@ -256,8 +260,9 @@ class TokenProcessor:
         self.token_conversation_start_number: int = -1
         self.expect_role = False
         self.phrase_tick: float | None = None
-        self.phrase = Phrase()
-        self.tool_call_phrase = Phrase()
+        self.is_detect_looped_inference = is_detect_looped_inference
+        self.phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
+        self.tool_call_phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
         self.tool_call_parsing_tick: float | None = None
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False

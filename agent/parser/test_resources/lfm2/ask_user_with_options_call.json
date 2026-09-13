@@ -1,0 +1,20 @@
+{
+  "tool_calls": [
+    {
+      "name": "ask_user_with_options",
+      "arguments": {
+        "question": "Based on the MessageStorageImpl class, what specific test cases would you like to create? Please specify the key scenarios to cover.",
+        "options": [
+          "Basic unit tests for insert and duplicate key handling",
+          "Integration tests with real PostgreSQL database using testcontainers",
+          "Tests for partition creation and maintenance service interactions",
+          "Tests for the storeUnique method with various failure scenarios",
+          "All of the above"
+        ],
+        "is_multiple_choice": true
+      },
+      "id": "middleware_checkpoint_e18d7d0c-05d4-45f6-01"
+    }
+  ],
+  "content": ""
+}
