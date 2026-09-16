@@ -16,10 +16,10 @@ class AskUserWithOptions(ToolSelectOptions, Tool):
     def name(self) -> str:
         return function_name
 
-    def new_call(self, question: str, answers: list[str], is_multiple_choice: bool = False) -> ParsedFunctionCall:
+    def new_call(self, question: str, options: list[str], is_multiple_choice: bool = False) -> ParsedFunctionCall:
         return ParsedFunctionCall(name=function_name, arguments={
             "question": question,
-            "options": answers,
+            "options": options,
             "is_multiple_choice": is_multiple_choice,
         })
 

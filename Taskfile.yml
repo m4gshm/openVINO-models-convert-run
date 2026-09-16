@@ -26,6 +26,10 @@ tasks:
   instal-openvino-nightly:
     cmds:
       - "{{.VENV_BIN}}pip install --pre -U openvino --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly"
+  update:
+    cmds:
+      - "{{.VENV_BIN}}pip install openvino.genai --upgrade"
+      - task: freeze
   
   activate:
     deps:

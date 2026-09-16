@@ -26,6 +26,9 @@ class GenerateOpts(BaseModel):
 
     num_return_sequences: int | None = None
 
+    num_assistant_tokens: int | None = None
+    max_ngram_size: int | None = None
+
 
 def get_default_generate_opts():
     return GenerateOpts(

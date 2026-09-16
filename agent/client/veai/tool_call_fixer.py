@@ -10,6 +10,7 @@ import json_repair
 from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH, OS
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
     search_file_by_name, file_structure, run_command, run_configuration, safe_delete
+from agent.client.veai.tool.ask_user_with_options import AskUserWithOptions
 from agent.client.veai.tool.edit_file import EditFile
 from agent.client.veai.tool.file_structure import FileStructure
 from agent.client.veai.tool.list_dir import ListDir
@@ -61,18 +62,22 @@ def veai_fix_incorrect_arguments(function: ParsedFunctionCall,
 
 
 def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
+    invalid = False
     args = get_args(function)
     options_raw = args.get("options")
+
     is_multiple_choice = as_bool_or_none(args.get("is_multiple_choice"), "is_multiple_choice")
     if not is_multiple_choice:
+        invalid = True
         is_multiple_choice = False
-        args["is_multiple_choice"] = is_multiple_choice
     question = args.get("question")
     if not question:
-        args["question"] = "[*]" if is_multiple_choice else "(*)"
+        invalid = True
+        question = "[*]" if is_multiple_choice else "(*)"
     options: Any = None
     if options_raw:
         if isinstance(options_raw, str):
+            invalid = True
             try:
                 options = json.loads(options_raw)
             except json.decoder.JSONDecodeError as e:
@@ -87,12 +92,12 @@ def fix_ask_user_with_options(function: ParsedFunctionCall, context: UserContext
     else:
         log.error(f"missing options in args, function '{function.name}', args '{args}'")
 
-    if options:
-        args["options"] = options  # json.dumps(options, ensure_ascii=False)
-
-    function.arguments = json.dumps(args, ensure_ascii=False)
-    log.info(f"function after repairing, function {function.name}, arguments '{args}'")
-    return function
+    if invalid:
+        log.info(f"function after repairing: {function.name}, question='{question}', "
+                 f"is_multiple_choice={is_multiple_choice}, options={options}")
+        return AskUserWithOptions().new_call(question, options, is_multiple_choice)
+    else:
+        return function
 
 
 def fix_file_structure(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:

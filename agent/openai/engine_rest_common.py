@@ -107,6 +107,15 @@ def new_generation_config(generate_opts: GenerateOpts,
                           stop: list[str] | str | None = None,
                           ) -> GenerationConfig:
     generation_config = GenerationConfig()
+
+    num_assistant_tokens = generate_opts.num_assistant_tokens
+    if not num_assistant_tokens is None:
+        generation_config.num_assistant_tokens = num_assistant_tokens
+
+    ngram_size = generate_opts.max_ngram_size
+    if not ngram_size is None:
+        generation_config.max_ngram_size = ngram_size
+
     max_new_tokens = max_completion_tokens or generate_opts.max_new_tokens
     if not max_new_tokens is None:
         generation_config.max_new_tokens = max_new_tokens

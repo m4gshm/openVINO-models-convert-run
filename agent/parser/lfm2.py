@@ -7,7 +7,7 @@ from agent.inference.phrase import Phrase
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail, DelayedResult
 from agent.parser.gemma4 import unescape
-from agent.parser.json_fixer import try_to_parse_json, ARRAY_START, OBJECT_START
+from agent.parser.json_fixer import ARRAY_START, OBJECT_START, try_to_parse_json
 
 TOOL_CALL_START_PROBABLY = "{\n"
 
@@ -82,45 +82,52 @@ class Lfm2Parser(Parser):
 
     def handle_delayed_phrase(self, phrase: Phrase) -> DelayedResult | None:
         full = phrase.full
-        parsed_json = try_to_parse_json(full)
-        if parsed_json is None:
-            return None
+        return parse_delayed_phrase(full)
+
+
+def parse_delayed_phrase(delayed_raw_json: str) -> DelayedResult | None:
+    parsed_json = try_to_parse_json(delayed_raw_json)
+    if parsed_json is None:
+        return None
+
+    handled_content: str | None = None
+    handled_tool_calls: list[ParsedFunctionCall] | None = None
+    if not isinstance(parsed_json, dict):
+        return None
+
+    content = parsed_json.get("content")
+    if not content is None:
+        if isinstance(content, str):
+            handled_content = content
         else:
-            handled_content: str | None = None
-            handled_tool_calls: list[ParsedFunctionCall] | None = None
-            if isinstance(parsed_json, dict):
-                content = parsed_json.get("content")
-                if not content is None:
-                    if isinstance(content, str):
-                        handled_content = content
-                    else:
-                        log.warning(f"unexpected content type='{type(content)}', content='{content}'")
+            log.warning(f"unexpected content type='{type(content)}', content='{content}'")
 
-                tool_calls = parsed_json.get("tool_calls")
-                if not tool_calls is None:
-                    if isinstance(tool_calls, list):
-                        parsed_tool_calls = list[ParsedFunctionCall]()
-                        for tool_call in tool_calls:
-                            if not isinstance(tool_call, dict):
-                                log.warning(f"unexpected tool_call type='{type(tool_call)}', content='{tool_call}'")
-                            else:
-                                name = tool_call.get("name")
-                                arguments = tool_call.get("arguments")
-                                if not (name is None or arguments is None):
-                                    if not isinstance(name, str):
-                                        log.warning(f"unexpected tool_call name type='{type(name)}', content='{name}'")
+    tool_calls = parsed_json.get("tool_calls")
+    if tool_calls is None:
+        pass
+    elif not isinstance(tool_calls, list):
+            log.warning(f"unexpected tool_calls type='{type(tool_calls)}', content='{tool_calls}'")
+    else:
+        parsed_tool_calls = list[ParsedFunctionCall]()
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                log.warning(f"unexpected tool_call type='{type(tool_call)}', content='{tool_call}'")
+            else:
+                name = tool_call.get("name")
+                arguments = tool_call.get("arguments")
+                if not (name is None or arguments is None):
+                    if not isinstance(name, str):
+                        log.warning(f"unexpected tool_call name type='{type(name)}', content='{name}'")
 
-                                    if not isinstance(arguments, dict):
-                                        log.warning(f"unexpected tool_call arguments type='{type(arguments)}',"
-                                                    f" content='{arguments}'")
-                                parsed_tool_calls.append(ParsedFunctionCall(name=name, arguments=arguments))
-                        if len(parsed_tool_calls) > 0:
-                            handled_tool_calls = parsed_tool_calls
-                    else:
-                        log.warning(f"unexpected tool_calls type='{type(tool_calls)}', content='{tool_calls}'")
+                    if not isinstance(arguments, dict):
+                        log.warning(f"unexpected tool_call arguments type='{type(arguments)}',"
+                                    f" content='{arguments}'")
+                parsed_tool_calls.append(ParsedFunctionCall(name=name, arguments=arguments))
+        if len(parsed_tool_calls) > 0:
+            handled_tool_calls = parsed_tool_calls
 
-            return DelayedResult(content=handled_content, tool_calls=handled_tool_calls) if (
-                    handled_content or handled_tool_calls) else None
+    return DelayedResult(content=handled_content, tool_calls=handled_tool_calls) if (
+            handled_content or handled_tool_calls) else None
 
 
 def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:

@@ -2,9 +2,10 @@ import unittest
 from importlib.resources import files
 
 from agent.client.user_context import UserContext, OS
-from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure, fix_search_file_by_name
+from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure, fix_search_file_by_name, \
+    fix_ask_user_with_options
 from agent.parser import ParsedFunctionCall
-from agent.parser.lfm2 import Lfm2Parser
+from agent.parser.lfm2 import Lfm2Parser, parse_delayed_phrase
 
 TEST_RESOURCES = "test_resources"
 
@@ -152,6 +153,25 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertEqual("file_structure", first_fixed.name)
         self.assertEqual({'depth': 4, 'directory_path': 'C:/src'},
                          first.arguments)
+
+    def test_ask_user_with_options_call_json(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/ask_user_with_options_call.json")
+        tool_call_text = tool_call_file.read_text()
+        delay = parse_delayed_phrase(tool_call_text)
+        calls = delay.tool_calls
+        first = calls[0]
+        first_fixed = fix_ask_user_with_options(first, user_context)
+        self.assertEqual("ask_user_with_options", first_fixed.name)
+        self.assertEqual({
+            "question": "Based on the MessageStorageImpl class, what specific test cases would you "
+                        "like to create? Please specify the key scenarios to cover.",
+            'options': ["Basic unit tests for insert and duplicate key handling",
+                        "Integration tests with real PostgreSQL database using testcontainers",
+                        "Tests for partition creation and maintenance service interactions",
+                        "Tests for the storeUnique method with various failure scenarios",
+                        "All of the above"],
+            "is_multiple_choice": True
+        }, first.arguments)
 
 
 if __name__ == '__main__':
