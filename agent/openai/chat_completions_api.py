@@ -37,19 +37,19 @@ class ChatCompletionMessageParam(BaseModel):
     tool_calls: Optional[List[ChatCompletionMessageFunctionToolCallParam]] = None
 
 
-class FunctionDefinition(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    name: str
-    description: Optional[str] = None
-    parameters: FunctionDefinitionParameters
-
-
 class FunctionDefinitionParameters(BaseModel):
     model_config = ConfigDict(extra="allow")
     type: str = "object"
     properties: Dict[str, Any]
     required: set[str] | None = None
     additionalProperties: bool | None = False
+
+
+class FunctionDefinition(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    name: str
+    description: Optional[str] = None
+    parameters: FunctionDefinitionParameters
 
 
 class ChatCompletionFunctionToolParam(BaseModel):
