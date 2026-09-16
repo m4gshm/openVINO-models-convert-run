@@ -122,6 +122,9 @@ def print_log(phrase: Phrase):
         log_inference_generated.debug(full)
 
 
+type ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedFunctionCall] | ParsedFunctionCall]
+
+
 class TokenHandler:
 
     def __init__(self,
@@ -179,9 +182,6 @@ def new_tool_call_chat_completion(fixed_tool_calls: list[ChoiceDeltaToolCall],
         return new_chat_completion_chunk(role=role, tool_calls=fixed_tool_calls), StopSignal.TOOL_CALL
 
 
-type ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedFunctionCall] | ParsedFunctionCall]
-
-
 def fix_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
                    parsed_function_calls: list[ParsedFunctionCall]) -> list[ParsedFunctionCall]:
     if not tool_fixer:
@@ -221,7 +221,7 @@ def fix_and_chat_complete_parsed_tool_calls(tool_fixer: ToolFixer,
 class TokenProcessor:
     def __clean_phrase(self):
         print_log(self.phrase)
-        new_phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
+        new_phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
         self.phrase = new_phrase
         self.empty_conversation_counter = 0
         self.phrase_tick = None
@@ -230,7 +230,7 @@ class TokenProcessor:
     def __clean_tool_call_phrase(self):
         call_phrase = self.tool_call_phrase
         print_log(call_phrase)
-        phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
+        phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
         self.tool_call_phrase = phrase
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
@@ -261,8 +261,8 @@ class TokenProcessor:
         self.expect_role = False
         self.phrase_tick: float | None = None
         self.is_detect_looped_inference = is_detect_looped_inference
-        self.phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
-        self.tool_call_phrase = Phrase(is_detect_looped_inference = self.is_detect_looped_inference)
+        self.phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
+        self.tool_call_phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
         self.tool_call_parsing_tick: float | None = None
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False

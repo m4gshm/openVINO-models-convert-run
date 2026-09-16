@@ -69,7 +69,7 @@ class Lfm2Parser(Parser):
 
         return parsed_calls, partial
 
-    def is_sequence_end(self, state: State, token: str) -> bool:
+    def is_sequence_end(self, state: ParserState, token: str) -> bool:
         sequence_end = super().is_sequence_end(state, token)
         return sequence_end
 
