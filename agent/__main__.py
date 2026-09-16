@@ -233,8 +233,6 @@ def main():
         log.error(f"file or directory doesn't exists: '{model_path}'")
         sys.exit(1)
 
-    handler_config = TokenHandlerConfig()
-
     default_generate_opts = get_default_generate_opts()
     generate_opts_file = args.generate_config_file
     generate_opts: GenerateOpts
@@ -465,9 +463,10 @@ def main():
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
                                          is_fix_tool_type=is_fix_tool_type,
-                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call,
-                                         is_detect_looped_inference=is_detect_looped_inference,
-                                         chat_template=chat_template)
+                                         chat_template=chat_template,
+                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call)
+
+    handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
     device_value: str = device.name
     app = init_sequential_engine(

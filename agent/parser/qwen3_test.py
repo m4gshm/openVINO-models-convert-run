@@ -283,8 +283,6 @@ Target.py
         self.assertFalse(partial)
 
     def test_search_for_text(self):
-        # function_parameters = get_required_function_parameters("qwen3/safe_delete_tool.json")
-        # state = parser.new_state(supported_functions=(function_parameters))
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text.txt")
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
@@ -294,6 +292,19 @@ Target.py
         self.assertEqual({'is_case_sensitive': False,
                           'target_path_or_url': '.',
                           'text_snippet': 'Testcontainers'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_search_for_text_2(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text_2.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_search_for_text(first, USER_CONTEXT)
+        self.assertEqual("search_for_text", fixed.name)
+        self.assertEqual({'is_case_sensitive': False,
+                          'target_path_or_url': 'C:\\',
+                          'text_snippet': 'testcontainers'},
                          fixed.arguments)
         self.assertFalse(partial)
 

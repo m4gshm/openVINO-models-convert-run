@@ -22,10 +22,11 @@ log = logging.getLogger(__name__)
 
 
 def init_continuous_batching_engine(controller_config: ControllerConfig,
+                                    handler_config: TokenHandlerConfig,
                                     model_path: str, device: str, parser: Parser,
                                     stop_signal: threading.Event,
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
-                                    generate_opts=GenerateOpts(), handler_config=TokenHandlerConfig(),
+                                    generate_opts=GenerateOpts(),
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None,
@@ -68,12 +69,14 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
                                                 stop_signal=stop_signal))
 
 
-def init_sequential_engine(controller_config: ControllerConfig, model_path: str,
+def init_sequential_engine(controller_config: ControllerConfig,
+                           handler_config: TokenHandlerConfig,
+                           model_path: str,
                            device: str, vlm: bool, parser: Parser,
                            stop_signal: threading.Event,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
-                           handler_config=TokenHandlerConfig(),
+
                            pipeline_properties: dict[str, Any] | None = None,
                            draft_model_path: str | None = None,
                            ) -> FastAPI:

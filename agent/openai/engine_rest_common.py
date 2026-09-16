@@ -55,7 +55,6 @@ class ControllerConfig(BaseModel):
     response_timeout: timedelta = timedelta(minutes=20)
     is_fix_tool_type: bool = True
     is_detect_cycled_tool_call: bool = True
-    is_detect_looped_inference: bool = True
     chat_template: str = ''
 
 
@@ -289,12 +288,11 @@ class BaseController(ABC):
                                      prompt=prompt,
                                      parser=self.parser,
                                      init_chat_events=True,
-                                     is_detect_looped_inference=self.config.is_detect_looped_inference,
                                      is_stop=is_stop,
-                                     tool_fixer=tool_fixer,
                                      config=self.handler_config,
-                                     supported_functions=function_parameters,
+                                     tool_fixer=tool_fixer,
                                      user_context=user_context,
+                                     supported_functions=function_parameters,
                                      )
 
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
@@ -353,9 +351,7 @@ class BaseController(ABC):
                                      prompt=prompt,
                                      parser=self.parser,
                                      init_chat_events=True,
-                                     is_detect_looped_inference=self.config.is_detect_looped_inference,
                                      is_stop=is_stop,
-                                     is_veai=False,
                                      config=self.handler_config,
                                      )
 

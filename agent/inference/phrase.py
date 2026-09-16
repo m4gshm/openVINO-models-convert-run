@@ -361,7 +361,7 @@ class Phrase:
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
                  duplicated_lines_limit=50,
                  duplicated_lines_threshold=10):
-        self.tokens: list[str] = []
+        self.letters: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}
         self.lines_duplicated_times: dict[int, set[str]] = {}
@@ -390,8 +390,9 @@ class Phrase:
 
     @property
     def full(self):
-        join = "".join(self.tokens)
+        join = "".join(self.letters)
         return join
+
 
     def add_token(self, token: str) -> list[str]:
         added_lines = list[str]()
@@ -399,12 +400,12 @@ class Phrase:
             log.error(f"empty token")
             token = " "
         for letter in token:
-            self.tokens.append(letter)
+            prev_token = self.letters[-1] if self.letters else None
+            self.letters.append(letter)
 
-            prev_token = self.tokens[-1]
             if self.is_detect_looped_inference and prev_token == letter:
                 i = 1
-                for prev_token in reversed(self.tokens[:-1]):
+                for prev_token in reversed(self.letters[:-1]):
                     if prev_token != letter:
                         break
                     i += 1

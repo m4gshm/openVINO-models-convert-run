@@ -30,6 +30,7 @@ class TokenHandlerConfig(BaseModel):
     no_conversation_counter_erased_max: int = 40
     no_conversation_counter_max: int = 20
     empty_conversation_counter_max: int = 20
+    is_detect_looped_inference: bool = True
 
 
 class StopSignal(Enum):
@@ -132,15 +133,13 @@ class TokenHandler:
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
-                 is_detect_looped_inference: bool,
                  is_stop: Callable[[], bool] | None,
                  config: TokenHandlerConfig,
-                 tool_fixer: ToolFixer | None,
+                 tool_fixer: ToolFixer | None = None,
                  user_context: UserContext | None = None,
                  supported_functions: dict[str, FunctionDefinitionParameters] | None = None):
         super().__init__()
         self.processor = TokenProcessor(prompt=prompt, parser=parser, init_chat_events=init_chat_events,
-                                        is_detect_looped_inference=is_detect_looped_inference,
                                         config=config, tool_fixer=tool_fixer, user_context=user_context,
                                         supported_functions=supported_functions)
         self.start_time: datetime | None = None
@@ -172,14 +171,7 @@ def end(amount: int) -> str:
     return "s" if amount != 1 else ""
 
 
-def new_tool_call_chat_completion(fixed_tool_calls: list[ChoiceDeltaToolCall],
-                                  unparsed_tool_call_expression: str,
-                                  role: Role | None) -> tuple[ChatCompletionChunk, StopSignal]:
-    if len(fixed_tool_calls) == 0:
-        log.info(f"unparsed tool calls: {unparsed_tool_call_expression}")
-        return new_chat_completion_chunk(role=role, content=unparsed_tool_call_expression), StopSignal.CANCEL
-    else:
-        return new_chat_completion_chunk(role=role, tool_calls=fixed_tool_calls), StopSignal.TOOL_CALL
+type ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedFunctionCall] | ParsedFunctionCall]
 
 
 def fix_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
@@ -215,13 +207,17 @@ def fix_and_chat_complete_parsed_tool_calls(tool_fixer: ToolFixer,
                                             tool_call_expression: str, role: Role | None
                                             ) -> tuple[ChatCompletionChunk, StopSignal]:
     tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(tool_fixer, user_context, parsed_function_calls)
-    return new_tool_call_chat_completion(tool_calls, tool_call_expression, role)
+    if len(tool_calls) == 0:
+        log.info(f"unparsed tool calls: {tool_call_expression}")
+        return new_chat_completion_chunk(role=role, content=tool_call_expression), StopSignal.CANCEL
+    else:
+        return new_chat_completion_chunk(role=role, tool_calls=tool_calls), StopSignal.TOOL_CALL
 
 
 class TokenProcessor:
     def __clean_phrase(self):
         print_log(self.phrase)
-        new_phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
+        new_phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
         self.phrase = new_phrase
         self.empty_conversation_counter = 0
         self.phrase_tick = None
@@ -230,7 +226,7 @@ class TokenProcessor:
     def __clean_tool_call_phrase(self):
         call_phrase = self.tool_call_phrase
         print_log(call_phrase)
-        phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
+        phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
         self.tool_call_phrase = phrase
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
@@ -239,7 +235,6 @@ class TokenProcessor:
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
-                 is_detect_looped_inference: bool,
                  config: TokenHandlerConfig,
                  tool_fixer: ToolFixer | None,
                  user_context: UserContext | None = None,
@@ -260,9 +255,8 @@ class TokenProcessor:
         self.token_conversation_start_number: int = -1
         self.expect_role = False
         self.phrase_tick: float | None = None
-        self.is_detect_looped_inference = is_detect_looped_inference
-        self.phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
-        self.tool_call_phrase = Phrase(is_detect_looped_inference=self.is_detect_looped_inference)
+        self.phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
+        self.tool_call_phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
         self.tool_call_parsing_tick: float | None = None
         self.tool_call_parsing_start_time: float | None = None
         self.tool_call_parsing_long_time_warned: bool = False
@@ -353,12 +347,17 @@ class TokenProcessor:
             if current_event == StateEvent.TOOL_CALL:
                 log.debug(f"tool call is finished by starting new tool call: '{token}'")
                 tool_call, stop_signal = self.tool_call_end(state, token)
+                if stop_signal == StopSignal.TOOL_CALL:
+                    stop_signal = None
                 result.append(tool_call)
             else:
                 self.tool_call_start(state, token)
         elif parser.is_tool_call_end(state, token):
             tool_call, stop_signal = self.tool_call_end(state, token)
             result.append(tool_call)
+            if parser.is_support_multiple_tool_calls(state, token) and stop_signal == StopSignal.TOOL_CALL:
+                stop_signal = None
+
         elif parser.is_tool_response_start(state, token):
             state.start_event(StateEvent.TOOL_RESPONSE)
             log.debug(f"tool response start: {token}")
@@ -559,19 +558,22 @@ class TokenProcessor:
         else:
             self.expect_role = True
 
-    def handle_tool_call(self, state: ParserState) -> tuple[ChatCompletionChunk, Literal[StopSignal.TOOL_CALL]]:
+    def handle_tool_call(self, state: ParserState) -> tuple[ChatCompletionChunk, StopSignal]:
         parser = self.parser
         tool_call_phrase = self.tool_call_phrase
         tool_call_expression = tool_call_phrase.full
         parsed_function_calls, _ = parser.parse_tool_calls(state, tool_call_expression)
-        chunk, stop_signal = fix_and_chat_complete_parsed_tool_calls(self.tool_fixer, self.user_context,
-                                                                     parsed_function_calls, tool_call_expression,
-                                                                     state.role)
+        tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(self.tool_fixer, self.user_context,
+                                                                           parsed_function_calls)
+        if len(tool_calls) == 0:
+            log.info(f"unparsed tool calls: {tool_call_expression}")
+            chunk, stop_signal =  new_chat_completion_chunk(role=state.role, content=tool_call_expression), StopSignal.CANCEL
+        else:
+            chunk, stop_signal =  new_chat_completion_chunk(role=state.role, tool_calls=tool_calls), StopSignal.TOOL_CALL
         self.__clean_tool_call_phrase()
         return chunk, stop_signal
 
-    def tool_call_end(self, state: ParserState, token: str | None) -> tuple[
-        ChatCompletionChunk, Literal[StopSignal.TOOL_CALL]]:
+    def tool_call_end(self, state: ParserState, token: str | None) -> tuple[ChatCompletionChunk, StopSignal]:
         self.tool_call_parsing_start_time = None
         tool_call_phrase = self.tool_call_phrase
         state.finish_current_event(expected_state=StateEvent.TOOL_CALL)

@@ -1,0 +1,13 @@
+<tool_call>
+<function=search_for_text>
+<parameter=is_case_sensitive>
+False
+</parameter>
+<parameter=search_directory>
+C:\
+</parameter>
+<parameter=text_snippet>
+testcontainers
+</parameter>
+</function>
+</tool_call>

@@ -5,6 +5,8 @@
   "min_p": 0.0,
   "repetition_penalty": 1.0,
   "presence_penalty": 0.0,
+  "do_sample": true,
+  "num_return_sequences": 1,
   "model_parameters": {
     "enable_thinking": true,
     "preserve_thinking": true

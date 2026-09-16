@@ -1,5 +1,5 @@
-@REM pip install --upgrade transformers==5.10.0
-set MODEL_NAME=gemma-4-12b-it-qat-q4_0-unquantized
+@REM pip install --upgrade transformers==5.10.4
+set MODEL_NAME=gemma-4-12B-it-qat-q4_0-unquantized-assistant
 set MODEL_DEVELOPER=google
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
@@ -16,6 +16,9 @@ optimum-cli export openvino ^
   --group-size %GROUP_SIZE% ^
   --trust-remote-code ^
   --sym ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%
+  --dataset textvqa ^
+  --awq ^
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-awq
 
 pause
+

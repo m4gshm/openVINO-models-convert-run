@@ -128,6 +128,9 @@ class Parser[State: ParserState]():
     def is_delay_streaming_end(self, state: State, token: str) -> bool:
         return False
 
+    def is_support_multiple_tool_calls(self, state: State, token: str) -> bool:
+        return True
+
     def is_tool_call_start(self, state: State, token: str) -> bool:
         return False
 
