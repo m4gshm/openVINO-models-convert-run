@@ -4,6 +4,9 @@
   "top_k": 64,
   "min_p": 0.05,
   "repetition_penalty": 1.05,
+  "num_return_sequences": 1,
+  "num_assistant_tokens": 5,
+  "max_ngram_size": 3,
   "model_parameters": {
     "enable_thinking": true
   }

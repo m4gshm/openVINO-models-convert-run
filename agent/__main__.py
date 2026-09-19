@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging.config
+import multiprocessing
 import os
 import signal
 import sys
@@ -13,6 +14,7 @@ from typing import Any
 import uvicorn
 from openvino_genai.py_openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode
 from pydantic.json import pydantic_encoder
+from openvino_genai import py_openvino_genai
 
 from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
 from agent.openai.engine_rest_common import ControllerConfig
@@ -134,9 +136,9 @@ def main():
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
     args_parser.add_argument("--device", type=str, required=False,
-                             default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
+                             default=enum_value(DeviceType.AUTO), choices=enum_values(DeviceType), help="%(default)s")
     args_parser.add_argument("--performance_hint", type=str, required=False,
-                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint),
+                             default=enum_value(PerformanceHint.THROUGHPUT), choices=enum_values(PerformanceHint),
                              help="%(default)s")
     args_parser.add_argument("--parser", type=str, required=False,
                              default=None, choices=enum_values(ParserType), help="%(default)s")
@@ -378,10 +380,12 @@ def main():
     npu_generate_hint = args.npu_generate_hint
     performance_hint = args.performance_hint
 
+    cores_available = multiprocessing.cpu_count()
     cpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": performance_hint,
         "ENABLE_MMAP": "YES",
+        "INFERENCE_NUM_THREADS": cores_available,
     }
 
     gpu_enable_large_allocations = args.gpu_enable_large_allocations
@@ -400,6 +404,7 @@ def main():
         "GPU_HOST_TASK_PRIORITY": gpu_priorities,
         "GPU_QUEUE_PRIORITY": gpu_priorities,
 
+        "COMPILATION_NUM_THREADS": cores_available,
         # "INFERENCE_PRECISION_HINT": 'dynamic'
     }
 
@@ -447,8 +452,9 @@ def main():
         log.error(f"model path is not existed: {model_path}")
 
     pipeline_properties = npu_pipeline_properties if is_device_npu \
-        else gpu_pipeline_properties if device == DeviceType.GPU \
-        else cpu_pipeline_properties
+        else cpu_pipeline_properties if device == DeviceType.CPU \
+        else cpu_pipeline_properties | gpu_pipeline_properties if device == DeviceType.AUTO \
+        else gpu_pipeline_properties
     kv_cache_precision = args.kv_cache_precision
     if kv_cache_precision:
         pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
@@ -457,8 +463,12 @@ def main():
     if attention_backend:
         pipeline_properties["ATTENTION_BACKEND"] = attention_backend
 
+    device_value: str = device.value
+
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
+    if draft_model_path:
+        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device_value)
 
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
@@ -468,7 +478,9 @@ def main():
 
     handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
-    device_value: str = device.name
+    log.info(f"model={model_path}, device={device}, properties={pipeline_properties}, "
+             f"generate_opts={generate_opts.model_dump(exclude_unset=True, exclude_none=True)}, "
+             f"scheduler_config={scheduler_config}")
     app = init_sequential_engine(
         controller_config=controller_config,
         model_path=str(model_path),
@@ -480,7 +492,6 @@ def main():
         handler_config=handler_config,
         pipeline_properties=pipeline_properties,
         stop_signal=stop_signal,
-        draft_model_path=draft_model_path
     ) if is_device_npu or pipe != Pipe.CB else init_continuous_batching_engine(
         controller_config=controller_config,
         model_path=str(model_path),
@@ -491,8 +502,8 @@ def main():
         scheduler_config=scheduler_config,
         pipeline_properties=pipeline_properties,
         tokenizer_properties=tokenizer_properties,
-        stop_signal=stop_signal,
-        draft_model_path=draft_model_path)
+        stop_signal=stop_signal
+    )
 
     log.info(f"listening {args.host}:{args.port}")
 

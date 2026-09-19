@@ -29,11 +29,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
                                     generate_opts=GenerateOpts(),
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
-                                    vision_encoder_properties: dict[str, Any] | None = None,
-                                    draft_model_path: str | None = None) -> FastAPI:
-    log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}, "
-             f"scheduler_config {scheduler_config.to_string()}")
-
+                                    vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
@@ -44,8 +40,6 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
     if not vision_encoder_properties:
         vision_encoder_properties = {}
     try:
-        if draft_model_path:
-            pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device)
         pipe = py_openvino_genai.ContinuousBatchingPipeline(models_path=model_path,
                                                             scheduler_config=scheduler_config,
                                                             device=device,
@@ -76,22 +70,16 @@ def init_sequential_engine(controller_config: ControllerConfig,
                            stop_signal: threading.Event,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
-
                            pipeline_properties: dict[str, Any] | None = None,
-                           draft_model_path: str | None = None,
                            ) -> FastAPI:
     if not pipeline_properties:
         pipeline_properties = {}
     if scheduler_config:
         pipeline_properties["scheduler_config"] = scheduler_config
 
-    log.info(f"model loading {model_path}, device: {device}, properties: {pipeline_properties}")
-
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
-    if draft_model_path:
-        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device)
     pipe = (
         py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
         py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
