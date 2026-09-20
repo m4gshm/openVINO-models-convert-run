@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
+from openvino_genai import py_openvino_genai
 from openvino_genai.py_openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode
 from pydantic.json import pydantic_encoder
-from openvino_genai import py_openvino_genai
 
 from agent.openai import GenerateOpts, get_default_generate_opts, SchedulerOpts, get_default_scheduler_opts
 from agent.openai.engine_rest_common import ControllerConfig
@@ -145,7 +145,7 @@ def main():
     args_parser.add_argument("--pipe", type=str, required=False,
                              default=None, choices=enum_values(Pipe), help="%(default)s")
     args_parser.add_argument("--attention_backend", type=str, required=False,
-                             default=None, choices=enum_values(AttentionBackend), help="%(default)s")
+                             default=AttentionBackend.PA, choices=enum_values(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
     # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--kv_cache_precision", type=str, required=False,
@@ -180,6 +180,10 @@ def main():
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--gpu_priorities", type=str, required=False,
                              default=enum_value(Level.HIGH), choices=enum_values(Level), help="%(default)s")
+    args_parser.add_argument("--prompt_lookup", type=str, required=False,
+                             default=enum_value(Turn.off), choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--eagle3_mode", type=str, required=False,
+                             default=enum_value(Turn.on), choices=enum_values(Turn), help="%(default)s")
 
     args = args_parser.parse_args()
 
@@ -317,7 +321,7 @@ def main():
         sparse_attention_config.xattention_stride = attention_opts.xattention_stride
         scheduler_config.sparse_attention_config = sparse_attention_config
 
-    prefix_caching = scheduler_opts.enable_prefix_caching or default_scheduler_opts.enable_prefix_caching
+    prefix_caching = get_or_default(scheduler_opts.enable_prefix_caching, default_scheduler_opts.enable_prefix_caching)
     if prefix_caching:
         scheduler_config.enable_prefix_caching = prefix_caching
     scheduler_config.use_cache_eviction = False
@@ -468,7 +472,12 @@ def main():
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
     if draft_model_path:
-        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device_value)
+        draft_properties = {}
+        eagle3_mode = args.eagle3_mode != Turn.off.value
+        if eagle3_mode:
+            draft_properties["eagle3_mode"] = True
+        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device_value,
+                                                                           **draft_properties)
 
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
@@ -481,6 +490,9 @@ def main():
     log.info(f"model={model_path}, device={device}, properties={pipeline_properties}, "
              f"generate_opts={generate_opts.model_dump(exclude_unset=True, exclude_none=True)}, "
              f"scheduler_config={scheduler_config}")
+    prompt_lookup = args.prompt_lookup == Turn.on.value
+    if prompt_lookup:
+        pipeline_properties["prompt_lookup"] = True
     app = init_sequential_engine(
         controller_config=controller_config,
         model_path=str(model_path),
@@ -502,7 +514,7 @@ def main():
         scheduler_config=scheduler_config,
         pipeline_properties=pipeline_properties,
         tokenizer_properties=tokenizer_properties,
-        stop_signal=stop_signal
+        stop_signal=stop_signal,
     )
 
     log.info(f"listening {args.host}:{args.port}")
@@ -520,6 +532,10 @@ def main():
         log.debug(f"main thread finish")
     except Exception as e:
         log.debug(f"main thread finish with error: {e}")
+
+
+def get_or_default[T](val: T | None, default: T | None) -> T | None:
+    return val if not val is None else default
 
 
 def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:

@@ -70,12 +70,11 @@ def init_sequential_engine(controller_config: ControllerConfig,
                            stop_signal: threading.Event,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
-                           pipeline_properties: dict[str, Any] | None = None,
-                           ) -> FastAPI:
+                           pipeline_properties: dict[str, Any] | None = None) -> FastAPI:
     if not pipeline_properties:
         pipeline_properties = {}
-    if scheduler_config:
-        pipeline_properties["scheduler_config"] = scheduler_config
+    # if scheduler_config:
+    #     pipeline_properties["scheduler_config"] = scheduler_config
 
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")

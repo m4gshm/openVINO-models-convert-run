@@ -29,6 +29,9 @@ class GenerateOpts(BaseModel):
     num_assistant_tokens: int | None = None
     max_ngram_size: int | None = None
 
+    tree_depth: int | None = None
+    branching_factor: int | None = None
+
 
 def get_default_generate_opts():
     return GenerateOpts(
@@ -51,9 +54,9 @@ class SchedulerOpts(BaseModel):
     cache_size: int | None = None
     cache_interval_multiplier: int | None = None
     max_num_seqs: int | None = None
-    dynamic_split_fuse: bool = False
-    enable_prefix_caching: bool = True
-    use_sparse_attention: bool = False
+    dynamic_split_fuse: bool | None = None
+    enable_prefix_caching: bool | None = None
+    use_sparse_attention: bool | None = None
     sparse_attention_config: SparseAttentionOpts | None = None
 
 

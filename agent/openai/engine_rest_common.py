@@ -111,6 +111,12 @@ def new_generation_config(generate_opts: GenerateOpts,
     num_assistant_tokens = generate_opts.num_assistant_tokens
     if not num_assistant_tokens is None:
         generation_config.num_assistant_tokens = num_assistant_tokens
+    tree_depth = generate_opts.tree_depth
+    if not tree_depth is None:
+        generation_config.tree_depth = tree_depth
+    branching_factor = generate_opts.branching_factor
+    if not branching_factor is None:
+        generation_config.branching_factor = branching_factor
 
     ngram_size = generate_opts.max_ngram_size
     if not ngram_size is None:
