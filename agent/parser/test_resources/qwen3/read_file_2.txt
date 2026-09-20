@@ -1,0 +1,15 @@
+<function=read_file>
+<parameter=content>
+C:/MessageStorageImpl.java
+</parameter>
+<parameter=line_offset>
+0
+</parameter>
+<parameter=end_line>
+100
+</parameter>
+<parameter=start_line>
+1
+</parameter>
+</function>
+</tool_call>

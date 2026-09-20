@@ -63,5 +63,5 @@ def get_default_scheduler_opts() -> SchedulerOpts:
         dynamic_split_fuse=False,
         enable_prefix_caching=True,
         cache_size=None,
-        max_num_batched_tokens=512,
+        max_num_batched_tokens=1024,
     )

@@ -646,7 +646,7 @@ def fix_search_file_by_name(function: ParsedFunctionCall, context: UserContext |
 
 def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = None) -> ParsedFunctionCall:
     args = get_args(function)
-    target_file, invalid = get_target_file(args, context)
+    target_file, invalid = get_target_file(args, context, ["content"])
 
     anonymous_arguments = function.anonymous_arguments
     if not target_file and anonymous_arguments:
@@ -689,12 +689,15 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = No
     return function
 
 
-def get_target_file(args, context: UserContext | None) -> tuple[str, bool]:
+def get_target_file(args, context: UserContext | None, additional_fields: list[str] | None = None) -> tuple[str, bool]:
     target_file = args.get(TARGET_FILE)
 
     invalid = not target_file
     if invalid:
-        target_file = get_one_of(args, ["file_path", "file", "path", "edit_scope", "directory_path"])
+        possible_fields = ["file_path", "file", "path", "edit_scope", "directory_path"]
+        if additional_fields:
+            possible_fields.extend(additional_fields)
+        target_file = get_one_of(args, possible_fields)
 
     target_file, fixed = fix_windows_path(target_file, context)
     if fixed:

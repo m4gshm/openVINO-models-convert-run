@@ -3,7 +3,7 @@ from importlib.resources import files
 
 from agent.client.user_context import UserContext, OS
 from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete, \
-    fix_search_for_text, fix_search_file_by_name
+    fix_search_for_text, fix_search_file_by_name, fix_read_file
 from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam, \
     FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
@@ -248,6 +248,19 @@ Target.py
         self.assertEqual({'end_line': 500,
                           'start_line': 1,
                           'target_file': 'C:/file.txt'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_read_file_2(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/read_file_2.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_read_file(first, USER_CONTEXT)
+        self.assertEqual("read_file", fixed.name)
+        self.assertEqual({'end_line': 100,
+                          'start_line': 1,
+                          'target_file': 'C:/MessageStorageImpl.java'},
                          fixed.arguments)
         self.assertFalse(partial)
 
