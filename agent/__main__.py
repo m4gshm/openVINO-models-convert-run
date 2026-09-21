@@ -145,7 +145,7 @@ def main():
     args_parser.add_argument("--pipe", type=str, required=False,
                              default=None, choices=enum_values(Pipe), help="%(default)s")
     args_parser.add_argument("--attention_backend", type=str, required=False,
-                             default=AttentionBackend.PA, choices=enum_values(AttentionBackend), help="%(default)s")
+                             default=enum_value(AttentionBackend.PA), choices=enum_values(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
     # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--kv_cache_precision", type=str, required=False,
