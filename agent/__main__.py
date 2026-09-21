@@ -136,16 +136,16 @@ def main():
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
     args_parser.add_argument("--device", type=str, required=False,
-                             default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
+                             default=enum_value(DeviceType.AUTO), choices=enum_values(DeviceType), help="%(default)s")
     args_parser.add_argument("--performance_hint", type=str, required=False,
-                             default=enum_value(PerformanceHint.THROUGHPUT), choices=enum_values(PerformanceHint),
+                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint),
                              help="%(default)s")
     args_parser.add_argument("--parser", type=str, required=False,
                              default=None, choices=enum_values(ParserType), help="%(default)s")
     args_parser.add_argument("--pipe", type=str, required=False,
                              default=None, choices=enum_values(Pipe), help="%(default)s")
     args_parser.add_argument("--attention_backend", type=str, required=False,
-                             default=enum_value(AttentionBackend.PA), choices=enum_values(AttentionBackend), help="%(default)s")
+                             default=None, choices=enum_values(AttentionBackend), help="%(default)s")
     args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
     # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
     args_parser.add_argument("--kv_cache_precision", type=str, required=False,
@@ -463,7 +463,13 @@ def main():
     if kv_cache_precision:
         pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
 
+    is_not_cb = is_device_npu or pipe != Pipe.CB
+
     attention_backend = args.attention_backend
+    if attention_backend is None and is_not_cb:
+        attention_backend = enum_value(AttentionBackend.PA)
+        log.info(f"force attention_backend={attention_backend}")
+
     if attention_backend:
         pipeline_properties["ATTENTION_BACKEND"] = attention_backend
 
@@ -493,6 +499,7 @@ def main():
     prompt_lookup = args.prompt_lookup == Turn.on.value
     if prompt_lookup:
         pipeline_properties["prompt_lookup"] = True
+
     app = init_sequential_engine(
         controller_config=controller_config,
         model_path=str(model_path),
@@ -504,7 +511,7 @@ def main():
         handler_config=handler_config,
         pipeline_properties=pipeline_properties,
         stop_signal=stop_signal,
-    ) if is_device_npu or pipe != Pipe.CB else init_continuous_batching_engine(
+    ) if is_not_cb else init_continuous_batching_engine(
         controller_config=controller_config,
         model_path=str(model_path),
         device=device_value,

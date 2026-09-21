@@ -1,13 +1,13 @@
 {
+  "model_parameters": {
+    "enable_thinking": true
+  },
   "temperature": 0.8,
   "top_p": 0.95,
   "top_k": 64,
   "min_p": 0.05,
   "repetition_penalty": 1.05,
-  "num_return_sequences": 1,
-  "num_assistant_tokens": 5,
-  "max_ngram_size": 3,
-  "model_parameters": {
-    "enable_thinking": true
-  }
+  "presence_penalty": 0.0,
+  "do_sample": true,
+  "num_return_sequences": 1
 }
