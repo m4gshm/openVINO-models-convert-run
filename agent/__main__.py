@@ -136,7 +136,7 @@ def main():
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
     args_parser.add_argument("--device", type=str, required=False,
-                             default=enum_value(DeviceType.AUTO), choices=enum_values(DeviceType), help="%(default)s")
+                             default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
     args_parser.add_argument("--performance_hint", type=str, required=False,
                              default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint),
                              help="%(default)s")
