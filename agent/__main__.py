@@ -473,7 +473,7 @@ def main():
     if attention_backend:
         pipeline_properties["ATTENTION_BACKEND"] = attention_backend
 
-    device_value: str = device.value
+    device_value: str = enum_value(device)
 
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
