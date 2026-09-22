@@ -3,7 +3,7 @@ from importlib.resources import files
 
 from agent.client.user_context import UserContext, OS
 from agent.client.veai.tool_call_fixer import fix_list_dir, fix_edit_file, fix_write_file, fix_safe_delete, \
-    fix_search_for_text, fix_search_file_by_name, fix_read_file
+    fix_search_for_text, fix_search_file_by_name, fix_read_file, fix_run_command
 from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletionFunctionToolParam, \
     FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
@@ -229,12 +229,28 @@ Target.py
         tool_call_text = tool_call_file.read_text()
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
         first = calls[0]
-        fixed = fix_write_file(first, USER_CONTEXT)
+        fixed = fix_run_command(first, USER_CONTEXT)
         self.assertEqual("run_command", fixed.name)
         self.assertEqual({'command': 'powershell -ExecutionPolicy Bypass -File _check_runtime.ps1',
                           'is_background': 'False',
                           'safe_to_run': 'False',
                           'working_directory': ''},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
+    def test_run_command_2(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/run_command_2.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_run_command(first, USER_CONTEXT)
+        self.assertEqual("run_command", fixed.name)
+        self.assertEqual({'command': 'Get-ChildItem -Recurse "C:/tmp" -ErrorAction SilentlyContinue | '
+                                     "Where-Object { $_.FullName -match 'test' } | Select-Object "
+                                     'FullName',
+                          'is_background': 'False',
+                          'safe_to_run': 'True',
+                          'working_directory': '.'},
                          fixed.arguments)
         self.assertFalse(partial)
 

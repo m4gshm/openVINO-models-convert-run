@@ -778,10 +778,10 @@ def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> P
 def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     args = get_args(function)
 
-    working_directory = args.get("working_directory")
+    invalid = False
+
     command = args.get("command")
     is_background = args.get("is_background")
-    invalid = False
     if not is_background:
         invalid = True
         is_background = False
@@ -789,6 +789,11 @@ def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -
     if not safe_to_run:
         invalid = True
         safe_to_run = False
+
+    working_directory = args.get("working_directory")
+    if working_directory is None:
+        working_directory = ROOT
+        invalid = True
 
     working_directory, fixed = fix_windows_path(working_directory, context)
     if fixed:

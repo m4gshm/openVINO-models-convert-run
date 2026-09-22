@@ -1,0 +1,17 @@
+[project]
+name = "experiments"
+version = "0.1.0"
+description = "Experimental scripts for MTP and other OpenVINO research"
+requires-python = ">=3.11"
+dependencies = [
+    "openvino-genai==2026.4.0.0",
+    "openvino==2026.4.0",
+    "transformers==5.16.1",
+    "torch==2.14.0",
+    "numpy==2.4.6",
+    "torchvision",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

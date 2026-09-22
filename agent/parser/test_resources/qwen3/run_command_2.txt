@@ -1,0 +1,13 @@
+<tool_call>
+<function=run_command>
+<parameter=command>
+Get-ChildItem -Recurse "C:/tmp" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'test' } | Select-Object FullName
+</parameter>
+<parameter=is_background>
+False
+</parameter>
+<parameter=safe_to_run>
+True
+</parameter>
+</function>
+</tool_call>

@@ -6,7 +6,7 @@ if not defined OPENVINO_DEV_NAME (
 )
 
 if not defined INTEL_OPENVINO_DIR (
-    call bin/%OPENVINO_DEV_NAME%/setupvars.bat
+    call .\bin\%OPENVINO_DEV_NAME%\setupvars.bat
 )
 echo OPENVINO_DEV_NAME: %OPENVINO_DEV_NAME%
 .venv\Scripts\python agent.py %*
