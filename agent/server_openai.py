@@ -1,17 +1,20 @@
+import logging
 import sys
 import threading
+from argparse import ArgumentParser
 
 import uvicorn
 from fastapi import FastAPI
 
-from agent.__main__ import log
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import get_default_generate_opts, GenerateOpts
 from agent.openai.engine_rest_common import ControllerConfig
 from agent.openai.engine_rest_openai import OpenAiController
 from agent.parser import Parser
-from agent.server import log, new_app
+from agent.server import new_app
+
+log = logging.getLogger(__name__)
 
 
 def run_openai_proxy(args):
@@ -105,7 +108,8 @@ def init_openai_engine(controller_config: ControllerConfig,
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
-    log.info(f"initializing OpenAI engine: base_url={base_url}, model={model_name_override or controller_config.model_name}")
+    log.info(
+        f"initializing OpenAI engine: base_url={base_url}, model={model_name_override or controller_config.model_name}")
 
     controller = OpenAiController(
         config=controller_config,
@@ -123,3 +127,10 @@ def init_openai_engine(controller_config: ControllerConfig,
     log.debug(f"consumed memory: {loaded_mem:.2f} MB, delta: {delta:.2f} MB")
 
     return new_app(controller)
+
+
+def add_openai_args(args_parser: ArgumentParser):
+    args_parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API key")
+    args_parser.add_argument("--openai_base_url", type=str, default="https://api.openai.com/v1",
+                             help="OpenAI API base URL")
+    args_parser.add_argument("--openai_model", type=str, default="", help="Override model name for OpenAI API")

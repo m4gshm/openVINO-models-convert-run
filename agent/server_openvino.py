@@ -3,7 +3,9 @@ import logging.config
 import multiprocessing
 import sys
 import threading
+from argparse import ArgumentParser
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -11,8 +13,6 @@ import uvicorn
 from fastapi import FastAPI
 from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
 
-from agent.__main__ import log, DeviceType, Pipe, ParserType, Turn, default_batch_size, \
-    enum_value, AttentionBackend, stop_signal
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandlerConfig
@@ -25,13 +25,93 @@ from agent.parser.gemma4 import Gemma4ChannelParser
 from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.parser.qwen3 import Qwen3MoeParser
-from agent.server import log, new_app
+from agent.server import new_app, enum_value, stop_signal
+
+log = logging.getLogger(__name__)
+
+default_batch_size = 1024
+default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
+default_models_dir = "./models"
+default_models_cache_dir = "./models_cache"
+
+
+class Turn(Enum):
+    on = 'on'
+    off = 'off'
+
+
+class DeviceType(Enum):
+    GPU = 'GPU'
+    NPU = 'NPU'
+    CPU = 'CPU'
+    AUTO = 'AUTO'
+
+
+class Pipe(Enum):
+    CB = 'CB'
+    VLM = 'VLM'
+    LLM = 'LLM'
+
+
+class ParserType(Enum):
+    qwen2 = 'qwen2'
+    qwen3moe = 'qwen3moe'
+    gemma4 = 'gemma4'
+    lfm2 = 'lfm2'
+
+
+class AttentionBackend(Enum):
+    PA = 'PA'
+    SDPA = 'SDPA'
+
+
+class KvCachePrecision(Enum):
+    u8 = 'u8'
+    u4 = 'u4'
+    f16 = 'f16'
+
+
+class NpuCompilerType(Enum):
+    DRIVER = 'DRIVER'
+    PLUGIN = 'PLUGIN'
+
+
+class YesNo(Enum):
+    YES = 'YES'
+    NO = 'NO'
+
+
+class Level(Enum):
+    HIGH = 'HIGH'
+    MEDIUM = 'MEDIUM'
+
+
+class NpuGenerateHint(Enum):
+    BEST_PERF = 'BEST_PERF'
+    FAST_COMPILE = 'FAST_COMPILE'
+
+
+class PrefillHint(Enum):
+    DYNAMIC = 'DYNAMIC'
+    STATIC = 'STATIC'
+
+
+class PerformanceHint(Enum):
+    LATENCY = 'LATENCY'
+    THROUGHPUT = 'THROUGHPUT'
+    CUMULATIVE_THROUGHPUT = 'CUMULATIVE_THROUGHPUT'
 
 
 def run_openvino(args):
-    """Run application in OpenVINO mode with local model loading."""
+    """Run application in OpenVINO mode with local model loading.
+
+    Entry point for running a local OpenVINO GenAI model. Loads the model
+    from disk (GGUF or directory), configures the pipeline, scheduler, and
+    parser based on detected architecture, then starts a uvicorn server.
+    """
     model = args.model
 
+    # --- Resolve model path and name ---
     model_path = Path(model)
     if model_path.is_absolute():
         if model_path.is_file():
@@ -52,6 +132,7 @@ def run_openvino(args):
 
     log.info("server starting")
 
+    # --- Detect model architecture from config.json ---
     model_architectures: set[str] = set()
     max_position_embeddings: int | None = None
 
@@ -77,6 +158,7 @@ def run_openvino(args):
         sys.exit(1)
 
     default_generate_opts = get_default_generate_opts()
+    # --- Load generate options from file or use defaults ---
     generate_opts_file = args.generate_config_file
     generate_opts: GenerateOpts
     if generate_opts_file:
@@ -91,6 +173,7 @@ def run_openvino(args):
         generate_opts = default_generate_opts
 
     default_scheduler_opts = get_default_scheduler_opts()
+    # --- Load scheduler options from file or use defaults ---
     scheduler_opts_file = args.scheduler_config_file
     scheduler_opts: SchedulerOpts
     if scheduler_opts_file:
@@ -104,6 +187,7 @@ def run_openvino(args):
     else:
         scheduler_opts = default_scheduler_opts
 
+    # --- Load chat template from file ---
     chat_template = ''
     chat_template_file = args.chat_template_file
     if chat_template_file:
@@ -115,6 +199,7 @@ def run_openvino(args):
             log.error(f"{e}")
             raise e
 
+    # --- Configure prompt length and device ---
     max_prompt_len = args.max_prompt_len
     if not max_prompt_len:
         max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
@@ -125,7 +210,9 @@ def run_openvino(args):
 
     generate_opts.max_prompt_tokens = max_prompt_len
 
+    # --- Build scheduler configuration ---
     scheduler_config = SchedulerConfig()
+    # --- Configure sparse attention settings ---
     use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
     dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts.dynamic_split_fuse
     num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens
@@ -171,6 +258,7 @@ def run_openvino(args):
     # eviction_config.adaptive_rkv_config = AdaptiveRKVConfig()
     # scheduler_config.cache_eviction_config = eviction_config
 
+    # --- Auto-detect parser type from model architecture ---
     tokenizer_properties = {
     }
 
@@ -203,10 +291,12 @@ def run_openvino(args):
         log.error(f"need define --pipe for model architectures={model_architectures}")
         sys.exit(1)
 
+    # --- Tool handling and inference detection flags ---
     is_fix_tool_type = args.fix_tool_type != Turn.off.value
     is_detect_cycled_tool_call = args.detect_cycled_tool_call != Turn.off.value
     is_detect_looped_inference = args.detect_looped_inference != Turn.off.value
 
+    # --- Instantiate model-specific parser ---
     model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
         Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
             Qwen2Parser() if parser_type == ParserType.qwen2 else \
@@ -218,10 +308,12 @@ def run_openvino(args):
         f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
+    # --- Build pipeline properties per device type ---
     npu_generate_hint = args.npu_generate_hint
     performance_hint = args.performance_hint
 
     cores_available = multiprocessing.cpu_count()
+    # --- Define CPU pipeline properties ---
     cpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": performance_hint,
@@ -229,6 +321,7 @@ def run_openvino(args):
         "INFERENCE_NUM_THREADS": cores_available,
     }
 
+    # --- Define GPU pipeline properties ---
     gpu_enable_large_allocations = args.gpu_enable_large_allocations
     gpu_priorities = args.gpu_priorities
     gpu_pipeline_properties = {
@@ -289,6 +382,7 @@ def run_openvino(args):
     if default_batch_size:
         npu_pipeline_properties["NPUW_LLM_PREFILL_CHUNK_SIZE"] = default_batch_size
 
+    # --- Select pipeline properties based on device ---
     if not model_path.exists():
         log.error(f"model path is not existed: {model_path}")
 
@@ -296,12 +390,16 @@ def run_openvino(args):
         else cpu_pipeline_properties if device == DeviceType.CPU \
         else cpu_pipeline_properties | gpu_pipeline_properties if device == DeviceType.AUTO \
         else gpu_pipeline_properties
+
+    # --- Configure KV cache precision ---
     kv_cache_precision = args.kv_cache_precision
     if kv_cache_precision:
         pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
 
+    # --- Determine engine type (CB vs sequential) ---
     is_not_cb = is_device_npu or pipe != Pipe.CB
 
+    # --- Configure attention backend ---
     attention_backend = args.attention_backend
     if attention_backend is None and is_not_cb:
         attention_backend = enum_value(AttentionBackend.PA)
@@ -312,6 +410,7 @@ def run_openvino(args):
 
     device_value: str = enum_value(device)
 
+    # --- Configure draft model (optional) ---
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
     if draft_model_path:
@@ -322,6 +421,7 @@ def run_openvino(args):
         pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device_value,
                                                                            **draft_properties)
 
+    # --- Build controller and handler configs ---
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
                                          is_fix_tool_type=is_fix_tool_type,
@@ -330,6 +430,7 @@ def run_openvino(args):
 
     handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
+    # --- Choose engine: sequential or continuous batching ---
     log.info(f"model={model_path}, device={device}, properties={pipeline_properties}, "
              f"generate_opts={generate_opts.model_dump(exclude_unset=True, exclude_none=True)}, "
              f"scheduler_config={scheduler_config}")
@@ -361,6 +462,7 @@ def run_openvino(args):
         stop_signal=stop_signal,
     )
 
+    # --- Start uvicorn server in a daemon thread ---
     log.info(f"listening {args.host}:{args.port}")
 
     def server_handle():
@@ -379,10 +481,12 @@ def run_openvino(args):
 
 
 def get_or_default[T](val: T | None, default: T | None) -> T | None:
+    """Return val if not None, otherwise return default."""
     return val if not val is None else default
 
 
 def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:
+    """Return pipe if truth, otherwise return default."""
     return pipe or default
 
 
@@ -395,15 +499,41 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
                                     pipeline_properties: dict[str, Any] | None = None,
                                     tokenizer_properties: dict[str, Any] | None = None,
                                     vision_encoder_properties: dict[str, Any] | None = None) -> FastAPI:
+    """Initialize a ContinuousBatchingPipeline-based engine.
+
+    Creates a FastAPI app backed by OpenVINO's ContinuousBatchingPipeline,
+    which supports dynamic batching of concurrent requests.
+
+    Args:
+        controller_config: Controller configuration (model name, max prompt length, etc.)
+        handler_config: Token handler configuration for streaming and tool handling
+        model_path: Path to the model directory or GGUF file
+        device: Target device string (e.g., 'CPU', 'GPU', 'NPU')
+        parser: Model-specific parser for token/stream handling
+        stop_signal: Event to signal shutdown
+        scheduler_config: Scheduler configuration (optional, defaults provided)
+        generate_opts: Generation options (temperature, max tokens, etc.)
+        pipeline_properties: OpenVINO pipeline properties dict (optional)
+        tokenizer_properties: Tokenizer-specific properties (optional)
+        vision_encoder_properties: Vision encoder properties for VLM models (optional)
+
+    Returns:
+        FastAPI: Initialized FastAPI application with ContinuousBatchingController
+    """
+    # --- Track initial memory usage ---
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
+    # --- Ensure all property dicts are initialized ---
     if not pipeline_properties:
         pipeline_properties = {}
     if not tokenizer_properties:
         tokenizer_properties = {}
     if not vision_encoder_properties:
         vision_encoder_properties = {}
+
+    # --- Instantiate the ContinuousBatchingPipeline ---
+    # --- Instantiate the ContinuousBatchingPipeline ---
     try:
         pipe = py_openvino_genai.ContinuousBatchingPipeline(models_path=model_path,
                                                             scheduler_config=scheduler_config,
@@ -413,6 +543,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
                                                             vision_encoder_properties=vision_encoder_properties)
         log.info(f"model loaded successfully, pipe {type(pipe)}")
 
+        # --- Log memory delta after model load ---
         loaded_pipe_mem = get_current_memory()
         delta = loaded_pipe_mem - start_mem
 
@@ -421,6 +552,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
         log.error(f"instantiate pipeline error: {e}", exc_info=e)
         sys.exit(1)
 
+    # --- Wire controller to FastAPI app ---
     return new_app(ContinuousBatchingController(config=controller_config,
                                                 parser=parser, pipe=pipe,
                                                 generate_opts=generate_opts,
@@ -436,27 +568,116 @@ def init_sequential_engine(controller_config: ControllerConfig,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
                            pipeline_properties: dict[str, Any] | None = None) -> FastAPI:
+    """Initialize a sequential LLMPipeline/VLMPipeline-based engine.
+
+    Creates a FastAPI app backed by OpenVINO's LLMPipeline or VLMPipeline
+    (for vision-language models), which processes requests sequentially.
+
+    Args:
+        controller_config: Controller configuration (model name, max prompt length, etc.)
+        handler_config: Token handler configuration for streaming and tool handling
+        model_path: Path to the model directory or GGUF file
+        device: Target device string (e.g., 'CPU', 'GPU', 'NPU')
+        vlm: If True, use VLMPipeline; otherwise use LLMPipeline
+        parser: Model-specific parser for token/stream handling
+        stop_signal: Event to signal shutdown
+        scheduler_config: Optional scheduler configuration
+        generate_opts: Generation options (temperature, max tokens, etc.)
+        pipeline_properties: OpenVINO pipeline properties dict (optional)
+
+    Returns:
+        FastAPI: Initialized FastAPI application with VlmController
+    """
+    # --- Prepare pipeline properties ---
     if not pipeline_properties:
         pipeline_properties = {}
     if scheduler_config:
         pipeline_properties["scheduler_config"] = scheduler_config
 
+    # --- Track initial memory usage ---
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
+    # --- Instantiate LLMPipeline or VLMPipeline based on vlm flag ---
     pipe = (
         py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
         py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
     )
 
     log.info(f"model loaded successfully, pipe {type(pipe)}")
+
+    # --- Log memory delta after model load ---
     loaded_pipe_mem = get_current_memory()
     delta = loaded_pipe_mem - start_mem
 
     log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
 
+    # --- Wire VlmController to FastAPI app ---
     return new_app(VlmController(config=controller_config,
                                  parser=parser, pipe=pipe,
                                  generate_opts=generate_opts,
                                  handler_config=handler_config,
                                  stop_signal=stop_signal))
+
+
+def add_openvino_args(args_parser: ArgumentParser):
+    args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
+    args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
+    args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
+    args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
+    args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
+    args_parser.add_argument("--draft_model", type=str, help="%(default)s")
+
+    args_parser.add_argument("--device", type=str, required=False,
+                             default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
+    args_parser.add_argument("--performance_hint", type=str, required=False,
+                             default=enum_value(PerformanceHint.LATENCY), choices=enum_values(PerformanceHint),
+                             help="%(default)s")
+    args_parser.add_argument("--parser", type=str, required=False,
+                             default=None, choices=enum_values(ParserType), help="%(default)s")
+    args_parser.add_argument("--pipe", type=str, required=False,
+                             default=None, choices=enum_values(Pipe), help="%(default)s")
+    args_parser.add_argument("--attention_backend", type=str, required=False,
+                             default=None, choices=enum_values(AttentionBackend), help="%(default)s")
+    args_parser.add_argument("--max_prompt_len", type=int, required=False, default=None, help="%(default)s")
+    # args_parser.add_argument("--max_generation_token_len", type=int, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--kv_cache_precision", type=str, required=False,
+                             default=None, choices=enum_values(KvCachePrecision), help="%(default)s")
+
+    args_parser.add_argument("--chat_template_file", type=str, required=False, default=None, help="%(default)s")
+    args_parser.add_argument("--fix_tool_type", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--detect_cycled_tool_call", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--detect_looped_inference", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--generate_config_file", type=str, required=False,
+                             default=".config/generate_config.json",
+                             help="%(default)s")
+    args_parser.add_argument("--scheduler_config_file", type=str, required=False,
+                             default=".config/scheduler_config.json",
+                             help="%(default)s")
+    args_parser.add_argument("--npu_compiler_type", type=str, required=False,
+                             default=enum_value(NpuCompilerType.DRIVER), choices=enum_values(NpuCompilerType),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_generate_hint", type=str, required=False,
+                             default=enum_value(NpuGenerateHint.FAST_COMPILE), choices=enum_values(NpuGenerateHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
+                             default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_turbo", type=str, required=False,
+                             default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
+
+    args_parser.add_argument("--gpu_enable_large_allocations", type=str, required=False,
+                             default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
+    args_parser.add_argument("--gpu_priorities", type=str, required=False,
+                             default=enum_value(Level.HIGH), choices=enum_values(Level), help="%(default)s")
+    args_parser.add_argument("--prompt_lookup", type=str, required=False,
+                             default=enum_value(Turn.off), choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--eagle3_mode", type=str, required=False,
+                             default=enum_value(Turn.on), choices=enum_values(Turn), help="%(default)s")
+
+def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
+    return [member.value for member in enum_class]
+
