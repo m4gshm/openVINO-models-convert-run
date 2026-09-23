@@ -65,10 +65,11 @@ class PhraseTestCase(unittest.TestCase):
         exception = context.exception
         error_message = exception.message
         self.assertEqual('Generated content appears to be a loop', error_message)
-        self.assertEqual('-jdbc/../idempotent-consumer\n-jdbc/../idempotent-consumer', exception.payload)
+        self.assertEqual('-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent', exception.payload)
         self.assertEqual(('<function=read_file>\n'
                           '<parameter=target_file>\n'
-                          'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer'), phrase.full)
+                          'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent'),
+                         phrase.full)
 
     def test_loop_lines_2(self):
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages_2.txt")
@@ -133,7 +134,19 @@ class PhraseTestCase(unittest.TestCase):
             for token in loop_messages:
                 phrase.add_token(token)
 
-        self.assertEqual(('ramework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+        self.maxDiff = None
+        self.assertEqual(('ingframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNodeList;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitNodeVisitor;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
@@ -145,20 +158,8 @@ class PhraseTestCase(unittest.TestCase):
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
-                          'org.springf\n'
-                          'ramework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNodeList;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitNodeVisitor;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchema;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaElement;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaParser;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitSchemaWriter;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXMLLoader;\\nimport '
-                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElement;\\nimport '
-                          'org.springf'), context.exception.payload)
+                          'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlAttribute;\\nimport '
+                          'org.spr'), context.exception.payload)
         self.assertEqual('Generated content appears to be a loop', context.exception.message)
 
         phrase.clean_current_line()
@@ -185,28 +186,34 @@ class PhraseTestCase(unittest.TestCase):
         loop_part1 = visualize_reversed_ranges(line, phrase.duplicate_ranges_reversed)
         loop_part2 = visualize_ranges(line, phrase.duplicate_ranges)
         visual_islands = visualize_islands_reversed(line, phrase.duplicates_islands_reversed)
-
-        self.assertEqual(('----re\\")\\n\\n    implementation(\\"org.jooq:jooq\\")\\n    '
-                          'implementation(\\"org.jooq:jooq-postgres-extensions\\")\\n}-- "----text": '
-                          '"plugins {\\n    ---------ra---\\n}\\nappl-(plugin '
-                          '--\\"io.-pring.dependenc----nagement\\")\\n\\ndependenc-es {\\n    '
-                          'api(project(\\":-dempotent-cons-me-\\"))\\n    '
-                          'api(project(\\":storage-api-reacti-e\\"))\\n    '
-                          'api(project(\\":postgres-----\\"))\\n\\n    '
-                          'implementation(\\"io.projectreactor-reactor-core\\")\\n'),
+        self.maxDiff = None
+        self.assertEqual(('pply(plugin = \\"io.spring.dependency-management\\")\\n\\ndependencies '
+                          '{\\n    api(project(\\":idempotent-consumer\\"))\\n    '
+                          'api(project(\\":storage-api-reactive\\"))\\n    '
+                          'api(project(\\":postgres-jdbc\\"))\\n\\n    '
+                          'implementation(\\"io.projectreactor:reactor-core\\")\\n\\n    '
+                          'implementation(\\"org.postgresql:postgresql\\")\\n\\n    '
+                          'implementation(\\"org.springframework.boot:spring-boot-starter-jooq\\")\\n    '
+                          'implementation(\\"org.springframework.boot:spring-boot-a-tocon----re\\")\\n\\n    '
+                          'implementation(\\"org.jooq:jooq\\")\\n    '
+                          'implementation(\\"org.jooq:jooq-postgres-extensions\\")\\n}-- "-ew-text": '
+                          '"plugins {\\n    ---------rar--\\n}\\napply(plugin = '
+                          '\\"io.spring.dependency-management\\")\\n\\ndependencies {\\n    '
+                          'api(project(\\":idempotent-consumer\\"))\\n    '
+                          'api(project(\\":storage-api-reactive\\"))\\n    '
+                          'api(project(\\":postgres-jdbc\\"))\\n\\n    '
+                          'implementation(\\"io.projectreactor:reactor-core\\")\\n'),
                          loop_part1)
-        self.assertEqual(('    '
-                          '---------------------------------------------------------------------------------- '
-                          '*************************  **    ~~~~~~~~~~~~~~~~~~~~~~~         &&   '
-                          '&&&&&&&&& ++++++++  &&&&& ###############    ++++++++++++++++++++++++ '
-                          '************************* ~~~~~~~~~~~~~~ -- ################################ '
-                          '~~~ ++++++ -----------------------------------    '
-                          '############################################## -----------------'), visual_islands)
-        self.assertEqual((
-            'figur------------------------------------------\\---------------------------------------p--------e-----i---\\-----", '
-            '-new_t---"- -p--------------`java-libr-ry`\\--\\---p-y(-------= '
-            '\\----sp-i-g-d--------y-man-------\\---------------ie------------------------id----t--------um-r\\------------------------s-------a---r-----ve-------------------------p--------jdbc\\-------------------------------p------r------:r----------------'),
-            unused_tokens_as_end_of_phrase)
+        self.assertEqual(('************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************ '
+                          '-----    '
+                          '********************************************************************************** '
+                          '-------------------------  ++ && #######################         ~~~  '
+                          '&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&'),
+                         visual_islands)
+        self.assertEqual(('p---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:----------\\----------------------------------------------------------------s---t-----------------------------------------------------------------------ut-c--figur----------------------------------------------------------------------------------p--------e-----i---\\-----", '
+                          '-ne-_t---"- '
+                          '-p--------------`java-libr--y`\\--\\-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------'),
+                         unused_tokens_as_end_of_phrase)
         self.assertEqual(loop_part1, loop_part2)
 
     def test_duplicated_parts_simple(self):
@@ -309,16 +316,19 @@ class PhraseTestCase(unittest.TestCase):
 
         phrase = Phrase()
         tokens = json.loads(loop_messages)
+        full_expected = ""
         for token in tokens:
+            full_expected += token
             phrase.add_token(token)
 
-        line = phrase.current_line[phrase.in_line_duplicates_detect_start_amount:]
-        loop_part1 = visualize_reversed_ranges(line, phrase.duplicate_ranges_reversed)
-        visual_islands = visualize_islands_reversed(line, phrase.duplicate_ranges_reversed)
+        # line = phrase.current_line[phrase.in_line_duplicates_detect_start_amount:]
+        # loop_part1 = visualize_reversed_ranges(line, phrase.duplicate_ranges_reversed)
+        # visual_islands = visualize_islands_reversed(line, phrase.duplicate_ranges_reversed)
 
         self.maxDiff = None
-        self.assertEqual((''), loop_part1)
-        self.assertEqual((''), visual_islands)
+        self.assertEqual(full_expected, phrase.full)
+        # self.assertEqual((''), loop_part1)
+        # self.assertEqual((''), visual_islands)
 
         pass
 

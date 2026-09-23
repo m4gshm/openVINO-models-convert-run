@@ -11,6 +11,10 @@ INIT_STEP = 1
 log = logging.getLogger(__name__)
 
 
+def join_str(result: list[str]) -> str:
+    return "".join(result)
+
+
 def visualize_reversed_ranges(line: list[str], reversed_ranges: dict[int, int]) -> str:
     result: list[str] = ["-"] * len(line)
     i = len(line) - 1
@@ -23,7 +27,7 @@ def visualize_reversed_ranges(line: list[str], reversed_ranges: dict[int, int]) 
                 result[i] = line[i]
                 i -= 1
             result[start] = line[start]
-    return "".join(result)
+    return join_str(result)
 
 
 def visualize_tokens(line: list[str], tokens: dict[str, set[int]]) -> str:
@@ -32,7 +36,7 @@ def visualize_tokens(line: list[str], tokens: dict[str, set[int]]) -> str:
         for position in positions:
             result[position] = line[position]
 
-    return "".join(result)
+    return join_str(result)
 
 
 def visualize_islands_reversed(line: list[str], duplicates_islands_reversed: dict[int, int]) -> str:
@@ -45,7 +49,7 @@ def visualize_islands_reversed(line: list[str], duplicates_islands_reversed: dic
             result[i] = symbols[current_symbol % len(symbols)]
             i += 1
         current_symbol += 1
-    return "".join(result)
+    return join_str(result)
 
 
 def visualize_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> str:
@@ -55,7 +59,7 @@ def visualize_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> str:
         while i <= end:
             result[i] = line[i]
             i += 1
-    return "".join(result)
+    return join_str(result)
 
 
 def process_duplicate_pairs(token: str,
@@ -63,11 +67,11 @@ def process_duplicate_pairs(token: str,
                             single_tokens: dict[str, set[int]],
                             duplicated_ranges_reversed: dict[int, int],
                             duplicate_ranges: dict[int, int],
-                            duplicated_words: dict[str, set[int]],
+                            duplicated_words: dict[tuple, set[int]],
                             islands: dict[int, int], duplicates_islands_reversed: dict[int, int]):
     token_positions = single_tokens[token]
 
-    duplicated_phrases_active = dict[str, set[int]]()
+    duplicated_phrases_active = dict[tuple, set[int]]()
     for i, token_position in enumerate(token_positions):
         prev_token_position = token_position - 1
 
@@ -76,7 +80,7 @@ def process_duplicate_pairs(token: str,
         if prev_token_position < 0:
             continue
 
-        phrase = line[prev_token_position] + token
+        phrase = (line[prev_token_position], token)
         duplicated_phrases_active.setdefault(phrase, set[int]()).add(token_position)
 
     for phrase, position_ends in duplicated_phrases_active.items():
@@ -99,7 +103,7 @@ def layout_last_island(line: list[str], start: int, end: int) -> dict[int, int]:
     token_positions = dict[str, set[int]]()
     duplicate_reversed_ranges = dict[int, int]()
     duplicate_ranges = dict[int, int]()
-    duplicated_words = dict[str, set[int]]()
+    duplicated_words = dict[tuple[str, ...], set[int]]()
     duplicates_islands = dict[int, int]()
     duplicates_islands_reversed = dict[int, int]()
     for i in range(start, end + 1):
@@ -133,9 +137,9 @@ def get_island_sizes(line_islands_reversed: dict[int, int] | None) -> list[int]:
 
 
 def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], duplicate_ranges: dict[int, int],
-                        duplicated_ranges_reversed: dict[int, int], duplicated_words: dict[str, set[int]],
+                        duplicated_ranges_reversed: dict[int, int], duplicated_words: dict[tuple[str, ...], set[int]],
                         touched_positions: set[int],
-                        islands: dict[int, int], duplicates_islands_reversed: dict[int, int], phrase: str,
+                        islands: dict[int, int], duplicates_islands_reversed: dict[int, int], phrase: tuple[str, ...],
                         phrase_end: int):
     phrase_start = phrase_end - (len(phrase) - 1)
     phrase_end_old = duplicate_ranges.get(phrase_start)
@@ -258,12 +262,12 @@ def add_check_duplicate_tokens(token_positions: dict[str, set[int]], token: str,
 
 
 def get_word(line: list[str], start: int, end: int) -> str:
-    return "".join(line[start:end + 1])
+    return join_str(line[start:end + 1])
 
 
 def delete_from_ranges(duplicate_ranges: dict[int, int],
                        duplicated_ranges_reversed: dict[int, int],
-                       duplicated_words: dict[str, set[int]],
+                       duplicated_words: dict[tuple[str, ...], set[int]],
                        touched_positions: set[int],
                        line: list[str],
                        position_start: int, position_end: int):
@@ -284,10 +288,10 @@ def clear_ranges(duplicate_ranges: dict[int, int], duplicated_ranges_reversed: d
 
 def delete_word(duplicate_ranges: dict[int, int],
                 duplicated_ranges_reversed: dict[int, int],
-                duplicated_words: dict[str, set[int]],
+                duplicated_words: dict[tuple[str, ...], set[int]],
                 touched_positions: set[int],
                 line: list[str],
-                phrase: str, position_start: int):
+                phrase: tuple[str, ...], position_start: int):
     phrase_positions = duplicated_words.get(phrase)
     if phrase_positions:
         phrase_positions.remove(position_start)
@@ -300,18 +304,21 @@ def delete_word(duplicate_ranges: dict[int, int],
             del duplicated_words[phrase]
 
 
-def find_duplicated_with_longest_last(last_part_start: int | None, last_word: str, start_positions: list[int],
-                                      duplicates_check_tail: list[str], duplicated_ranges_reversed: dict[int, int],
-                                      duplicated_words: dict[str, set[int]]) -> tuple[str | None, list[int]]:
-    merged_word: str | None = None
+def find_duplicated_with_longest_last(last_part_start: int | None, last_word: tuple[str, ...],
+                                      start_positions: list[int],
+                                      duplicates_check_tail: list[str],
+                                      duplicated_ranges_reversed: dict[int, int],
+                                      duplicated_words: dict[tuple[str, ...], set[int]]) -> tuple[
+    tuple[str, ...] | None, list[int]]:
+    merged_word: tuple[str, ...] | None = None
     end_positions = list[int]()
     for start_position in start_positions:
         prev_word_start = duplicated_ranges_reversed.get(start_position)
         if prev_word_start and prev_word_start >= last_part_start:
-            prev_word = "".join(duplicates_check_tail[prev_word_start: start_position + 1])
+            prev_word = tuple(duplicates_check_tail[prev_word_start: start_position + 1])
             if duplicated_words.get(prev_word):
                 end_position = start_position + len(last_word) - 1
-                join = "".join(duplicates_check_tail[prev_word_start: end_position + 1])
+                join = tuple(duplicates_check_tail[prev_word_start: end_position + 1])
                 if merged_word is None:
                     merged_word = join
                     end_positions.append(end_position)
@@ -319,7 +326,7 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: st
                     end_positions.append(end_position)
 
     while not merged_word is None and len(start_positions) > 1:
-        new_merged_word: str | None = None
+        new_merged_word: tuple[str, ...] | None = None
         new_end_positions = list[int]()
         shift = (len(merged_word) - 1)
         for end_position in end_positions:
@@ -329,9 +336,9 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: st
                 # loop
                 break
             elif not prev_word_start is None and prev_word_start >= last_part_start:
-                prev_word = "".join(duplicates_check_tail[prev_word_start: start_position + 1])
+                prev_word = tuple(duplicates_check_tail[prev_word_start: start_position + 1])
                 if duplicated_words.get(prev_word):
-                    join = "".join(duplicates_check_tail[prev_word_start: end_position + 1])
+                    join = tuple(duplicates_check_tail[prev_word_start: end_position + 1])
                     if not new_merged_word:
                         new_merged_word = join
                         new_end_positions.append(end_position)
@@ -356,12 +363,12 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: st
 
 class Phrase:
     def __init__(self, is_detect_looped_inference: bool = True,
-                 strat_duplicates_detect_from: int = 500, last_part_duplicates_rate: float = 0.5,
+                 strat_duplicates_detect_from: int = 50, last_part_duplicates_rate: float = 0.5,
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
                  duplicated_lines_limit=50,
                  duplicated_lines_threshold=10):
-        self.letters: list[str] = []
+        self.tokens: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}
         self.lines_duplicated_times: dict[int, set[str]] = {}
@@ -371,7 +378,7 @@ class Phrase:
         self.current_line_has_no_pair_tokens: dict[str, set[int]] = {}
         self.duplicate_ranges_reversed = dict[int, int]()
         self.duplicate_ranges = dict[int, int]()
-        self.duplicated_words = dict[str, set[int]]()
+        self.duplicated_words = dict[tuple[str, ...], set[int]]()
         self.duplicates_islands = dict[int, int]()
         self.duplicates_islands_reversed = dict[int, int]()
         self.last_island_rate = 0.0
@@ -390,7 +397,7 @@ class Phrase:
 
     @property
     def full(self):
-        join = "".join(self.letters)
+        join = join_str(self.tokens)
         return join
 
     def add_token(self, token: str) -> list[str]:
@@ -398,28 +405,33 @@ class Phrase:
         if token == "":
             log.error(f"empty token")
             token = " "
-        for letter in token:
-            prev_token = self.letters[-1] if self.letters else None
-            self.letters.append(letter)
 
-            if self.is_detect_looped_inference and prev_token == letter:
-                i = 1
-                for prev_token in reversed(self.letters[:-1]):
-                    if prev_token != letter:
-                        break
-                    i += 1
-                    if i >= self.duplicated_tokens_limit:
-                        raise LoopError(payload=letter, message=f"Duplicated tokens (amount={i})")
+        prev_token = self.tokens[-1] if self.tokens else None
+        self.tokens.append(token)
 
-            if letter != '\n':
-                add_token(letter, self.current_line)
+        if self.is_detect_looped_inference and prev_token == token:
+            i = 1
+            for prev_token in reversed(self.tokens[:-1]):
+                if prev_token != token:
+                    break
+                i += 1
+                if i >= self.duplicated_tokens_limit:
+                    raise LoopError(payload=token, message=f"Duplicated tokens (amount={i})")
+
+        token_lines = token.splitlines(keepends=True)
+        for token_part in token_lines:
+            if not token_part:
+                pass
+            add_token(token_part, self.current_line)
+            if not token_part.endswith('\n') or token_part.endswith("\r\n"):
                 if self.is_detect_looped_inference and len(
                         self.current_line) > self.in_line_duplicates_detect_start_amount:
                     duplicates_check_tail = self.current_line[self.in_line_duplicates_detect_start_amount:]
                     token_positions = self.current_line_has_no_pair_tokens
-                    add_check_duplicate_tokens(token_positions, letter, len(duplicates_check_tail) - 1)
+                    add_check_duplicate_tokens(token_positions, token_part, len(duplicates_check_tail) - 1)
 
-                    process_duplicate_pairs(letter, duplicates_check_tail,
+                    process_duplicate_pairs(token_part,
+                                            duplicates_check_tail,
                                             token_positions,
                                             self.duplicate_ranges_reversed,
                                             self.duplicate_ranges,
@@ -436,7 +448,7 @@ class Phrase:
                     if last_part_rate > self.last_part_duplicates_rate and last_part_rate - self.last_island_rate > 0.01:
                         log.debug(
                             f"duplicates detector: last_part_rate={last_part_rate}, last_island_rate={self.last_island_rate}")
-                        self.last_island_rate = last_part_rate
+                        # self.last_island_rate = last_part_rate
                         last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
                         # sub_island_sizes = get_island_sizes(last_sub_islands)
 
@@ -455,7 +467,7 @@ class Phrase:
                             log.debug(
                                 f"duplicates detector: delta_rate={delta_rate}, last_part_rate2={last_part_rate2}")
                             last_duplicated_range_start = self.duplicate_ranges_reversed[last_part_end]
-                            last_word = "".join(duplicates_check_tail[last_duplicated_range_start: last_part_end + 1])
+                            last_word = tuple(duplicates_check_tail[last_duplicated_range_start: last_part_end + 1])
                             last_word_positions = self.duplicated_words[last_word]
 
                             start_positions = list(last_word_positions)
@@ -472,13 +484,13 @@ class Phrase:
                                 log.debug(f"duplicated word info: word='{longest_last_duplicated_word}', "
                                           f"end_positions={end_positions}, "
                                           f"duplicates_check_tail={duplicates_check_tail}")
-                                duplicated_payload = "\n".join([longest_last_duplicated_word] * len(end_positions))
+                                duplicated_payload = "".join(list(longest_last_duplicated_word) * len(end_positions))
                                 raise LoopError(payload=duplicated_payload, message=ERROR_APPEARS_TO_BE_A_LOOP)
                             else:
                                 pass
             else:
                 current_line = self.current_line
-                current_line_str = "".join(current_line)
+                current_line_str = join_str(current_line)
                 if self.is_detect_looped_inference:
                     lines = self.lines
                     # if lines and lines[-1] == current_line_str:
@@ -559,4 +571,3 @@ class Phrase:
         self.duplicates_islands.clear()
         self.duplicates_islands_reversed.clear()
         self.last_island_rate = 0.0
-        self.start_time = None
