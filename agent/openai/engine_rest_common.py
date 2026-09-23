@@ -52,6 +52,10 @@ class TokenizeRequest(BaseModel):
     input: str
 
 
+class DetokenizeRequest(BaseModel):
+    tokens: list[int]
+
+
 class ControllerConfig(BaseModel):
     model_name: str
     max_prompt_len: int
