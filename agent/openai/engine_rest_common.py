@@ -48,21 +48,9 @@ USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
 
 
-# llama.cpp API request/response models
 class TokenizeRequest(BaseModel):
     input: str
 
-
-class TokenizeResponse(BaseModel):
-    tokens: list[int]
-
-
-class DetokenizeRequest(BaseModel):
-    tokens: list[int]
-
-
-class DetokenizeResponse(BaseModel):
-    text: str
 
 class ControllerConfig(BaseModel):
     model_name: str
