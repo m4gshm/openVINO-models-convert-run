@@ -11,7 +11,7 @@ from openai.types.chat import ChatCompletionChunk
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
     VLMDecodedResults, GenerationConfig
-from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
@@ -217,21 +217,22 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
         """
         try:
             metrics = self.pipe.get_metrics()
-            
+
             # Get real OpenVINO GenAI metrics
-            kv_cache_size_mb = metrics.kv_cache_size_in_bytes / 1024 / 1024 if hasattr(metrics, 'kv_cache_size_in_bytes') else 0
+            kv_cache_size_mb = metrics.kv_cache_size_in_bytes / 1024 / 1024 if hasattr(metrics,
+                                                                                       'kv_cache_size_in_bytes') else 0
             cache_size_mb = metrics.cache_size_in_bytes / 1024 / 1024 if hasattr(metrics, 'cache_size_in_bytes') else 0
             cache_usage = metrics.cache_usage if hasattr(metrics, 'cache_usage') else 0
             max_cache_usage = metrics.max_cache_usage if hasattr(metrics, 'max_cache_usage') else 0
             requests = metrics.requests if hasattr(metrics, 'requests') else 0
             scheduled_requests = metrics.scheduled_requests if hasattr(metrics, 'scheduled_requests') else 0
-            
+
             # Calculate cache utilization percentage
             if cache_size_mb > 0 and cache_usage is not None:
                 cache_utilization_pct = (cache_usage / cache_size_mb * 100) if cache_size_mb > 0 else 0.0
             else:
                 cache_utilization_pct = 0.0
-            
+
             return JSONResponse(content={
                 "slots": [],
                 "kv_cache_size_mb": round(kv_cache_size_mb, 2),

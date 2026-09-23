@@ -36,7 +36,7 @@ def main():
     args = args_parser.parse_args()
 
     # Determine mode: --model for OpenVINO, --openai_base_url for OpenAI proxy
-    has_model = args.model != default_model
+    has_model = not args.model is None
     has_openai_base = bool(args.openai_base_url and args.openai_base_url != "https://api.openai.com/v1")
 
     if has_model and has_openai_base:
