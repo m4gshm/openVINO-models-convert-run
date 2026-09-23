@@ -64,31 +64,6 @@ class DetokenizeRequest(BaseModel):
 class DetokenizeResponse(BaseModel):
     text: str
 
-
-class EmbeddingRequest(BaseModel):
-    input: str | list[str]
-
-
-class EmbeddingResponse(BaseModel):
-    model: str
-    object: str = "embedding"
-    data: list[dict]
-
-
-class SlotInfo(BaseModel):
-    id: int
-    prompt: str
-    prompt_len: int
-    kv_cache_blocks: int
-    state: str
-
-
-class SlotsResponse(BaseModel):
-    slots: list[SlotInfo]
-    kv_cache_free_blocks: int
-    gpu_cache_free_pct: float
-
-
 class ControllerConfig(BaseModel):
     model_name: str
     max_prompt_len: int

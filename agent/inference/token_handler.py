@@ -171,9 +171,6 @@ def end(amount: int) -> str:
     return "s" if amount != 1 else ""
 
 
-type ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedFunctionCall] | ParsedFunctionCall]
-
-
 def fix_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
                    parsed_function_calls: list[ParsedFunctionCall]) -> list[ParsedFunctionCall]:
     if not tool_fixer:
@@ -567,9 +564,10 @@ class TokenProcessor:
                                                                            parsed_function_calls)
         if len(tool_calls) == 0:
             log.info(f"unparsed tool calls: {tool_call_expression}")
-            chunk, stop_signal =  new_chat_completion_chunk(role=state.role, content=tool_call_expression), StopSignal.CANCEL
+            chunk, stop_signal = new_chat_completion_chunk(role=state.role,
+                                                           content=tool_call_expression), StopSignal.CANCEL
         else:
-            chunk, stop_signal =  new_chat_completion_chunk(role=state.role, tool_calls=tool_calls), StopSignal.TOOL_CALL
+            chunk, stop_signal = new_chat_completion_chunk(role=state.role, tool_calls=tool_calls), StopSignal.TOOL_CALL
         self.__clean_tool_call_phrase()
         return chunk, stop_signal
 
