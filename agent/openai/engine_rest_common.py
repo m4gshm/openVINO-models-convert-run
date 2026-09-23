@@ -48,6 +48,47 @@ USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
 
 
+# llama.cpp API request/response models
+class TokenizeRequest(BaseModel):
+    input: str
+
+
+class TokenizeResponse(BaseModel):
+    tokens: list[int]
+
+
+class DetokenizeRequest(BaseModel):
+    tokens: list[int]
+
+
+class DetokenizeResponse(BaseModel):
+    text: str
+
+
+class EmbeddingRequest(BaseModel):
+    input: str | list[str]
+
+
+class EmbeddingResponse(BaseModel):
+    model: str
+    object: str = "embedding"
+    data: list[dict]
+
+
+class SlotInfo(BaseModel):
+    id: int
+    prompt: str
+    prompt_len: int
+    kv_cache_blocks: int
+    state: str
+
+
+class SlotsResponse(BaseModel):
+    slots: list[SlotInfo]
+    kv_cache_free_blocks: int
+    gpu_cache_free_pct: float
+
+
 class ControllerConfig(BaseModel):
     model_name: str
     max_prompt_len: int
@@ -208,6 +249,10 @@ class BaseController(ABC):
     def shutdown(self):
         self.closed.set()
 
+    async def health(self) -> JSONResponse:
+        """Simple health check — always returns 200 OK."""
+        return JSONResponse(content={"status": "ok"})
+
     async def models(self) -> ModelsListResponse:
         current_time = int(time.time())
         return ModelsListResponse(data=[ModelObject(
@@ -215,6 +260,16 @@ class BaseController(ABC):
             max_model_len=self.config.max_prompt_len,
             created=current_time,
         )])
+
+    async def tokenize(self, request: TokenizeRequest) -> JSONResponse:
+        """tokenize endpoint — tokenizes text and returns token IDs."""
+        tokens = self.tokenizer.encode(request.input).input_ids.data[0].tolist()
+        return JSONResponse(content={"tokens": tokens})
+
+    async def detokenize(self, request: DetokenizeRequest) -> JSONResponse:
+        """detokenize endpoint — detokenizes token IDs back to text."""
+        text = self.tokenizer.decode(request.tokens).strip()
+        return JSONResponse(content={"text": text})
 
     async def validation_exception_handler(self, request: Request, exc: RequestValidationError):
         log.error(f"request validation error: {exc.errors()}")

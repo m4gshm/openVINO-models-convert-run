@@ -10,6 +10,7 @@ from typing import Literal
 from openai.types.chat import ChatCompletionChunk
 from openvino_genai.py_openvino_genai import ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason, \
     GenerationConfig, GenerationStatus
+from starlette.responses import JSONResponse
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
@@ -239,3 +240,64 @@ class ContinuousBatchingController(BaseController):
         after_generate_mem = get_current_memory()
         delta = after_generate_mem - before_generate_mem
         log.debug(f"consumed memory: {after_generate_mem:.2f} MB, delta: {delta:.2f} MB")
+
+    async def slots(self) -> JSONResponse:
+        """slots endpoint — returns detailed slot status for continuous batching.
+        
+        Uses ContinuousBatchingController's active_handles and pipeline metrics
+        to provide real-time slot information.
+        """
+        metrics = self.pipe.get_metrics()
+        
+        with self.active_handles_lock:
+            active_ids = list(self.active_handles.keys())
+            
+            # Get real OpenVINO GenAI metrics
+            kv_cache_size_mb = metrics.kv_cache_size_in_bytes / 1024 / 1024 if hasattr(metrics, 'kv_cache_size_in_bytes') else 0
+            cache_size_mb = metrics.cache_size_in_bytes / 1024 / 1024 if hasattr(metrics, 'cache_size_in_bytes') else 0
+            cache_usage = metrics.cache_usage if hasattr(metrics, 'cache_usage') else 0
+            max_cache_usage = metrics.max_cache_usage if hasattr(metrics, 'max_cache_usage') else 0
+            requests = metrics.requests if hasattr(metrics, 'requests') else 0
+            scheduled_requests = metrics.scheduled_requests if hasattr(metrics, 'scheduled_requests') else 0
+            
+            # Calculate cache utilization percentage
+            if cache_size_mb > 0 and cache_usage is not None:
+                cache_utilization_pct = (cache_usage / cache_size_mb * 100) if cache_size_mb > 0 else 0.0
+            else:
+                cache_utilization_pct = 0.0
+            
+            # Build slot list from active handles
+            slots_list = []
+            for req_id, handle in self.active_handles.items():
+                status = handle.get_status()
+                request_id = handle.get_request_id() if hasattr(handle, 'get_request_id') else req_id
+                
+                slot_info = {
+                    "id": req_id,
+                    "request_id": request_id,
+                    "state": str(status),
+                    "prompt_len": 0,
+                    "kv_cache_blocks": 0
+                }
+                
+                # Try to get additional info from handle
+                if hasattr(handle, 'get_prompt_length'):
+                    slot_info["prompt_len"] = handle.get_prompt_length()
+                if hasattr(handle, 'get_generated_tokens'):
+                    slot_info["generation_tokens"] = handle.get_generated_tokens()
+                if hasattr(handle, 'get_kv_cache_blocks'):
+                    slot_info["kv_cache_blocks"] = handle.get_kv_cache_blocks()
+                
+                slots_list.append(slot_info)
+        
+        return JSONResponse(content={
+            "slots": slots_list,
+            "kv_cache_size_mb": round(kv_cache_size_mb, 2),
+            "cache_size_mb": round(cache_size_mb, 2),
+            "cache_usage": cache_usage,
+            "max_cache_usage": max_cache_usage,
+            "cache_utilization_pct": round(cache_utilization_pct, 2),
+            "active_requests": requests,
+            "scheduled_requests": scheduled_requests,
+            "active_slots": len(slots_list)
+        })

@@ -108,8 +108,19 @@ def new_app(controller: BaseController) -> FastAPI:
     app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
     app_router = app.router
     app_router.route_class = LoggingRoute
+    # OpenAI compatible endpoints
     app_router.post("/v1/completions", response_model_exclude_none=True)(controller.completions)
     app_router.post("/v1/chat/completions", response_model_exclude_none=True)(controller.chat)
-    app_router.get(path="/v1/models", response_model_exclude_none=True)(controller.models)
+    app_router.get("/v1/models", response_model_exclude_none=True)(controller.models)
+    
+    # llama.cpp compatible endpoints
+    app_router.post("/completion")(controller.completions)
+    app_router.post("/chat/completion")(controller.chat)
+    app_router.get("/health")(controller.health)
+    app_router.get("/models")(controller.models)
+    app_router.post("/tokenize")(controller.tokenize)
+    app_router.post("/detokenize")(controller.detokenize)
+    
     app.add_exception_handler(RequestValidationError, controller.validation_exception_handler)
     return app
+
