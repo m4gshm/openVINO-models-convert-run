@@ -135,6 +135,10 @@ def main():
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
+    args_parser.add_argument("--openai", action="store_true", help="Enable OpenAI proxy mode (skip OpenVINO loading)")
+    args_parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API key")
+    args_parser.add_argument("--openai_base_url", type=str, default="https://api.openai.com/v1", help="OpenAI API base URL")
+    args_parser.add_argument("--openai_model", type=str, default="", help="Override model name for OpenAI API")
     args_parser.add_argument("--device", type=str, required=False,
                              default=enum_value(DeviceType.GPU), choices=enum_values(DeviceType), help="%(default)s")
     args_parser.add_argument("--performance_hint", type=str, required=False,
@@ -186,6 +190,63 @@ def main():
                              default=enum_value(Turn.on), choices=enum_values(Turn), help="%(default)s")
 
     args = args_parser.parse_args()
+
+    # OpenAI proxy mode - skip all OpenVINO pipeline loading
+    if args.openai:
+        if not args.openai_api_key:
+            log.error("OpenAI API key is required for OpenAI proxy mode")
+            sys.exit(1)
+        
+        log.info(f"starting OpenAI proxy mode: base_url={args.openai_base_url}, model={args.openai_model or args.model}")
+        
+        from agent.server import init_openai_engine
+        from agent.parser import Parser
+        from agent.openai import GenerateOpts
+        from agent.openai.engine_rest_common import ControllerConfig
+        from agent.inference.token_handler import TokenHandlerConfig
+        
+        controller_config = ControllerConfig(
+            model_name=args.openai_model or args.model,
+            max_prompt_len=4096,
+            model_architectures=set(),
+            is_fix_tool_type=False,
+            is_detect_cycled_tool_call=False
+        )
+        
+        handler_config = TokenHandlerConfig()
+        stop_signal = threading.Event()
+        default_generate_opts = get_default_generate_opts()
+        generate_opts = default_generate_opts
+        parser = Parser()
+        
+        app = init_openai_engine(
+            controller_config=controller_config,
+            handler_config=handler_config,
+            api_key=args.openai_api_key,
+            base_url=args.openai_base_url,
+            parser=parser,
+            stop_signal=stop_signal,
+            generate_opts=generate_opts,
+            model_name_override=args.openai_model or args.model
+        )
+        
+        log.info(f"listening {args.host}:{args.port}")
+        
+        def handle():
+            uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
+        
+        server_thread = threading.Thread(target=handle, daemon=True)
+        server_thread.start()
+        
+        try:
+            stopped = False
+            while not stopped:
+                stopped = stop_signal.wait(timeout=1)
+            log.debug(f"main thread finish")
+        except Exception as e:
+            log.debug(f"main thread finish with error: {e}")
+        
+        return
 
     model = args.model
 
@@ -526,7 +587,7 @@ def main():
 
     log.info(f"listening {args.host}:{args.port}")
 
-    def handle():
+    def server_handle():
         uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
 
     server_thread = threading.Thread(target=handle, daemon=True)

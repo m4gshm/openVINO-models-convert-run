@@ -19,10 +19,10 @@ This module provides an alternative to the OpenVINO-based controllers (`Continuo
 
 ```
 OpenAiController
-��── __init__() - Initialize OpenAI client
-��── chunk_generator() - Generate chunks using OpenAI API
-��── slots_sync() - Return slot info (sync version for testing)
-��── shutdown() - Clean up resources
+|── __init__() - Initialize OpenAI client
+|── chunk_generator() - Generate chunks using OpenAI API
+|── slots_sync() - Return slot info (sync version for testing)
+|── shutdown() - Clean up resources
 ```
 
 **Note**: The `slots()` async endpoint was removed from BaseController. Use `slots_sync()` for testing.
