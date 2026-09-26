@@ -588,7 +588,7 @@ def fix_search_for_text(function: ParsedFunctionCall, context: UserContext | Non
     args = get_args(function)
     target_path_or_url = args.get("target_path_or_url")
     if not target_path_or_url:
-        target_path_or_url = get_one_of(args, ["target_path", "search_directory"])
+        target_path_or_url = get_one_of(args, ["target_path", "target_path_url", "search_directory"])
 
     text_snippet = args.get("text_snippet")
     if target_path_or_url and text_snippet:

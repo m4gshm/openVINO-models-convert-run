@@ -1,0 +1,13 @@
+<tool_call>
+<function=search_for_text>
+<parameter=target_path_url>
+C:\java
+</parameter>
+<parameter=text_snippet>
+TestPropertySource
+</parameter>
+<parameter=is_case_sensitive>
+False
+</parameter>
+</function>
+</tool_call>

@@ -338,5 +338,18 @@ Target.py
         self.assertFalse(partial)
 
 
+    def test_search_for_text_3(self):
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text_3.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+        fixed = fix_search_for_text(first, USER_CONTEXT)
+        self.assertEqual("search_for_text", fixed.name)
+        self.assertEqual({'is_case_sensitive': False,
+                          'target_path_or_url': 'C:\\java',
+                          'text_snippet': 'TestPropertySource'},
+                         fixed.arguments)
+        self.assertFalse(partial)
+
 if __name__ == '__main__':
     unittest.main()
