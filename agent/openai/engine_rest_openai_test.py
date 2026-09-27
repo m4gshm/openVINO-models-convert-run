@@ -51,7 +51,6 @@ class TestOpenAiControllerInit:
         
         controller = OpenAiController(
             config=config,
-            parser=parser,
             api_key="test-key",
             base_url="https://api.test.com/v1",
             handler_config=handler_config,
@@ -78,7 +77,6 @@ class TestOpenAiControllerInit:
         
         controller = OpenAiController(
             config=config,
-            parser=parser,
             api_key="test-key",
             base_url="https://api.test.com/v1",
             handler_config=handler_config,
@@ -121,7 +119,6 @@ class TestOpenAiControllerChunkGenerator:
         
         controller = OpenAiController(
             config=config,
-            parser=parser,
             api_key="test-key",
             base_url="https://api.test.com/v1",
             handler_config=handler_config,
@@ -192,7 +189,6 @@ class TestOpenAiControllerSlots:
         
         controller = OpenAiController(
             config=config,
-            parser=parser,
             api_key="test-key",
             base_url="https://api.test.com/v1",
             handler_config=handler_config,
@@ -231,7 +227,6 @@ class TestOpenAiControllerShutdown:
         
         controller = OpenAiController(
             config=config,
-            parser=parser,
             api_key="test-key",
             base_url="https://api.test.com/v1",
             handler_config=handler_config,

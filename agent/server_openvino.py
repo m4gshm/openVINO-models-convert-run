@@ -11,7 +11,6 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
-from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
 
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
@@ -26,11 +25,11 @@ from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.parser.qwen3 import Qwen3MoeParser
 from agent.server import new_app, enum_value, stop_signal
+from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
 
 log = logging.getLogger(__name__)
 
 default_batch_size = 1024
-default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
 default_models_dir = "./models"
 default_models_cache_dir = "./models_cache"
 
@@ -212,14 +211,14 @@ def run_openvino(args):
 
     # --- Build scheduler configuration ---
     scheduler_config = SchedulerConfig()
-    # --- Configure sparse attention settings ---
-    use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
     dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts.dynamic_split_fuse
-    num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens
-    if dynamic_split_fuse and num_batched_tokens:
-        scheduler_config.max_num_batched_tokens = num_batched_tokens
-    else:
-        scheduler_config.max_num_batched_tokens = max_prompt_len
+    if not dynamic_split_fuse is None:
+        scheduler_config.dynamic_split_fuse = dynamic_split_fuse
+        if dynamic_split_fuse:
+            num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens or 8192
+            scheduler_config.max_num_batched_tokens = num_batched_tokens
+        else:
+            scheduler_config.max_num_batched_tokens = max_prompt_len
     opts_cache_size = scheduler_opts.cache_size or default_scheduler_opts.cache_size
     if opts_cache_size:
         scheduler_config.cache_size = opts_cache_size
@@ -229,9 +228,10 @@ def run_openvino(args):
     opts_max_num_seqs = scheduler_opts.max_num_seqs or default_scheduler_opts.max_num_seqs
     if opts_max_num_seqs:
         scheduler_config.max_num_seqs = opts_max_num_seqs
-    scheduler_config.dynamic_split_fuse = dynamic_split_fuse
+
     # scheduler_config.num_kv_blocks = 2048
     # scheduler_config.num_linear_attention_blocks = 256
+    use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
     scheduler_config.use_sparse_attention = use_sparse_attention
     attention_opts = scheduler_opts.sparse_attention_config
     if use_sparse_attention and attention_opts:
@@ -414,12 +414,20 @@ def run_openvino(args):
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
     if draft_model_path:
-        draft_properties = {}
-        eagle3_mode = args.eagle3_mode != Turn.off.value
+        draft_properties = {
+            "CACHE_DIR": model_cache_dir
+        }
+        eagle3_mode = args.eagle3_mode == Turn.on.value
         if eagle3_mode:
             draft_properties["eagle3_mode"] = True
-        pipeline_properties["draft_model"] = py_openvino_genai.draft_model(draft_model_path, device_value,
-                                                                           **draft_properties)
+        mtp_mode = args.mtp_mode == Turn.on.value
+        if mtp_mode:
+            draft_properties["mtp_mode"] = True
+        draft_scheduler_config = SchedulerConfig()
+        draft_scheduler_config.enable_prefix_caching = False
+        draft_model = py_openvino_genai.draft_model(models_path=draft_model_path, device=device_value,
+                                                    scheduler_config=draft_scheduler_config, **draft_properties)
+        pipeline_properties["draft_model"] = draft_model
 
     # --- Build controller and handler configs ---
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
@@ -591,17 +599,19 @@ def init_sequential_engine(controller_config: ControllerConfig,
     # --- Prepare pipeline properties ---
     if not pipeline_properties:
         pipeline_properties = {}
-    if scheduler_config:
-        pipeline_properties["scheduler_config"] = scheduler_config
+    if not scheduler_config:
+        scheduler_config = py_openvino_genai.SchedulerConfig()
 
-    # --- Track initial memory usage ---
+        # --- Track initial memory usage ---
     start_mem = get_current_memory()
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
     # --- Instantiate LLMPipeline or VLMPipeline based on vlm flag ---
     pipe = (
-        py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
-        py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
+        py_openvino_genai.VLMPipeline(models_path=model_path, device=device, scheduler_config=scheduler_config,
+                                      **pipeline_properties) if vlm else
+        py_openvino_genai.LLMPipeline(models_path=model_path, device=device, scheduler_config=scheduler_config,
+                                      **pipeline_properties)
     )
 
     log.info(f"model loaded successfully, pipe {type(pipe)}")
@@ -625,7 +635,7 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
     args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
-    args_parser.add_argument("--model", type=str, default=default_model, help="%(default)s")
+    args_parser.add_argument("--model", type=str, default=None, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
 
     args_parser.add_argument("--device", type=str, required=False,
@@ -676,8 +686,10 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--prompt_lookup", type=str, required=False,
                              default=enum_value(Turn.off), choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--eagle3_mode", type=str, required=False,
-                             default=enum_value(Turn.on), choices=enum_values(Turn), help="%(default)s")
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--mtp_mode", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+
 
 def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
     return [member.value for member in enum_class]
-

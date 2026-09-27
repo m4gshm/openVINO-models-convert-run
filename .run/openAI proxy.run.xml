@@ -1,5 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="OmniCoder-9B" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="openAI proxy" type="PythonConfigurationType" factoryName="Python">
+    <module name="run-model" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
@@ -13,10 +14,9 @@
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
     <option name="DEBUG_JUST_MY_CODE" value="true" />
-    <module name="" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq" />
+    <option name="PARAMETERS" value="--openai_base_url http://localhost:8000/v3 --openai_api_key 123" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

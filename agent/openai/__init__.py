@@ -62,9 +62,5 @@ class SchedulerOpts(BaseModel):
 
 def get_default_scheduler_opts() -> SchedulerOpts:
     return SchedulerOpts(
-        max_num_seqs=4,
-        dynamic_split_fuse=False,
         enable_prefix_caching=True,
-        cache_size=None,
-        max_num_batched_tokens=1024,
     )

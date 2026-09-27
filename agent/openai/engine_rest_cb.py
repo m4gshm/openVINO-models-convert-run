@@ -17,7 +17,7 @@ from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_
     markdown_bold, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal, get_tokens_size
+from agent.openai.engine_rest_common import ControllerConfig, BaseOVController, add_stop_signal, get_tokens_size
 from agent.parser import Parser, StateEvent
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 request_counter = itertools.count(start=0)
 
 
-class ContinuousBatchingController(BaseController):
+class ContinuousBatchingController(BaseOVController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: ContinuousBatchingPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event, generate_opts: GenerateOpts):
         super().__init__(config, parser, pipe.get_tokenizer(), handler_config, generate_opts, stop_signal)
@@ -69,33 +69,8 @@ class ContinuousBatchingController(BaseController):
         request_id = next(request_counter)
 
         response_id = str(uuid.uuid4())
-        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
-        max_length = generation_config.max_length
-
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
-                                                      response_id=response_id)
-        if over_limit_response:
-            yield over_limit_response
-            return
 
         stop_response = new_stop_response(response_id=response_id, model=model_name, role=None)
-
-        if self.log_inference.isEnabledFor(logging.DEBUG):
-            self.log_inference.debug(
-                f"inference start: request={request_id}, "
-                f"pipe_type={type(self.pipe)}, "
-                f"prompt_tokens_amount={prompt_tokens_amount}, "
-                f"do_sample={generation_config.do_sample}, "
-                f"max_length={max_length}, "
-                f"max_new_tokens={generation_config.max_new_tokens}, "
-                f"temperature={generation_config.temperature:.2f}, "
-                f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
-                f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
-                f"presence_penalty={generation_config.presence_penalty:.2f}, "
-                f"frequency_penalty={generation_config.frequency_penalty:.2f}"
-            )
-        else:
-            self.log_inference.info(f"inference start: request={request_id}")
 
         generation_handle: GenerationHandle
         try:

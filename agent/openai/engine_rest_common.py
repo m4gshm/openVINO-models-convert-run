@@ -10,8 +10,6 @@ from typing import Any, Literal, Iterable
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
-from openvino_genai import ChatHistory
-from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import GenerationConfig
 from pydantic import BaseModel
 from starlette import status
@@ -25,7 +23,7 @@ from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type, \
     veai_fix_incorrect_arguments
 from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str, TokenHandler, \
-    TokenHandlerConfig, ToolFixer
+    TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
@@ -35,6 +33,8 @@ from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_mid
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.tool_call import PreprocessToolCall
+from openvino_genai import ChatHistory
+from openvino_genai import Tokenizer
 
 STOP: Literal["stop"] = "stop"
 LENGTH: Literal["length"] = "length"
@@ -57,7 +57,7 @@ class DetokenizeRequest(BaseModel):
 
 
 class ControllerConfig(BaseModel):
-    model_name: str
+    model_name: str | None = None
     max_prompt_len: int
     model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
@@ -115,7 +115,6 @@ def new_generation_config(generate_opts: GenerateOpts,
                           stop: list[str] | str | None = None,
                           ) -> GenerationConfig:
     generation_config = GenerationConfig()
-
     num_assistant_tokens = generate_opts.num_assistant_tokens
     if not num_assistant_tokens is None:
         generation_config.num_assistant_tokens = num_assistant_tokens
@@ -199,147 +198,35 @@ def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
 
 
 class BaseController(ABC):
-    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
+    def __init__(self, config: ControllerConfig,
                  handler_config: TokenHandlerConfig,
-                 generate_opts: GenerateOpts, stop_signal: threading.Event):
-        self.parser = parser
+                 generate_opts: GenerateOpts,
+                 stop_signal: threading.Event):
+        # self.parser = parser
         self.generate_opts = generate_opts
         self.handler_config = handler_config
         self.config = config
-        self.tokenizer = tokenizer
+        # self.tokenizer = tokenizer
         self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         self.log_inference = inference.log
         self.closed = threading.Event()
         self.stop_signal = stop_signal
 
-    def shutdown(self):
-        self.closed.set()
-
     async def health(self) -> JSONResponse:
         """Simple health check — always returns 200 OK."""
         return JSONResponse(content={"status": "ok"})
 
-    async def models(self) -> ModelsListResponse:
-        current_time = int(time.time())
-        return ModelsListResponse(data=[ModelObject(
-            id=self.config.model_name,
-            max_model_len=self.config.max_prompt_len,
-            created=current_time,
-        )])
+    def shutdown(self):
+        self.closed.set()
 
-    async def tokenize(self, request: TokenizeRequest) -> JSONResponse:
-        """tokenize endpoint — tokenizes text and returns token IDs."""
-        tokens = self.tokenizer.encode(request.input).input_ids.data[0].tolist()
-        return JSONResponse(content={"tokens": tokens})
-
-    async def detokenize(self, request: DetokenizeRequest) -> JSONResponse:
-        """detokenize endpoint — detokenizes token IDs back to text."""
-        text = self.tokenizer.decode(request.tokens).strip()
-        return JSONResponse(content={"text": text})
-
-    async def validation_exception_handler(self, request: Request, exc: RequestValidationError):
+    def validation_exception_handler(self, request: Request, exc: RequestValidationError):
         log.error(f"request validation error: {exc.errors()}")
 
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": exc.errors()},
         )
-
-    async def chat(self, body: ChatCompletionRequest, request: Request):
-        headers = request.headers
-        host = headers.get("host")
-        user_agent = headers.get("user-agent")
-        x_device_id = headers.get("x-device-id")
-        x_request_id = headers.get("x-request-id")
-
-        log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
-                  f"x_device_id={x_device_id}, x_request_id={x_request_id}")
-
-        stream = body.stream == True
-        messages = body.messages
-        tools = body.tools
-
-        log.info(f"inbound history messages {len(messages)}")
-
-        is_veai = is_veai_agent(messages)
-        tool_fixer: ToolFixer | None = veai_fix_incorrect_arguments if is_veai else None
-
-        # if is_veai:
-        #     for message in messages:
-        #         if message.name == ListDir.name():
-        #             dumped_dirs = read_list_dir(message)
-        #             if dumped_dirs:
-        #                 result_json = ListDir.new_result_json(dumped_dirs)
-        #                 message.content = result_json
-        #             pass
-
-        user_context = get_veai_context(messages) if is_veai else UserContext()
-        user_context.messages = messages
-        user_context.model_architectures = self.config.model_architectures
-
-        last_message = messages[-1] if messages else None
-        if last_message:
-            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
-                    last_message.content).lower():
-                return new_http_response_chat(stream, [
-                    new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
-            elif last_message.role == ROLE_TOOL:
-                log_client_generated.debug(last_message.content)
-
-        invalid_response = self.validate_messages(messages, tools)
-        if invalid_response:
-            return new_http_response_chat(stream, [invalid_response])
-
-        tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
-
-        extra_context = {}
-        model_parameters = self.generate_opts.model_parameters
-        if model_parameters:
-            extra_context = model_parameters
-
-        chat_history = new_chat_history(messages, tools_raw)
-        history_get_messages = chat_history.get_messages()
-        log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
-                  f"extra_context={extra_context}")
-
-        prompt = self.tokenizer.apply_chat_template(history=chat_history,
-                                                    tools=tools_raw,
-                                                    add_generation_prompt=True,
-                                                    extra_context=extra_context,
-                                                    chat_template=self.config.chat_template)
-
-        self.log_inference_prompt.debug(prompt)
-
-        def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
-
-        generation_config = new_generation_config(temperature=body.temperature,
-                                                  generate_opts=self.generate_opts,
-                                                  max_completion_tokens=(
-                                                          body.max_tokens or body.max_completion_tokens),
-                                                  top_p=body.top_p, frequency_penalty=body.frequency_penalty,
-                                                  logprobs=body.logprobs, stop=body.stop)
-
-        token_handler = TokenHandler(tokenizer=self.tokenizer,
-                                     prompt=prompt,
-                                     parser=self.parser,
-                                     init_chat_events=True,
-                                     is_stop=is_stop,
-                                     config=self.handler_config,
-                                     tool_fixer=tool_fixer,
-                                     user_context=user_context,
-                                     supported_functions=function_parameters,
-                                     )
-
-        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               token_handler=token_handler)
-        return new_http_response_chat(stream, chunk_generator)
-
-    @abstractmethod
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler) -> \
-            Iterable[ChatCompletionChunk]:
-        pass
 
     def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
         if self.config.is_detect_cycled_tool_call:
@@ -370,6 +257,165 @@ class BaseController(ABC):
                                                  tool_calls=tool_calls)
         return None
 
+    async def chat(self, body: ChatCompletionRequest, request: Request):
+        headers = request.headers
+        host = headers.get("host")
+        user_agent = headers.get("user-agent")
+        x_device_id = headers.get("x-device-id")
+        x_request_id = headers.get("x-request-id")
+
+        log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
+                  f"x_device_id={x_device_id}, x_request_id={x_request_id}")
+
+        stream = body.stream == True
+        messages = body.messages
+        log.info(f"inbound history messages {len(messages)}")
+
+        last_message = messages[-1] if messages else None
+        if last_message:
+            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
+                    last_message.content).lower():
+                return new_http_response_chat(stream, [
+                    new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
+            elif last_message.role == ROLE_TOOL:
+                log_client_generated.debug(last_message.content)
+
+        invalid_response = self.validate_messages(messages, body.tools)
+        return new_http_response_chat(stream, [invalid_response]) if invalid_response \
+            else await self.handle_chat_completion(body, request)
+
+    @abstractmethod
+    async def handle_chat_completion(self, body: ChatCompletionRequest,
+                                     request: Request) -> StreamingResponse | ChatCompletion:
+        pass
+
+    @abstractmethod
+    async def completions(self, body: completions_api.CompletionRequest, request: Request):
+        pass
+
+    @abstractmethod
+    async def models(self) -> ModelsListResponse:
+        pass
+
+
+class BaseOVController(BaseController):
+    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
+                 handler_config: TokenHandlerConfig,
+                 generate_opts: GenerateOpts, stop_signal: threading.Event):
+        super().__init__(config, handler_config, generate_opts, stop_signal)
+        self.parser = parser
+        # self.generate_opts = generate_opts
+        # self.handler_config = handler_config
+        # self.config = config
+        self.tokenizer = tokenizer
+        # self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
+        # self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
+        # self.log_inference = inference.log
+        # self.closed = threading.Event()
+        # self.stop_signal = stop_signal
+
+    async def models(self) -> ModelsListResponse:
+        current_time = int(time.time())
+        return ModelsListResponse(data=[ModelObject(
+            id=self.config.model_name,
+            max_model_len=self.config.max_prompt_len,
+            created=current_time,
+        )])
+
+    async def tokenize(self, request: TokenizeRequest) -> JSONResponse:
+        """tokenize endpoint — tokenizes text and returns token IDs."""
+        tokens = self.tokenizer.encode(request.input).input_ids.data[0].tolist()
+        return JSONResponse(content={"tokens": tokens})
+
+    async def detokenize(self, request: DetokenizeRequest) -> JSONResponse:
+        """detokenize endpoint — detokenizes token IDs back to text."""
+        text = self.tokenizer.decode(request.tokens).strip()
+        return JSONResponse(content={"text": text})
+
+    async def handle_chat_completion(self, body: ChatCompletionRequest,
+                                     request: Request) -> StreamingResponse | ChatCompletion:
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
+
+        stream = body.stream == True
+        tools = body.tools
+        messages: list[ChatCompletionMessageParam] = body.messages
+        is_veai = is_veai_agent(messages)
+        tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
+
+        extra_context = {}
+        model_parameters = self.generate_opts.model_parameters
+        if model_parameters:
+            extra_context = model_parameters
+
+        chat_history = new_chat_history(messages, tools_raw)
+        history_get_messages = chat_history.get_messages()
+        log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
+                  f"extra_context={extra_context}")
+
+        prompt = self.tokenizer.apply_chat_template(history=chat_history,
+                                                    tools=tools_raw,
+                                                    add_generation_prompt=True,
+                                                    extra_context=extra_context,
+                                                    chat_template=self.config.chat_template)
+
+        self.log_inference_prompt.debug(prompt)
+
+        generation_config = new_generation_config(temperature=body.temperature,
+                                                  generate_opts=self.generate_opts,
+                                                  max_completion_tokens=(
+                                                          body.max_tokens or body.max_completion_tokens),
+                                                  top_p=body.top_p, frequency_penalty=body.frequency_penalty,
+                                                  logprobs=body.logprobs, stop=body.stop)
+
+        response_id = str(uuid.uuid4())
+        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
+        max_length = generation_config.max_length
+
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
+                                                      response_id=response_id)
+        if over_limit_response:
+            return new_http_response_chat(stream, [over_limit_response])
+
+        if self.log_inference.isEnabledFor(logging.DEBUG):
+            self.log_inference.debug(
+                f"inference start: "
+                f"prompt_tokens_amount={prompt_tokens_amount}, "
+                f"do_sample={generation_config.do_sample}, "
+                f"max_length={generation_config.max_length}, "
+                f"max_new_tokens={generation_config.max_new_tokens}, "
+                f"temperature={generation_config.temperature:.2f}, "
+                f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
+                f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
+                f"presence_penalty={generation_config.presence_penalty:.2f}, "
+                f"frequency_penalty={generation_config.frequency_penalty:.2f}"
+            )
+        else:
+            self.log_inference.info(f"inference start")
+
+        user_context = get_veai_context(messages) if is_veai else UserContext()
+        user_context.messages = messages
+        user_context.model_architectures = self.config.model_architectures
+        token_handler = TokenHandler(tokenizer=self.tokenizer,
+                                     prompt=prompt,
+                                     parser=self.parser,
+                                     init_chat_events=True,
+                                     is_stop=is_stop,
+                                     config=self.handler_config,
+                                     tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
+                                     user_context=user_context,
+                                     supported_functions=function_parameters,
+                                     )
+
+        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                               token_handler=token_handler)
+        return new_http_response_chat(stream, chunk_generator)
+
+    @abstractmethod
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler) -> \
+            Iterable[ChatCompletionChunk]:
+        pass
+
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
         prompt = body.prompt
         if not prompt:
@@ -392,11 +438,17 @@ class BaseController(ABC):
                                      config=self.handler_config,
                                      )
 
-        stream = body.stream
-        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               token_handler=token_handler)
+        stream = body.stream | True
+        response_id = str(uuid.uuid4())
+        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
+        max_length = generation_config.max_length
+        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
+                                                      response_id=response_id)
 
-        return new_http_response_completions(stream, chunk_generator)
+        return new_http_response_chat(stream, [over_limit_response]) if over_limit_response \
+            else new_http_response_completions(stream,
+                                               self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                                                    token_handler=token_handler))
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         if encode_size >= max_length:

@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="OmniCoder-9B" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="Ornith-1.5-9B-int4-sym-g128-awq (mtp)" type="PythonConfigurationType" factoryName="Python">
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />
@@ -16,7 +16,7 @@
     <module name="" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model OmniCoder-9B-int4-sym-g128-se-awq" />
+    <option name="PARAMETERS" value="--model Ornith-1.5-9B-int4-sym-g128-awq --draft_model Ornith-1.5-9B-int4-sym-g128-awq --mtp_mode on --eagle3_mode off --generate_config_file .config/generate_config_mtp.json --scheduler_config_file=.config/scheduler_config_caching_disabled.json --device GPU" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />

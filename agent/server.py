@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
-from agent.openai.engine_rest_common import BaseController
+from agent.openai.engine_rest_common import BaseOVController, BaseController
 from agent.openai.logger_rest import LoggingRoute
 
 log = logging.getLogger(__name__)
@@ -49,8 +49,8 @@ def new_app(controller: BaseController) -> FastAPI:
     app_router.post("/chat/completion")(controller.chat)
     app_router.get("/health")(controller.health)
     app_router.get("/models")(controller.models)
-    app_router.post("/tokenize")(controller.tokenize)
-    app_router.post("/detokenize")(controller.detokenize)
+    # app_router.post("/tokenize")(controller.tokenize)
+    # app_router.post("/detokenize")(controller.detokenize)
 
     app.add_exception_handler(RequestValidationError, controller.validation_exception_handler)
     return app

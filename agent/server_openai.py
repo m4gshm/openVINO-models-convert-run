@@ -28,7 +28,7 @@ def run_openai_proxy(args):
         log.error("OpenAI API key is required for OpenAI proxy mode")
         sys.exit(1)
 
-    log.info(f"starting OpenAI proxy mode: base_url={args.openai_base_url}, model={args.openai_model or args.model}")
+    log.info(f"starting OpenAI proxy mode: base_url={args.openai_base_url}")
 
     from agent.parser import Parser
     from agent.openai.engine_rest_common import ControllerConfig
@@ -36,7 +36,6 @@ def run_openai_proxy(args):
 
     # --- Build configuration objects ---
     controller_config = ControllerConfig(
-        model_name=args.openai_model or args.model,
         max_prompt_len=4096,
         model_architectures=set(),
         is_fix_tool_type=False,
@@ -58,7 +57,6 @@ def run_openai_proxy(args):
         parser=parser,
         stop_signal=stop_signal,
         generate_opts=generate_opts,
-        model_name_override=args.openai_model or args.model
     )
 
     log.info(f"listening {args.host}:{args.port}")
@@ -84,8 +82,7 @@ def init_openai_engine(controller_config: ControllerConfig,
                        base_url: str,
                        parser: Parser,
                        stop_signal: threading.Event,
-                       generate_opts=GenerateOpts(),
-                       model_name_override: str | None = None) -> FastAPI:
+                       generate_opts=GenerateOpts()) -> FastAPI:
     """
     Initialize OpenAI-compatible controller without OpenVINO dependencies.
 
@@ -109,17 +106,15 @@ def init_openai_engine(controller_config: ControllerConfig,
     log.debug(f"consumed memory: {start_mem:.2f} MB")
 
     log.info(
-        f"initializing OpenAI engine: base_url={base_url}, model={model_name_override or controller_config.model_name}")
+        f"initializing OpenAI engine: base_url={base_url}")
 
     controller = OpenAiController(
         config=controller_config,
-        parser=parser,
         api_key=api_key,
         base_url=base_url,
         generate_opts=generate_opts,
         handler_config=handler_config,
         stop_signal=stop_signal,
-        model_name_override=model_name_override
     )
 
     loaded_mem = get_current_memory()
@@ -133,4 +128,3 @@ def add_openai_args(args_parser: ArgumentParser):
     args_parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API key")
     args_parser.add_argument("--openai_base_url", type=str, default="https://api.openai.com/v1",
                              help="OpenAI API base URL")
-    args_parser.add_argument("--openai_model", type=str, default="", help="Override model name for OpenAI API")

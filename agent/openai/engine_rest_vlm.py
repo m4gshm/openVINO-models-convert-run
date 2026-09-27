@@ -17,13 +17,13 @@ from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, add_stop_signal, get_tokens_size
+from agent.openai.engine_rest_common import ControllerConfig, BaseOVController, add_stop_signal, get_tokens_size
 from agent.parser import Parser
 
 log = logging.getLogger(__name__)
 
 
-class VlmController(BaseController):
+class VlmController(BaseOVController):
     def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
                  handler_config: TokenHandlerConfig, stop_signal: threading.Event, generate_opts: GenerateOpts):
         super().__init__(config, parser, pipe.get_tokenizer(), handler_config, generate_opts, stop_signal)
@@ -35,40 +35,15 @@ class VlmController(BaseController):
                         token_handler: TokenHandler) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
-        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
-        max_length = generation_config.max_length
-
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
-                                                      response_id=response_id)
-        if over_limit_response:
-            yield over_limit_response
-            return
 
         with self.request_lock:
             chunk_queue: queue.Queue[ChatCompletionChunk | None] = queue.Queue()
             stop_stream_handling: queue.Queue[bool] = queue.Queue()
             start_stream_handling: queue.Queue[bool] = queue.Queue()
             before_generate_mem = get_current_memory()
-            max_length = generation_config.max_length
 
             def run_inference():
                 try:
-                    if self.log_inference.isEnabledFor(logging.DEBUG):
-                        self.log_inference.debug(
-                            f"inference start: "
-                            f"pipe_type={type(self.pipe)}, "
-                            f"prompt_tokens_amount={prompt_tokens_amount}, "
-                            f"do_sample={generation_config.do_sample}, "
-                            f"max_length={max_length}, "
-                            f"max_new_tokens={generation_config.max_new_tokens}, "
-                            f"temperature={generation_config.temperature:.2f}, "
-                            f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
-                            f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
-                            f"presence_penalty={generation_config.presence_penalty:.2f}, "
-                            f"frequency_penalty={generation_config.frequency_penalty:.2f}"
-                        )
-                    else:
-                        self.log_inference.info(f"inference start")
                     streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
