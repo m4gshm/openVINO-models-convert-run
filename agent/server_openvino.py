@@ -29,7 +29,6 @@ from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttenti
 
 log = logging.getLogger(__name__)
 
-default_batch_size = 1024
 default_models_dir = "./models"
 default_models_cache_dir = "./models_cache"
 
@@ -73,6 +72,7 @@ class KvCachePrecision(Enum):
 class NpuCompilerType(Enum):
     DRIVER = 'DRIVER'
     PLUGIN = 'PLUGIN'
+    PREFER_PLUGIN = 'PREFER_PLUGIN'
 
 
 class YesNo(Enum):
@@ -95,10 +95,23 @@ class PrefillHint(Enum):
     STATIC = 'STATIC'
 
 
+class AttentionHint(Enum):
+    DYNAMIC = 'DYNAMIC'
+    STATIC = 'STATIC'
+    PYRAMID = 'PYRAMID'
+    HFA = 'HFA'
+
+
 class PerformanceHint(Enum):
     LATENCY = 'LATENCY'
     THROUGHPUT = 'THROUGHPUT'
     CUMULATIVE_THROUGHPUT = 'CUMULATIVE_THROUGHPUT'
+
+
+class MoEHint(Enum):
+    DENSE = 'DENSE'
+    HOST_ROUTED = 'HOST_ROUTED'
+    DEVICE_ROUTED = 'DEVICE_ROUTED'
 
 
 def run_openvino(args):
@@ -308,12 +321,19 @@ def run_openvino(args):
         f"parser_type='{type(model_parser)}'")
     log.debug(f"cache dir {model_cache_dir}")
 
-    # --- Build pipeline properties per device type ---
     npu_generate_hint = args.npu_generate_hint
     performance_hint = args.performance_hint
 
+    # --- Configure attention backend ---
+    attention_backend = args.attention_backend
+    is_cb = pipe == Pipe.CB
+    if is_cb and attention_backend == enum_value(AttentionBackend.PA):
+        log.info(f"erase attention_backend={attention_backend} for unsupported pipe={enum_value(pipe)}")
+    elif attention_backend is None and not (is_cb or is_device_npu or is_gemma4):
+        attention_backend = enum_value(AttentionBackend.PA)
+        log.info(f"force attention_backend={attention_backend}")
+
     cores_available = multiprocessing.cpu_count()
-    # --- Define CPU pipeline properties ---
     cpu_pipeline_properties = {
         "CACHE_DIR": model_cache_dir,
         "PERFORMANCE_HINT": performance_hint,
@@ -321,7 +341,6 @@ def run_openvino(args):
         "INFERENCE_NUM_THREADS": cores_available,
     }
 
-    # --- Define GPU pipeline properties ---
     gpu_enable_large_allocations = args.gpu_enable_large_allocations
     gpu_priorities = args.gpu_priorities
     gpu_pipeline_properties = {
@@ -343,34 +362,66 @@ def run_openvino(args):
     }
 
     npu_prefill_hint = args.npu_prefill_hint
+    npu_prefill_attention_hint = args.npu_prefill_attention_hint
+    npu_generate_attention_hint = args.npu_generate_attention_hint
+    npuw_llm_propagate_slice_up = args.npuw_llm_propagate_slice_up
+    npuw_llm_enable_prefix_caching = args.npuw_llm_enable_prefix_caching
+    npuw_llm_enable_continuous_prefill = args.npuw_llm_enable_continuous_prefill
+    npuw_llm_enable_block_based_kv_cache = args.npuw_llm_enable_block_based_kv_cache
+    npuw_llm_prefill_moe_hint = args.npuw_llm_prefill_moe_hint
+    npuw_llm_generate_moe_hint = args.npuw_llm_generate_moe_hint
+    npuw_llm_prefill_chunk_size = args.npuw_llm_prefill_chunk_size
     npu_turbo = args.npu_turbo
     npu_compiler_type = args.npu_compiler_type
 
     npu_pipeline_properties: dict[str, str | int] = {
         "CACHE_DIR": model_cache_dir,
+        "CACHE_MODE": "OPTIMIZE_SPEED",
         "PERFORMANCE_HINT": performance_hint,
         "ENABLE_MMAP": "YES",
         # "PERF_COUNT": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
+        # "NPUW_DEVICES": "NPU,GPU",
 
         "NPU_COMPILER_TYPE": npu_compiler_type,
+        "NPU_COMPILATION_MODE_PARAMS": "optimization-level=2 performance-hint-override=latency",
         "NPU_USE_NPUW": "YES",
-        "NPUW_LLM": "YES",
-        # "NPUW_DEVICES": "NPU,CPU",
         "NPU_TURBO": npu_turbo,
+        "NPUW_LLM": "YES",
+
         "NPUW_LLM_GENERATE_HINT": npu_generate_hint,
         "NPUW_LLM_PREFILL_HINT": npu_prefill_hint,
-        "NPUW_LLM_PREFILL_ATTENTION_HINT": "PYRAMID",
-        "NPUW_LLM_GENERATE_PYRAMID": "YES",
-        "NPUW_PARALLEL_COMPILE": "YES",
-        "NPUW_LLM_SHARED_HEAD": "YES",
+        "NPUW_LLM_PREFILL_CHUNK_SIZE": npuw_llm_prefill_chunk_size,
 
-        "LOG_LEVEL": "LOG_WARNING",
+        "NPUW_LLM_GENERATE_PYRAMID": "YES",
+        "NPUW_LLM_SHARED_HEAD": "YES",
+        "NPUW_PARALLEL_COMPILE": "YES",
+        "LOG_LEVEL": "LOG_INFO",
     }
+
+    if npuw_llm_prefill_moe_hint:
+        npu_pipeline_properties["NPUW_LLM_PREFILL_MOE_HINT"] = npuw_llm_prefill_moe_hint
+    if npuw_llm_generate_moe_hint:
+        npu_pipeline_properties["NPUW_LLM_GENERATE_MOE_HINT"] = npuw_llm_generate_moe_hint
+    if npu_prefill_attention_hint:
+        npu_pipeline_properties["NPUW_LLM_PREFILL_ATTENTION_HINT"] = npu_prefill_attention_hint
+    if npu_generate_attention_hint:
+        npu_pipeline_properties["NPUW_LLM_GENERATE_ATTENTION_HINT"] = npu_generate_attention_hint
+    if npuw_llm_propagate_slice_up:
+        npu_pipeline_properties["NPUW_LLM_PROPAGATE_SLICE_UP"] = npuw_llm_propagate_slice_up
+    if npuw_llm_enable_prefix_caching:
+        npu_pipeline_properties["NPUW_LLM_ENABLE_PREFIX_CACHING"] = npuw_llm_enable_prefix_caching
+    if npuw_llm_enable_continuous_prefill:
+        npu_pipeline_properties["NPUW_LLM_ENABLE_CONTINUOUS_PREFILL"] = npuw_llm_enable_continuous_prefill
+    if npuw_llm_enable_block_based_kv_cache:
+        npu_pipeline_properties["NPUW_LLM_ENABLE_BLOCK_BASED_KV_CACHE"] = npuw_llm_enable_block_based_kv_cache
 
     if max_prompt_len:
         npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
+    # todo llm or pa
+    # if attention_backend == enum_value(AttentionBackend.PA):
+    #     npu_pipeline_properties["NPUW_PA"] = "YES"
 
     # max_generation_token_len = args.max_generation_token_len
     # if not max_generation_token_len:
@@ -378,9 +429,6 @@ def run_openvino(args):
 
     # if max_generation_token_len:
     #     npu_pipeline_properties["NPUW_LLM_MAX_GENERATION_TOKEN_LEN"] = max_generation_token_len
-
-    if default_batch_size:
-        npu_pipeline_properties["NPUW_LLM_PREFILL_CHUNK_SIZE"] = default_batch_size
 
     # --- Select pipeline properties based on device ---
     if not model_path.exists():
@@ -391,19 +439,9 @@ def run_openvino(args):
         else cpu_pipeline_properties | gpu_pipeline_properties if device == DeviceType.AUTO \
         else gpu_pipeline_properties
 
-    # --- Configure KV cache precision ---
     kv_cache_precision = args.kv_cache_precision
     if kv_cache_precision:
         pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
-
-    # --- Determine engine type (CB vs sequential) ---
-    is_not_cb = is_device_npu or pipe != Pipe.CB
-
-    # --- Configure attention backend ---
-    attention_backend = args.attention_backend
-    if attention_backend is None and is_not_cb:
-        attention_backend = enum_value(AttentionBackend.PA)
-        log.info(f"force attention_backend={attention_backend}")
 
     if attention_backend:
         pipeline_properties["ATTENTION_BACKEND"] = attention_backend
@@ -457,7 +495,7 @@ def run_openvino(args):
         handler_config=handler_config,
         pipeline_properties=pipeline_properties,
         stop_signal=stop_signal,
-    ) if is_not_cb else init_continuous_batching_engine(
+    ) if not is_cb else init_continuous_batching_engine(
         controller_config=controller_config,
         model_path=str(model_path),
         device=device_value,
@@ -599,8 +637,8 @@ def init_sequential_engine(controller_config: ControllerConfig,
     # --- Prepare pipeline properties ---
     if not pipeline_properties:
         pipeline_properties = {}
-    if not scheduler_config:
-        scheduler_config = py_openvino_genai.SchedulerConfig()
+    if scheduler_config:
+        pipeline_properties["scheduler_config"] = scheduler_config
 
         # --- Track initial memory usage ---
     start_mem = get_current_memory()
@@ -608,10 +646,8 @@ def init_sequential_engine(controller_config: ControllerConfig,
 
     # --- Instantiate LLMPipeline or VLMPipeline based on vlm flag ---
     pipe = (
-        py_openvino_genai.VLMPipeline(models_path=model_path, device=device, scheduler_config=scheduler_config,
-                                      **pipeline_properties) if vlm else
-        py_openvino_genai.LLMPipeline(models_path=model_path, device=device, scheduler_config=scheduler_config,
-                                      **pipeline_properties)
+        py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
+        py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
     )
 
     log.info(f"model loaded successfully, pipe {type(pipe)}")
@@ -668,17 +704,42 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=".config/scheduler_config.json",
                              help="%(default)s")
     args_parser.add_argument("--npu_compiler_type", type=str, required=False,
-                             default=enum_value(NpuCompilerType.DRIVER), choices=enum_values(NpuCompilerType),
+                             default=enum_value(NpuCompilerType.PREFER_PLUGIN), choices=enum_values(NpuCompilerType),
                              help="%(default)s")
     args_parser.add_argument("--npu_generate_hint", type=str, required=False,
-                             default=enum_value(NpuGenerateHint.FAST_COMPILE), choices=enum_values(NpuGenerateHint),
+                             default=enum_value(NpuGenerateHint.BEST_PERF), choices=enum_values(NpuGenerateHint),
                              help="%(default)s")
     args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
                              default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint),
                              help="%(default)s")
+    args_parser.add_argument("--npu_prefill_attention_hint", type=str, required=False,
+                             default=None, choices=enum_values(AttentionHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npu_generate_attention_hint", type=str, required=False,
+                             default=None, choices=enum_values(AttentionHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_prefill_moe_hint", type=str, required=False,
+                             default=None, choices=enum_values(MoEHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_generate_moe_hint", type=str, required=False,
+                             default=None, choices=enum_values(MoEHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_propagate_slice_up", type=str, required=False,
+                             default=None, choices=enum_values(YesNo),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_enable_prefix_caching", type=str, required=False,
+                             default=None, choices=enum_values(YesNo),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_prefill_chunk_size", type=int, required=False,
+                             default=1024, help="%(default)s")
+    args_parser.add_argument("--npuw_llm_enable_continuous_prefill", type=str, required=False,
+                             default=None, choices=enum_values(YesNo),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm_enable_block_based_kv_cache", type=str, required=False,
+                             default=None, choices=enum_values(YesNo),
+                             help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
-                             default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
-
+                             default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--gpu_enable_large_allocations", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--gpu_priorities", type=str, required=False,
