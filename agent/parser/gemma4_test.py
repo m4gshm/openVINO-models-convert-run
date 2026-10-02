@@ -849,6 +849,46 @@ class TestAddFunction(unittest.TestCase):
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)
 
+    def test_edit_file22_parse(self):
+        state = parser.new_state()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_22.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '    '
+                                                 'testImplementation("org.springframework.boot:spring-boot-starter-test")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:postgresql")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:junit-jupiter")\n'
+                                                 '    '
+                                                 'testImplementation("org.testcontainers:local-embedded")\n'
+                                                 '    // Podman is usually handled by the '
+                                                 'Testcontainers ecosystem, but explicit integration '
+                                                 'might require a wrapper or specific library if not '
+                                                 'using standard Docker setup.\n'
+                                                 '    // For Podman, usually, you rely on '
+                                                 'docker/podman-compose setup outside Gradle '
+                                                 'configuration or specific extensions, but for '
+                                                 'simplicity in a Gradle test setup, the standard '
+                                                 'Testcontainers dependency should suffice for '
+                                                 'PostgreSQL. \n'
+                                                 '\n'
+                                                 '    // Note: Specific Podman setup might require '
+                                                 'separate configuration not covered by standard '
+                                                 'dependencies. \n'
+                                                 '    \n'},
+                                    {'old_text': '    '
+                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'}]},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
     def test_write_file_2_parse(self):
         state = parser.new_state()
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/write_file_2.txt")

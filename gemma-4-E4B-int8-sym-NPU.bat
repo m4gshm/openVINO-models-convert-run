@@ -1,4 +1,4 @@
-call agent.bat --model gemma-4-E4B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq ^
+call agent.bat --model gemma-4-E4B-it-int8-sym ^
  --detect_cycled_tool_call off ^
  --device NPU ^
  --max_prompt_len 49152 ^
@@ -10,5 +10,3 @@ call agent.bat --model gemma-4-E4B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq 
  --npu_prefill_attention_hint HFA ^
  --generate_config_file .config/gemma4_generate_config_npu.json ^
  --chat_template_file .config/gemma4_chat_template.jinja
-
-@REM  --npu_generate_attention_hint PYRAMID ^

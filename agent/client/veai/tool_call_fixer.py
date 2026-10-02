@@ -427,7 +427,9 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
         edits = [edits]
     elif not isinstance(edits, Iterable):
         log.warning(f"unexpected edits type='{type(edits)}', edits='{edits}'")
-    for i, edit in enumerate(edits):
+    i = 0
+    while i < len(edits):
+        edit = edits[i]
         if isinstance(edit, dict):
             if len(edit) == 0:
                 on_delete_i.append(i)
@@ -472,9 +474,20 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
             else:
                 anonymous_edits.extend(edit)
             on_delete_i.append(i)
+        elif edit == "old_text" or edit == "new_text":
+            next_i = i + 1
+            next_e = edits[next_i] if i < len(edits) + 1 else None
+            if not next_e is None:
+                edits[i] = {edit: next_e}
+                on_delete_i.append(next_i)
+                i = next_i
+            else:
+                anonymous_edits.append(edit)
+                on_delete_i.append(i)
         else:
             anonymous_edits.append(edit)
             on_delete_i.append(i)
+        i += 1
 
     for i in reversed(on_delete_i):
         try:
