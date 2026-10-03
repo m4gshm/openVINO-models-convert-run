@@ -361,6 +361,7 @@ def run_openvino(args):
         # "INFERENCE_PRECISION_HINT": 'dynamic'
     }
 
+    npuw_devices = args.npuw_devices
     npu_prefill_hint = args.npu_prefill_hint
     npu_prefill_attention_hint = args.npu_prefill_attention_hint
     npu_generate_attention_hint = args.npu_generate_attention_hint
@@ -382,7 +383,6 @@ def run_openvino(args):
         # "PERF_COUNT": "YES",
 
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
-        # "NPUW_DEVICES": "NPU,GPU",
 
         "NPU_COMPILER_TYPE": npu_compiler_type,
         "NPU_COMPILATION_MODE_PARAMS": "optimization-level=2 performance-hint-override=latency",
@@ -400,6 +400,8 @@ def run_openvino(args):
         "LOG_LEVEL": "LOG_INFO",
     }
 
+    if npuw_devices:
+        npu_pipeline_properties["NPUW_DEVICES"] = npuw_devices
     if npuw_llm_prefill_moe_hint:
         npu_pipeline_properties["NPUW_LLM_PREFILL_MOE_HINT"] = npuw_llm_prefill_moe_hint
     if npuw_llm_generate_moe_hint:
@@ -740,6 +742,8 @@ def add_openvino_args(args_parser: ArgumentParser):
                              help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
+    args_parser.add_argument("--npuw_devices", type=str, required=False,
+                             default=None, help="%(default)s")
     args_parser.add_argument("--gpu_enable_large_allocations", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--gpu_priorities", type=str, required=False,

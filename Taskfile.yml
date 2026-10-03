@@ -6,7 +6,7 @@ tasks:
     cmds:
       - uv sync
     sources:
-      - pyproject.toml
+      - agent/pyproject.toml
     generates:
       - ".venv/**/*"
       - uv.lock
@@ -15,6 +15,12 @@ tasks:
     desc: Regenerate lock file
     cmds:
       - uv lock
+
+  update:
+    desc: Regenerate lock file
+    cmds:
+      - uv lock --upgrade
+      - uv sync
 
   test:
     desc: Run tests

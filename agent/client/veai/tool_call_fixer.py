@@ -398,9 +398,9 @@ def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, conte
                 i -= 1
 
     new_text_lines = new_text_lines[new_text_merge_point_start: new_text_merge_point_end + 1]
-    old_text_join = "\n".join(old_text_lines)
+    old_text_join = "\n".join(old_text_lines) if old_text_lines else None
     new_text_join = "\n".join(new_text_lines)
-    return old_text_join, old_text_join + new_text_join
+    return old_text_join, (old_text_join if old_text_join else "") + new_text_join
 
 
 def split_lines(file_content_str: str) -> list[str]:

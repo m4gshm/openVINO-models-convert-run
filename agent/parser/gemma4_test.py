@@ -1,19 +1,39 @@
 import unittest
 from importlib.resources import files
+from importlib.resources.abc import Traversable
+from pathlib import Path
 
-from agent.client.user_context import UserContext, OS
+from agent.client.user_context import UserContext, OS, UserContextFiles
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file, GEMMA_4, fix_search_file_by_name
 from agent.parser.gemma4 import Gemma4ChannelParser
+
+TEST_RESOURCES = "test_resources"
 
 
 def new_windows_user_context() -> UserContext:
     context = UserContext(model_architectures={GEMMA_4})
     context.os_type = OS.Windows
+
+    file_content = {Path("java/build.gradle.kts"): read_bytes("build.gradle.kts.txt")}
+    context.files = UserContextFiles(file_content=file_content)
     return context
 
 
+def open_file(file_name: str) -> Traversable:
+    return files(__package__).joinpath(TEST_RESOURCES, "gemma4/" + file_name)
+
+
+def read_text(file_name: str):
+    file = open_file(file_name)
+    return file.read_text()
+
+
+def read_bytes(file_name: str):
+    file = open_file(file_name)
+    return file.read_bytes()
+
+
 USER_CONTEXT = new_windows_user_context()
-TEST_RESOURCES = "test_resources"
 
 parser = Gemma4ChannelParser()
 
@@ -885,6 +905,28 @@ class TestAddFunction(unittest.TestCase):
                                                  '    \n'},
                                     {'old_text': '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'}]},
+                         fixed.arguments)
+        self.assertEqual([], first.anonymous_arguments)
+        self.assertFalse(partial)
+
+    def test_edit_file23_parse(self):
+        state = parser.new_state()
+        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "gemma4/edit_file_23.txt")
+        tool_call_text = tool_call_file.read_text()
+        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        first = calls[0]
+
+        fixed = fix_edit_file(first, USER_CONTEXT)
+
+        self.assertEqual("edit_file", fixed.name)
+        self.assertEqual({'allow_multiple_matches': False,
+                          'edits': [{'new_text': '// --- Testcontainers dependencies for integration '
+                                                 'testing ---\n'
+                                                 "testImplementation('org.testcontainers:postgresql:postgresql:1.19.1' "
+                                                 ')\n'
+                                                 "testImplementation('org.testcontainers:junit-jupiter:junit-jupiter:1.8.2' "
+                                                 ')\n'}],
+                          'target_file': 'java/build.gradle.kts'},
                          fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)
         self.assertFalse(partial)

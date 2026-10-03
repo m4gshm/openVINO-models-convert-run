@@ -1,8 +1,13 @@
 call agent.bat --model OmniCoder-9B-int4-sym-g128-se-awq ^
  --device NPU ^
- --max_prompt_len 65536 ^
- --npu_compiler_type DRIVER ^
+ --max_prompt_len 61440 ^
  --npu_turbo YES ^
- --detect_cycled_tool_call on ^
- --kv_cache_precision u4 ^
+ --npu_compiler_type PLUGIN ^
+ --npuw_llm_enable_block_based_kv_cache NO ^
+ --npuw_llm_enable_continuous_prefill NO ^
+ --npuw_llm_enable_prefix_caching YES ^
+ --npu_prefill_attention_hint HFA ^
+ --npuw_devices NPU,GPU ^
+ --npuw_llm_prefill_moe_hint HOST_ROUTED ^
+ --npuw_llm_generate_moe_hint DEVICE_ROUTED ^
  --generate_config_file .config/generate_config.json
