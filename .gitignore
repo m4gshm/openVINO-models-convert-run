@@ -33,6 +33,7 @@ src_models/ornith-ai
 src_models/Fara*
 src_models/LiquidAI*
 models_cache
+models/Muse*
 models/lfm*
 models/LFM*
 models/Qwen*
@@ -48,3 +49,7 @@ models/Vibe-Coding-Claude-Fable-5*
 models/Mellum*/1
 models/Fara*
 models/Ornith*
+
+# AI for OpenIDE — local agent state (chat transcripts, memory, snapshots; may contain secrets).
+.aiforopenide/
+!.aiforopenide/config.json

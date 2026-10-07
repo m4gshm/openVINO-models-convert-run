@@ -1,0 +1,27 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Qwen3.6-35B-A3B (LAPLD)" type="PythonConfigurationType" factoryName="Python">
+    <option name="ENV_FILES" value="" />
+    <option name="INTERPRETER_OPTIONS" value="" />
+    <option name="PARENT_ENVS" value="true" />
+    <envs>
+      <env name="PYTHONUNBUFFERED" value="1" />
+    </envs>
+    <option name="SDK_HOME" value="" />
+    <option name="SDK_NAME" value="C:\alex\github\m4gshm\openVINO-models-convert-run\.venv" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="IS_MODULE_SDK" value="false" />
+    <option name="ADD_CONTENT_ROOTS" value="true" />
+    <option name="ADD_SOURCE_ROOTS" value="true" />
+    <option name="DEBUG_JUST_MY_CODE" value="true" />
+    <module name="" />
+    <option name="RUN_TOOL" value="" />
+    <option name="SCRIPT_NAME" value="agent" />
+    <option name="PARAMETERS" value="--model Qwen3.6-35B-A3B-int4-sym-g128-awq --pipe VLM --generate_config_file .config/qwen_3.5_generate_config_LAPLD.json --scheduler_config_file .config/scheduler_config.json --prompt_lookup on" />
+    <option name="SHOW_COMMAND_LINE" value="false" />
+    <option name="EMULATE_TERMINAL" value="false" />
+    <option name="MODULE_MODE" value="true" />
+    <option name="REDIRECT_INPUT" value="false" />
+    <option name="INPUT_FILE" value="" />
+    <method v="2" />
+  </configuration>
+</component>

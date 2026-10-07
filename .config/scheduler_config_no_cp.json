@@ -1,15 +1,11 @@
 {
-  "max_num_seqs": 1,
-  "dynamic_split_fuse": true,
-  "max_num_batched_tokens": 4096,
-  "cache_interval_multiplier": 256,
-  "enable_prefix_caching": true,
+  "enable_prefix_caching": false,
   "use_sparse_attention": false,
   "sparse_attention_config": {
     "sparse_attention_mode": "TRISHAPE",
     "num_last_dense_tokens_in_prefill": 256,
-    "num_retained_start_tokens_in_cache": 512,
-    "num_retained_recent_tokens_in_cache": 128,
+    "num_retained_start_tokens_in_cache": 8192,
+    "num_retained_recent_tokens_in_cache": 512,
     "xattention_threshold": 0.65,
     "xattention_block_size": 128,
     "xattention_stride": 32

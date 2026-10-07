@@ -26,9 +26,6 @@ def handle_exit_signal(signum, frame):
 signal.signal(signal.SIGINT, handle_exit_signal)
 signal.signal(signal.SIGTERM, handle_exit_signal)
 
-
-# default_model = "OmniCoder-9B-int4-sym-g128-se-awq"
-
 def main():
     args_parser = argparse.ArgumentParser()
     add_openvino_args(args_parser)

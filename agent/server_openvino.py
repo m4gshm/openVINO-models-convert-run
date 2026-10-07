@@ -142,7 +142,7 @@ def run_openvino(args):
 
     logging.config.dictConfig(base_log_config)
 
-    log.info("server starting")
+    log.info(f"server starting with arguments application arguments: {args}")
 
     # --- Detect model architecture from config.json ---
     model_architectures: set[str] = set()
@@ -454,7 +454,7 @@ def run_openvino(args):
     draft_model = args.draft_model
     draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
     if draft_model_path:
-        draft_properties = {
+        draft_properties: dict[str, Any] = {
             "CACHE_DIR": model_cache_dir
         }
         eagle3_mode = args.eagle3_mode == Turn.on.value
@@ -463,8 +463,10 @@ def run_openvino(args):
         mtp_mode = args.mtp_mode == Turn.on.value
         if mtp_mode:
             draft_properties["mtp_mode"] = True
+        dflash_mode = args.dflash_mode == Turn.on.value
+        if dflash_mode:
+            draft_properties["dflash_mode"] = True
         draft_scheduler_config = SchedulerConfig()
-        draft_scheduler_config.enable_prefix_caching = False
         draft_model = py_openvino_genai.draft_model(models_path=draft_model_path, device=device_value,
                                                     scheduler_config=draft_scheduler_config, **draft_properties)
         pipeline_properties["draft_model"] = draft_model
@@ -753,6 +755,8 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--eagle3_mode", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--mtp_mode", type=str, required=False,
+                             default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--dflash_mode", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
 
 
