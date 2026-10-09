@@ -24,6 +24,11 @@ from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_
     veai_fix_incorrect_arguments
 from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str, TokenHandler, \
     TokenHandlerConfig
+from agent.multimodal.content_parts import content_text
+from agent.multimodal.media_error import MediaError
+from agent.multimodal.media_inputs import MediaInputs, MediaLimits
+from agent.multimodal.modality import Modalities, Modality
+from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
@@ -64,6 +69,23 @@ class ControllerConfig(BaseModel):
     is_fix_tool_type: bool = True
     is_detect_cycled_tool_call: bool = True
     chat_template: str = ''
+    modalities: set[str] = {Modality.TEXT.value}
+    max_media_bytes: int = 20 * 1024 * 1024
+    max_media_items: int = 16
+    allow_local_media_files: bool = False
+    media_http_timeout: float = 30.0
+    media_audio_sample_rate: int = 16000
+
+    def modalities_of(self) -> Modalities:
+        """Accepted input modalities of the configured model."""
+        return Modalities(frozenset(Modality(name) for name in self.modalities | {Modality.TEXT.value}))
+
+    def media_limits(self) -> MediaLimits:
+        """Media size and count limits of a single request."""
+        return MediaLimits(max_bytes=self.max_media_bytes, max_items=self.max_media_items,
+                           allow_local_files=self.allow_local_media_files,
+                           http_timeout=self.media_http_timeout,
+                           audio_sample_rate=self.media_audio_sample_rate)
 
 
 def new_http_response_chat(stream: bool,
@@ -273,12 +295,12 @@ class BaseController(ABC):
 
         last_message = messages[-1] if messages else None
         if last_message:
-            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in str(
-                    last_message.content).lower():
+            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in \
+                    content_text(last_message.content).lower():
                 return new_http_response_chat(stream, [
                     new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
             elif last_message.role == ROLE_TOOL:
-                log_client_generated.debug(last_message.content)
+                log_client_generated.debug(content_text(last_message.content))
 
         invalid_response = self.validate_messages(messages, body.tools)
         return new_http_response_chat(stream, [invalid_response]) if invalid_response \
@@ -319,6 +341,7 @@ class BaseOVController(BaseController):
         return ModelsListResponse(data=[ModelObject(
             id=self.config.model_name,
             max_model_len=self.config.max_prompt_len,
+            supported_modalities=self.config.modalities_of().names(),
             created=current_time,
         )])
 
@@ -348,10 +371,20 @@ class BaseOVController(BaseController):
         if model_parameters:
             extra_context = model_parameters
 
-        chat_history = new_chat_history(messages, tools_raw)
+        try:
+            prepared = await asyncio.to_thread(
+                prepare_messages, messages, self.config.modalities_of(), self.config.media_limits())
+        except MediaError as e:
+            log.info("multimodal request rejected: %s", e)
+            return new_http_response_chat(stream, [new_chat_completion_chunk(
+                response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name,
+                content=str(e), finish_reason=STOP)])
+
+        chat_history = new_chat_history(prepared.messages, tools_raw)
+        media = prepared.media
         history_get_messages = chat_history.get_messages()
         log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
-                  f"extra_context={extra_context}")
+                  f"extra_context={extra_context}, media='{media.summary()}'")
 
         prompt = self.tokenizer.apply_chat_template(history=chat_history,
                                                     tools=tools_raw,
@@ -391,7 +424,7 @@ class BaseOVController(BaseController):
                 f"frequency_penalty={generation_config.frequency_penalty:.2f}"
             )
         else:
-            self.log_inference.info(f"inference start")
+            self.log_inference.info(f"inference start, media='{media.summary()}'")
 
         user_context = get_veai_context(messages) if is_veai else UserContext()
         user_context.messages = messages
@@ -408,13 +441,20 @@ class BaseOVController(BaseController):
                                      )
 
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               token_handler=token_handler)
+                                               token_handler=token_handler, media=media)
         return new_http_response_chat(stream, chunk_generator)
 
     @abstractmethod
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler) -> \
-            Iterable[ChatCompletionChunk]:
-        pass
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler,
+                        media: MediaInputs) -> Iterable[ChatCompletionChunk]:
+        """Run generation for the prepared prompt and stream chat completion chunks.
+
+        Args:
+            prompt: rendered prompt text, may contain OpenVINO media tags.
+            generation_config: generation parameters of this call.
+            token_handler: streaming token handler of the response.
+            media: decoded image/video/audio inputs referenced by the prompt tags.
+        """
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
         prompt = body.prompt
@@ -448,7 +488,8 @@ class BaseOVController(BaseController):
         return new_http_response_chat(stream, [over_limit_response]) if over_limit_response \
             else new_http_response_completions(stream,
                                                self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                                                    token_handler=token_handler))
+                                                                    token_handler=token_handler,
+                                                                    media=MediaInputs.empty()))
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         if encode_size >= max_length:
@@ -496,11 +537,11 @@ def is_disconnected(request: Request) -> bool:
     return disconnected
 
 
-def new_chat_history(messages: list[ChatCompletionMessageParam],
+def new_chat_history(messages: list[ChatCompletionMessageParam] | list[dict],
                      tools_raw: list[dict[str, Any]] | None = None) -> ChatHistory:
     chat_history = ChatHistory()
     for message in messages:
-        model_dump = message.model_dump()
+        model_dump = message.model_dump() if hasattr(message, "model_dump") else message
         chat_history.append(model_dump)
     if tools_raw:
         chat_history.set_tools(tools_raw)

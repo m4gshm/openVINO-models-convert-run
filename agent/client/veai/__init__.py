@@ -7,6 +7,7 @@ from typing import Any
 
 from agent.client import is_agent
 from agent.client.user_context import UserContext, UserContextFiles, OS
+from agent.multimodal.content_parts import content_text
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
 
 END_LINE = "end_line"
@@ -57,7 +58,7 @@ def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext 
     if not first_message:
         return None
 
-    content = first_message.content
+    content = content_text(first_message.content)
 
     context = _get_context(content)
     if context:
@@ -256,7 +257,7 @@ def parse_arguments(function: Function) -> Any:
 
 
 def parse_content(message: ChatCompletionMessageParam) -> Any:
-    content = message.content
+    content = content_text(message.content)
     try:
         parsed_content = json.loads(content)
     except Exception as e:

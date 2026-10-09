@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandlerConfig
+from agent.multimodal.model_capabilities import read_media_capabilities, resolve_modalities
 from agent.openai import get_default_generate_opts, GenerateOpts, get_default_scheduler_opts, SchedulerOpts
 from agent.openai.engine_rest_cb import ContinuousBatchingController
 from agent.openai.engine_rest_common import ControllerConfig
@@ -169,6 +170,10 @@ def run_openvino(args):
         log.error(f"file or directory doesn't exists: '{model_path}'")
         sys.exit(1)
 
+    # --- Detect media capabilities of the model itself (vision / audio encoders) ---
+    media_capabilities = read_media_capabilities(model_path)
+    log.info(f"model media capabilities: {media_capabilities.describe()}")
+
     default_generate_opts = get_default_generate_opts()
     # --- Load generate options from file or use defaults ---
     generate_opts_file = args.generate_config_file
@@ -299,6 +304,10 @@ def run_openvino(args):
         elif is_lfm or is_qwen2:
             parser_type = ParserType.lfm2
             pipe = or_default_pipe(pipe, Pipe.LLM)
+
+    if not pipe and media_capabilities.has_media:
+        pipe = or_default_pipe(pipe, Pipe.VLM)
+        log.info(f"pipe selected by model media capabilities: {enum_value(pipe)}")
 
     if not pipe:
         log.error(f"need define --pipe for model architectures={model_architectures}")
@@ -472,11 +481,24 @@ def run_openvino(args):
         pipeline_properties["draft_model"] = draft_model
 
     # --- Build controller and handler configs ---
+    modalities = resolve_modalities(media_capabilities, model_architectures, enum_value(pipe))
+    allow_local_media_files = args.allow_local_media_files == enum_value(Turn.on)
+    log.info("input modalities: %s, pipe=%s, model media: %s",
+             modalities.names(), enum_value(pipe), media_capabilities.describe())
+    if media_capabilities.has_media and not modalities.media_names():
+        log.warning("model has media encoders (%s) but the engine accepts text only, "
+                    "media requests will be rejected", media_capabilities.describe())
+
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
                                          is_fix_tool_type=is_fix_tool_type,
                                          chat_template=chat_template,
-                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call)
+                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call,
+                                         modalities=set(modalities.names()),
+                                         max_media_bytes=args.max_media_mb * 1024 * 1024,
+                                         max_media_items=args.max_media_items,
+                                         media_audio_sample_rate=media_capabilities.audio_sample_rate,
+                                         allow_local_media_files=allow_local_media_files)
 
     handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
@@ -752,6 +774,13 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=enum_value(Level.HIGH), choices=enum_values(Level), help="%(default)s")
     args_parser.add_argument("--prompt_lookup", type=str, required=False,
                              default=enum_value(Turn.off), choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--max_media_mb", type=int, required=False, default=20,
+                             help="%(default)s, size limit of a single image or audio attachment")
+    args_parser.add_argument("--max_media_items", type=int, required=False, default=16,
+                             help="%(default)s, media attachments allowed in one request")
+    args_parser.add_argument("--allow_local_media_files", type=str, required=False,
+                             default=enum_value(Turn.off), choices=enum_values(Turn),
+                             help="read media referenced by a local file path, not only base64 and http(s)")
     args_parser.add_argument("--eagle3_mode", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--mtp_mode", type=str, required=False,

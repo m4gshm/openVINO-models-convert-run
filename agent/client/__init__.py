@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable
 
+from agent.multimodal.content_parts import content_text
 from agent.openai.chat_completions_api import ChatCompletionMessageParam
 from agent.parser import ParsedFunctionCall
 
@@ -22,14 +23,4 @@ def check_agent(messages: list[ChatCompletionMessageParam], check: Callable[...,
     first_message = messages[0] if messages else None
     if not first_message:
         return False
-
-    content = first_message.content
-    if isinstance(content, str):
-        return check(content)
-    elif isinstance(content, list):
-        for message in content:
-            for k in message.keys():
-                if check(k):
-                    return True
-
-    return False
+    return check(content_text(first_message.content))

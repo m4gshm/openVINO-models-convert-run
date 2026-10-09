@@ -11,6 +11,9 @@ dependencies = [
     "json-repair==0.60.1",
     "openai==2.48.0",
     "psutil==7.2.2",
+    "httpx>=0.24.0",
+    "numpy",
+    "pillow>=11",
 ]
 
 [project.optional-dependencies]

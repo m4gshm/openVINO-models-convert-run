@@ -528,6 +528,42 @@ def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]]
         if isinstance(edits, list):
             edits.extend(dirty_edits)
             unused_anonymous_edits.extend(handle_edits(edits))
+
+    if isinstance(edits, list):
+        # merge with next if its need
+        on_delete_i = []
+        i = 0
+        while i < len(edits):
+            edit = edits[i]
+            if isinstance(edit, dict):
+                has_next_text = "new_text" in edit
+                has_old_text = "old_text" in edit
+                if has_next_text and has_old_text:
+                    pass
+                else:
+                    ii = i + 1
+                    if ii < len(edits):
+                        next_edit = edits[ii]
+                        if "new_text" in next_edit and "old_text" in next_edit:
+                            pass
+                        else:
+                            if has_next_text and "old_text" in next_edit:
+                                edit["old_text"] = next_edit["old_text"]
+                                on_delete_i.append(ii)
+                                i = ii
+                            elif has_old_text and "new_text" in next_edit:
+                                edit["new_text"] = next_edit["new_text"]
+                                on_delete_i.append(ii)
+                                i = ii
+            i += 1
+
+        for i in reversed(on_delete_i):
+            try:
+                del edits[i]
+            except Exception as e:
+                log.error(f"error on del edits[{i}]: {e}, edits={edits}")
+                raise e
+
     return edits, unused_anonymous_edits
 
 

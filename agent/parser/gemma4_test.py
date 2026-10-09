@@ -902,8 +902,8 @@ class TestAddFunction(unittest.TestCase):
                                                  '    // Note: Specific Podman setup might require '
                                                  'separate configuration not covered by standard '
                                                  'dependencies. \n'
-                                                 '    \n'},
-                                    {'old_text': '    '
+                                                 '    \n',
+                                     'old_text': '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\n'}]},
                          fixed.arguments)
         self.assertEqual([], first.anonymous_arguments)

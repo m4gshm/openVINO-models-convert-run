@@ -27,6 +27,7 @@ class ModelObject(BaseModel):
     root: Optional[str] = None
     parent: Optional[str] = None
     max_model_len: Optional[int] = None
+    supported_modalities: Optional[List[str]] = None
 
 
 class ModelsListResponse(BaseModel):

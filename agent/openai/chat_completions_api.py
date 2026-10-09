@@ -1,7 +1,6 @@
 from typing import List, Optional, Union, Dict, Any
 
 from openai.types.chat import ChatCompletionToolChoiceOptionParam
-from openai.types.chat.chat_completion_assistant_message_param import ContentArrayOfContentPart
 from pydantic import BaseModel, ConfigDict, Field
 
 CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
@@ -28,10 +27,45 @@ class ResponseFormat(BaseModel):
     type: str = "text"  # Can be "text" or "json_object"
 
 
+class ContentPartUrl(BaseModel):
+    """``image_url`` / ``video_url`` / ``audio_url`` nested object."""
+    model_config = ConfigDict(extra="allow")
+    url: str = ""
+    detail: Optional[str] = None
+    media_type: Optional[str] = None
+
+
+class ContentPartAudio(BaseModel):
+    """``input_audio`` nested object with inline base64 payload."""
+    model_config = ConfigDict(extra="allow")
+    data: str = ""
+    format: Optional[str] = None
+    media_type: Optional[str] = None
+
+
+class ChatCompletionContentPartParam(BaseModel):
+    """One content part of a message: text, image, audio or video.
+
+    Declared leniently (extra fields allowed) to accept vendor specific shapes:
+    OpenAI ``image_url``/``input_audio``, HuggingFace style ``image``/``audio``/``video``.
+    """
+    model_config = ConfigDict(extra="allow")
+    type: str = "text"  # "text", "image_url", "input_audio", "video_url", "image", "audio", "refusal"
+    text: Optional[str] = None
+    refusal: Optional[str] = None
+    image_url: Optional[ContentPartUrl] = None
+    video_url: Optional[ContentPartUrl] = None
+    audio_url: Optional[ContentPartUrl] = None
+    input_audio: Optional[ContentPartAudio] = None
+    image: Optional[str] = None
+    video: Optional[str] = None
+    audio: Optional[str] = None
+
+
 class ChatCompletionMessageParam(BaseModel):
     model_config = ConfigDict(extra="allow")
     role: str  # "system", "user", "assistant", "tool", or "function"
-    content: Optional[Union[str, List[ContentArrayOfContentPart]]] = None
+    content: Optional[Union[str, List[ChatCompletionContentPartParam]]] = None
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_calls: Optional[List[ChatCompletionMessageFunctionToolCallParam]] = None

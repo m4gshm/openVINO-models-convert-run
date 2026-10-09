@@ -24,6 +24,22 @@ from agent.openai.engine_rest_common import ControllerConfig, BaseController, ne
 log = logging.getLogger(__name__)
 
 
+def remote_modalities(model: object) -> list[str] | None:
+    """Modalities declared by the remote endpoint for one model entry.
+
+    The OpenAI response schema has no such field (``Model`` is id/object/created/owned_by), but
+    servers commonly add it as an extension, and the SDK keeps unknown fields. When the remote
+    stays silent the result is None, so ``/v1/models`` omits the field instead of guessing it.
+    """
+    declared = getattr(model, "supported_modalities", None)
+    if declared is None:
+        declared = (getattr(model, "model_extra", None) or {}).get("supported_modalities")
+    if not isinstance(declared, (list, tuple, set)):
+        return None
+    names = sorted({name for name in declared if isinstance(name, str) and name})
+    return names or None
+
+
 class OpenAiController(BaseController):
     """
     OpenAI-compatible controller that uses OpenAI Python SDK to call
@@ -59,7 +75,8 @@ class OpenAiController(BaseController):
     async def models(self) -> ModelsListResponse:
         models = self.client.models.list()
         data = models.data
-        result = [ModelObject(created=m.created, id=m.id, owned_by=m.owned_by, ) for m in data]
+        result = [ModelObject(created=m.created, id=m.id, owned_by=m.owned_by,
+                              supported_modalities=remote_modalities(m)) for m in data]
         return ModelsListResponse(data=result)
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
@@ -71,9 +88,11 @@ class OpenAiController(BaseController):
         response_id = str(uuid.uuid4())
 
         body_model = body.model
+        # Content parts (images, audio) are forwarded as they came: plain dicts keep the payload intact.
+        messages = [message.model_dump(mode="json", exclude_none=True) for message in body.messages]
         stream = self.client.chat.completions.create(model=body_model,
                                                      stream=body.stream | True,
-                                                     messages=body.messages)
+                                                     messages=messages)
 
         def chunk_generator() -> Iterable[ChatCompletionChunk]:
             try:

@@ -4,23 +4,62 @@ import threading
 import uuid
 from collections import abc
 from concurrent.futures import ThreadPoolExecutor
-from typing import Iterable
+from typing import Any, Iterable
 from typing import SupportsInt, Literal
 
 from openai.types.chat import ChatCompletionChunk
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
 from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
     VLMDecodedResults, GenerationConfig
-from starlette.responses import JSONResponse
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
+from agent.multimodal.media_error import MediaUnsupportedError
+from agent.multimodal.media_inputs import MediaInputs
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
 from agent.openai.engine_rest_common import ControllerConfig, BaseOVController, add_stop_signal, get_tokens_size
 from agent.parser import Parser
 
 log = logging.getLogger(__name__)
+
+
+def generate_vlm(pipe: VLMPipeline, prompt: str, generation_config: GenerationConfig,
+                 streamer: "StreamerWrapper", media: MediaInputs) -> VLMDecodedResults:
+    """Run VLMPipeline generation passing only the media modalities the request carries.
+
+    Prompt text refers to the tensors by OpenVINO media tags, so empty lists are omitted to
+    keep compatibility with pipeline versions that do not declare all media parameters.
+    """
+    kwargs = media.generate_kwargs()
+    if kwargs:
+        log.info("vlm generation with media: %s", media.summary())
+    try:
+        return pipe.generate(prompt=prompt, generation_config=generation_config, streamer=streamer, **kwargs)
+    except TypeError as e:
+        raise TypeError(f"pipeline does not accept media inputs {sorted(kwargs)}: {e}") from e
+
+
+def vlm_metrics_str(metrics: Any) -> str:
+    """Extra VLM metrics of a generation: vision/audio encoding time and image slices."""
+    parts: list[str] = []
+    for name, getter in (("prepare_embeddings", "get_prepare_embeddings_duration"),
+                         ("vision_encoding", "get_vision_encoding_duration"),
+                         ("audio_encoding", "get_audio_encoding_duration"),
+                         ("text_embedding", "get_text_embedding_duration")):
+        method = getattr(metrics, getter, None)
+        if not callable(method):
+            continue
+        value = method()
+        mean = getattr(value, "mean", None)
+        if mean:
+            parts.append(f"{name}={mean:.2f}ms")
+    image_slices = getattr(metrics, "get_total_image_slice_count", None)
+    if callable(image_slices):
+        slices = image_slices()
+        if slices:
+            parts.append(f"image_slices={slices}")
+    return f", {', '.join(parts)}" if parts else ""
 
 
 class VlmController(BaseOVController):
@@ -32,7 +71,7 @@ class VlmController(BaseOVController):
         self.request_lock = threading.Lock()
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        token_handler: TokenHandler) -> Iterable[ChatCompletionChunk]:
+                        token_handler: TokenHandler, media: MediaInputs) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
 
@@ -73,6 +112,7 @@ class VlmController(BaseOVController):
                             f"inference_duration={to_str(metrics.get_inference_duration())}, "
                             f"ttft={to_str(metrics.get_ttft())}, "
                             f"throughput={to_str(metrics.get_throughput())}")
+                        log_msg += vlm_metrics_str(metrics)
                     if self.log_inference.isEnabledFor(logging.DEBUG):
                         texts = generate_result.texts if isinstance(generate_result,
                                                                     DecodedResults) else generate_result
@@ -102,10 +142,11 @@ class VlmController(BaseOVController):
             def start_generate_result(streamer: StreamerWrapper) -> VLMDecodedResults:
                 pipe = self.pipe
                 if isinstance(pipe, VLMPipeline):
-                    vlm_pipe: VLMPipeline = pipe
-                    generate_result = vlm_pipe.generate(prompt=prompt, generation_config=generation_config,
-                                                        streamer=streamer)
+                    generate_result = generate_vlm(pipe, prompt, generation_config, streamer, media)
                 elif isinstance(pipe, LLMPipeline):
+                    if not media.is_empty():
+                        raise MediaUnsupportedError(
+                            "LLM pipeline cannot take media inputs, load the model with --pipe VLM")
                     llm_pipe: LLMPipeline = pipe
                     generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
                                                         streamer=streamer)
@@ -183,54 +224,3 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
         elif stop_signal == StopSignal.CANCEL:
             return StreamingStatus.CANCEL
         return StreamingStatus.RUNNING
-
-    async def slots(self) -> JSONResponse:
-        """slots endpoint — returns slot info for VLM/LLM pipeline.
-        
-        Uses pipeline metrics to provide basic slot/cache information.
-        Override in subclasses for more detailed slot tracking.
-        """
-        try:
-            metrics = self.pipe.get_metrics()
-
-            # Get real OpenVINO GenAI metrics
-            kv_cache_size_mb = metrics.kv_cache_size_in_bytes / 1024 / 1024 if hasattr(metrics,
-                                                                                       'kv_cache_size_in_bytes') else 0
-            cache_size_mb = metrics.cache_size_in_bytes / 1024 / 1024 if hasattr(metrics, 'cache_size_in_bytes') else 0
-            cache_usage = metrics.cache_usage if hasattr(metrics, 'cache_usage') else 0
-            max_cache_usage = metrics.max_cache_usage if hasattr(metrics, 'max_cache_usage') else 0
-            requests = metrics.requests if hasattr(metrics, 'requests') else 0
-            scheduled_requests = metrics.scheduled_requests if hasattr(metrics, 'scheduled_requests') else 0
-
-            # Calculate cache utilization percentage
-            if cache_size_mb > 0 and cache_usage is not None:
-                cache_utilization_pct = (cache_usage / cache_size_mb * 100) if cache_size_mb > 0 else 0.0
-            else:
-                cache_utilization_pct = 0.0
-
-            return JSONResponse(content={
-                "slots": [],
-                "kv_cache_size_mb": round(kv_cache_size_mb, 2),
-                "cache_size_mb": round(cache_size_mb, 2),
-                "cache_usage": cache_usage,
-                "max_cache_usage": max_cache_usage,
-                "cache_utilization_pct": round(cache_utilization_pct, 2),
-                "active_requests": requests,
-                "scheduled_requests": scheduled_requests,
-                "active_slots": 0
-            })
-        except Exception:
-            # Fallback if get_metrics() not available
-            from starlette import status
-            from starlette.responses import JSONResponse
-            return JSONResponse(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                content={
-                    "error": {
-                        "message": "Slots not supported in this configuration",
-                        "type": "not_implemented",
-                        "param": None,
-                        "code": 501
-                    }
-                }
-            )

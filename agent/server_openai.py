@@ -35,6 +35,8 @@ def run_openai_proxy(args):
     from agent.inference.token_handler import TokenHandlerConfig
 
     # --- Build configuration objects ---
+    # The proxy neither decodes media nor judges capabilities: content parts are forwarded as they
+    # came, and /v1/models reports what the remote endpoint declares for each of its models.
     controller_config = ControllerConfig(
         max_prompt_len=4096,
         model_architectures=set(),
