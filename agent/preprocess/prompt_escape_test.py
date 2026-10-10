@@ -51,8 +51,8 @@ class EscapeCase(unittest.TestCase):
     escaper = PromptEscaper.of_tokenizer(QWEN_LIKE)
 
     def test_media_tags(self):
-        escaped = MEDIA_TAGS_ONLY.escape("see `<ov_genai_image_0>`, <ov_genai_video_12> and <ov_genai_audio_1>")
-        self.assertEqual(f"see `<{ZWS}ov_genai_image_0>`, <{ZWS}ov_genai_video_12> and <{ZWS}ov_genai_audio_1>",
+        escaped = MEDIA_TAGS_ONLY.escape("see `<ov_genai_image_0>`, <ov_genai_video_12>")
+        self.assertEqual(f"see `<{ZWS}ov_genai_image_0>`, <{ZWS}ov_genai_video_12>",
                          escaped)
 
     def test_not_a_tag(self):

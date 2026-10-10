@@ -74,7 +74,7 @@ class PrepareMediaCase(unittest.TestCase):
 
     def test_audio_part_becomes_tag_and_tensor(self):
         prepared = prepare_messages([user([audio_part()])], OMNI)
-        self.assertEqual("<ov_genai_audio_0>", prepared.messages[0]["content"])
+        self.assertEqual("", prepared.messages[0]["content"])
         self.assertEqual(1, len(prepared.media.audios))
 
     def test_media_tag_indexes_are_conversation_absolute(self):
@@ -88,7 +88,7 @@ class PrepareMediaCase(unittest.TestCase):
 
     def test_each_modality_has_its_own_index(self):
         prepared = prepare_messages([user([image_part(), audio_part(), image_part()])], OMNI)
-        self.assertEqual("<ov_genai_image_0><ov_genai_audio_0><ov_genai_image_1>",
+        self.assertEqual("<ov_genai_image_0><ov_genai_image_1>",
                          prepared.messages[0]["content"])
         self.assertEqual(2, len(prepared.media.images))
         self.assertEqual(1, len(prepared.media.audios))

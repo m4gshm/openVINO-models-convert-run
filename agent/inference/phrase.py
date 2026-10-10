@@ -2,6 +2,9 @@ import logging
 
 from agent.inference.loop_error import LoopError, ERROR_APPEARS_TO_BE_A_LOOP
 
+NEW_LINE_UNIX = '\n'
+NEW_LINE_WINDOWS = "\r\n"
+
 DEFAULT_DUPLICATED_TOKENS_LIMIT = 100
 
 IGNORE_DUPLICATED_PARTS_SIZE = 10
@@ -423,7 +426,7 @@ class Phrase:
             if not token_part:
                 pass
             add_token(token_part, self.current_line)
-            if not token_part.endswith('\n') or token_part.endswith("\r\n"):
+            if not token_part.endswith(NEW_LINE_UNIX) or token_part.endswith(NEW_LINE_WINDOWS):
                 if self.is_detect_looped_inference and len(
                         self.current_line) > self.in_line_duplicates_detect_start_amount:
                     duplicates_check_tail = self.current_line[self.in_line_duplicates_detect_start_amount:]

@@ -1,7 +1,7 @@
 """Preparation of chat messages that carry images or audio for OpenVINO GenAI generation.
 
 OpenVINO GenAI expands universal media tags placed in the prompt
-(``<ov_genai_image_0>``, ``<ov_genai_audio_1>``, ...), so a multimodal OpenAI request is
+(``<ov_genai_image_0>``, ``<ov_genai_video_1>``, ...), so a multimodal OpenAI request is
 turned into two artifacts:
 
 * messages with ``content`` flattened to a plain string containing the tags,
@@ -28,7 +28,6 @@ CONTENT_KEY = "content"
 MEDIA_TAG_TEMPLATES = {
     Modality.IMAGE: "<ov_genai_image_{}>",
     Modality.VIDEO: "<ov_genai_video_{}>",
-    Modality.AUDIO: "<ov_genai_audio_{}>",
 }
 
 
@@ -103,7 +102,11 @@ def _flatten_content(parts: list, modalities: Modalities, loader: MediaLoader,
             raise MediaUnsupportedError(unsupported_message(ref.modality, modalities),
                                         modality=ref.modality.value)
         index = loader.load(ref, media)
-        pieces.append(MEDIA_TAG_TEMPLATES[ref.modality].format(index))
+        if ref.modality in MEDIA_TAG_TEMPLATES:
+            pieces.append(MEDIA_TAG_TEMPLATES[ref.modality].format(index))
+        else:
+            log.info("modality '%s' has no universal tag, tensor is passed but no text placeholder",
+                     ref.modality.value)
     return "".join(pieces)
 
 

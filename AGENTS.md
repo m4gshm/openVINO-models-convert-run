@@ -121,7 +121,7 @@ external demuxer — send frames as images.
 
 Every request repeats the whole conversation (the OpenAI protocol is stateless), so media of
 earlier turns is sent and decoded again; each item becomes an OpenVINO tag in the prompt
-(`<ov_genai_image_0>`, `<ov_genai_audio_1>`, ...). Media expands the prompt with many tokens, so
+(`<ov_genai_image_0>`, `<ov_genai_video_1>`). Media expands the prompt with many tokens, so
 `--max_prompt_len` must leave room for it.
 
 ## Code Quality Rules

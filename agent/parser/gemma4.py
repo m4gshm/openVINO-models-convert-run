@@ -8,6 +8,9 @@ from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall
 from agent.parser.json_fixer import try_to_parse_json_arguments, OBJECT_START, OBJECT_END, ARRAY_START, ARRAY_END
 
+NEW_LINE_UNIX = "\n"
+NEW_LINE_WINDOWS = "\r\n"
+
 ROLE = "model"
 
 EXPECTED_PROPERTY_TYPE = 'type'
@@ -317,7 +320,7 @@ def strip_unquote_if_wrapped_by_empty_and_quoted(val: Any):
         return val
 
 
-unescaped = [("\\\"", "\""), ("\\r\\n", "\n"), ("\r\n", "\n"), ("\\n", "\n"), ("\\t", "\t")]
+unescaped = [("\\\"", "\""), ("\\r\\n", NEW_LINE_WINDOWS), (NEW_LINE_WINDOWS, NEW_LINE_UNIX), ("\\n", NEW_LINE_UNIX), ("\\t", "\t")]
 
 
 def unescape(val: str | Any):
@@ -348,20 +351,6 @@ def cast_value(val: str | Any):
         elif low_val == "true":
             return True
     return val
-
-
-# new_line_map = [("\r\n", "\n")]
-#
-#
-# def normalize_new_line(val: str | Any):
-#     if isinstance(val, str):
-#         for (old, new) in new_line_map:
-#             if old in val:
-#                 after = val.replace(old, new)
-#                 log.debug(f"normalize_new_line '{old}' by '{new}':\nbefore={val}\nafter={after}")
-#                 val = after
-#     return val
-
 
 def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
     log.debug(f"parse array from '{array_str}'")

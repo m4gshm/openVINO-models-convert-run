@@ -26,6 +26,9 @@ from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam, F
 from agent.parser import ParsedFunctionCall
 from agent.parser.json_fixer import try_to_parse_json_arguments
 
+NEW_LINE_UNIX = "\n"
+NEW_LINE_WINDOWS = "\r\n"
+
 GEMMA_4 = "Gemma4ForConditionalGeneration"
 
 TARGET_FILE = "target_file"
@@ -404,7 +407,7 @@ def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, conte
 
 
 def split_lines(file_content_str: str) -> list[str]:
-    return file_content_str.split("\r\n" if "\r\n" in file_content_str else "\n")
+    return file_content_str.split(NEW_LINE_WINDOWS if NEW_LINE_WINDOWS in file_content_str else NEW_LINE_UNIX)
 
 
 def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], context: UserContext,
