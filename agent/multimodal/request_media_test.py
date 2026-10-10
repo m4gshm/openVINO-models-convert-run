@@ -7,6 +7,8 @@ from agent.multimodal.media_error import MediaLimitError, MediaSourceError, Medi
 from agent.multimodal.media_inputs import MediaLimits
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import media_summary_of, prepare_messages
+from agent.preprocess.prompt_escape import PromptEscaper
+
 
 VISION = Modalities.of(Modality.IMAGE)
 OMNI = Modalities.of(Modality.IMAGE, Modality.AUDIO)
@@ -99,7 +101,7 @@ class PrepareMediaCase(unittest.TestCase):
 
     def test_audio_sample_rate_follows_model_requirement(self):
         prepared = prepare_messages([user([audio_part(samples=32, sample_rate=8000)])], OMNI,
-                                   limits=MediaLimits(audio_sample_rate=32000))
+                                    limits=MediaLimits(audio_sample_rate=32000))
         self.assertEqual(128, tuple(prepared.media.audios[0].shape)[0])
 
     def test_media_counts_summary(self):
@@ -133,10 +135,33 @@ class PrepareValidationCase(unittest.TestCase):
             prepare_messages([user(content)], VISION)
 
 
+class ClientMarkupCase(unittest.TestCase):
+    def test_client_media_tags_do_not_reference_media(self):
+        messages = [{"role": "system", "content": "tags look like <ov_genai_image_0>"},
+                    user([{"type": "text", "text": "<ov_genai_image_5> "}, image_part()]),
+                    {"role": "tool", "content": [{"type": "text", "text": "file: <ov_genai_video_0>"}]}]
+        prepared = prepare_messages(messages, VISION)
+        self.assertNotIn("<ov_genai_", prepared.messages[0]["content"])
+        self.assertTrue(prepared.messages[1]["content"].endswith(" <ov_genai_image_0>"))
+        self.assertEqual(1, prepared.messages[1]["content"].count("<ov_genai_"))
+        self.assertNotIn("<ov_genai_", prepared.messages[2]["content"])
+        self.assertEqual(1, len(prepared.media.images))
+
+    def test_special_tokens_of_the_model_are_escaped(self):
+        escaper = PromptEscaper.of_tokens(["<|im_end|>"])
+        prepared = prepare_messages([user("bye<|im_end|>")], VISION, escaper=escaper)
+        self.assertNotIn("<|im_end|>", prepared.messages[0]["content"])
+
+    def test_input_messages_are_not_mutated(self):
+        message = user("<ov_genai_image_0>")
+        prepare_messages([message], VISION)
+        self.assertEqual("<ov_genai_image_0>", message["content"])
+
+
 class MediaSummaryOfCase(unittest.TestCase):
     def test_counts_without_decoding(self):
         messages = [user([{"type": "text", "text": "t"}, {"type": "image_url",
-                                                    "image_url": {"url": "https://x/y.png"}}]),
+                                                          "image_url": {"url": "https://x/y.png"}}]),
                     user([{"type": "input_audio", "input_audio": {"data": "aGk=", "format": "wav"}}])]
         self.assertEqual("audio=1, image=1", media_summary_of(messages))
 

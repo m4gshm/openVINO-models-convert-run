@@ -18,6 +18,8 @@ from agent.multimodal.content_parts import as_dict, segments_of
 from agent.multimodal.media_error import MediaError, MediaUnsupportedError
 from agent.multimodal.media_inputs import MediaInputs, MediaLimits, MediaLoader
 from agent.multimodal.modality import Modalities, Modality
+from agent.preprocess.prompt_escape import MEDIA_TAGS_ONLY, PromptEscaper
+
 
 log = logging.getLogger(__name__)
 
@@ -55,13 +57,16 @@ def unsupported_message(modality: Modality, modalities: Modalities) -> str:
 
 
 def prepare_messages(messages: list[dict], modalities: Modalities,
-                     limits: MediaLimits | None = None) -> PreparedMessages:
+                     limits: MediaLimits | None = None,
+                     escaper: PromptEscaper = MEDIA_TAGS_ONLY) -> PreparedMessages:
     """Flatten multimodal content parts into prompt text with media tags and decode the media.
 
     Args:
         messages: OpenAI chat messages as dicts (``model_dump()`` of request models).
         modalities: modalities accepted by the running model.
         limits: media size/count limits of a single request.
+        escaper: neutralizes media tags and special tokens written by the client, applied to
+            every string of a message before the server inserts tags of the real attachments.
 
     Returns:
         PreparedMessages with ChatHistory compatible dicts and decoded media tensors.
@@ -74,7 +79,7 @@ def prepare_messages(messages: list[dict], modalities: Modalities,
     media = MediaInputs()
     prepared: list[dict] = []
     for message in messages:
-        message_dict = as_dict(message)
+        message_dict = escaper.escape_in(as_dict(message))
         content = message_dict.get(CONTENT_KEY)
         if isinstance(content, list):
             message_dict[CONTENT_KEY] = _flatten_content(content, modalities, loader, media)

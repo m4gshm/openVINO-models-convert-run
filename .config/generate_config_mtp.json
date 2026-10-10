@@ -5,6 +5,6 @@
   },
   "do_sample": false,
   "num_return_sequences": 1,
-  "num_assistant_tokens": 3,
+  "num_assistant_tokens": 5,
   "max_new_tokens": 20000000
 }

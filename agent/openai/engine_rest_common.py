@@ -10,6 +10,8 @@ from typing import Any, Literal, Iterable
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
+from openvino_genai import ChatHistory
+from openvino_genai import Tokenizer
 from openvino_genai.py_openvino_genai import GenerationConfig
 from pydantic import BaseModel
 from starlette import status
@@ -37,9 +39,9 @@ from agent.openai.chat_completions_api import ChatCompletionRequest, ChatComplet
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
+from agent.preprocess.prompt_escape import PromptEscaper, MEDIA_TAGS_ONLY
 from agent.preprocess.tool_call import PreprocessToolCall
-from openvino_genai import ChatHistory
-from openvino_genai import Tokenizer
+
 
 STOP: Literal["stop"] = "stop"
 LENGTH: Literal["length"] = "length"
@@ -330,6 +332,8 @@ class BaseOVController(BaseController):
         # self.handler_config = handler_config
         # self.config = config
         self.tokenizer = tokenizer
+        self.prompt_escaper = PromptEscaper.of_tokenizer(tokenizer)
+
         # self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
         # self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
         # self.log_inference = inference.log
@@ -365,6 +369,7 @@ class BaseOVController(BaseController):
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
         tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
+        tools_raw = self.prompt_escaper.escape_in(tools_raw)
 
         extra_context = {}
         model_parameters = self.generate_opts.model_parameters
@@ -373,7 +378,8 @@ class BaseOVController(BaseController):
 
         try:
             prepared = await asyncio.to_thread(
-                prepare_messages, messages, self.config.modalities_of(), self.config.media_limits())
+                prepare_messages, messages, self.config.modalities_of(), self.config.media_limits(),
+                self.prompt_escaper)
         except MediaError as e:
             log.info("multimodal request rejected: %s", e)
             return new_http_response_chat(stream, [new_chat_completion_chunk(
@@ -457,9 +463,10 @@ class BaseOVController(BaseController):
         """
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
-        prompt = body.prompt
-        if not prompt:
-            prompt = ""
+        # a raw prompt is the client's own template, so special tokens are intended there,
+        # but no media is attached to it and a media tag would only fail generation
+        prompt = MEDIA_TAGS_ONLY.escape(body.prompt or "")
+
 
         self.log_inference_prompt.debug(prompt)
 
