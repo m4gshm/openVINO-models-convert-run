@@ -1,4 +1,11 @@
-pip install -U "git+https://github.com/huggingface/optimum-intel.git" torchvision Pillow --extra-index-url https://download.pytorch.org/whl/cpu
+python -m venv qwen3.5
+if not exist ".\qwen3.5\Scripts\activate.bat" (
+  echo ERROR: failed to create venv qwen3.5
+  pause
+  exit /b 1
+)
+call .\qwen3.5\Scripts\activate.bat
+pip install -U optimum-intel
 pip install -U "openvino>=2026.4.1"
 pip install -U "transformers==5.2.0"
 set MODEL_NAME=Qwen3.5-9B

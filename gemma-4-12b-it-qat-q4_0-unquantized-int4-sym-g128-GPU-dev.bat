@@ -1,4 +1,4 @@
-call agent-dev.bat --model gemma-4-12b-it-qat-q4_0-unquantized-int4-sym-g64-awq ^
+call agent-dev.bat --model gemma-4-12b-it-qat-q4_0-unquantized-int4-sym-g128 ^
  --device GPU ^
  --pipe VLM ^
  --generate_config_file .config/gemma4_generate_config.json ^

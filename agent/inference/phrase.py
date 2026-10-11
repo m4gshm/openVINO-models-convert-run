@@ -484,7 +484,8 @@ class Phrase:
                                 self.duplicated_words)
 
                             if not longest_last_duplicated_word is None and len(end_positions) > 1:
-                                log.debug(f"duplicated word info: word='{longest_last_duplicated_word}', "
+                                longest_last_duplicated_word_str = "".join(list(longest_last_duplicated_word))
+                                log.debug(f"duplicated word info: word='{longest_last_duplicated_word_str}', "
                                           f"end_positions={end_positions}, "
                                           f"duplicates_check_tail={duplicates_check_tail}")
                                 duplicated_payload = "".join(list(longest_last_duplicated_word) * len(end_positions))

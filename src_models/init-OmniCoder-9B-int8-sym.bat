@@ -1,4 +1,4 @@
-pip install -U "git+https://github.com/huggingface/optimum-intel.git" torchvision Pillow --extra-index-url https://download.pytorch.org/whl/cpu
+pip install -U optimum-intel
 pip install -U "openvino>=2026.4.1"
 pip install -U "transformers==5.2.0"
 set MODEL_NAME=OmniCoder-9B

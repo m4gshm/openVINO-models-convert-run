@@ -394,7 +394,7 @@ def run_openvino(args):
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": npu_compiler_type,
-        "NPU_COMPILATION_MODE_PARAMS": "optimization-level=2 performance-hint-override=latency",
+        # "NPU_COMPILATION_MODE_PARAMS": "optimization-level=2 performance-hint-override=latency",
         "NPU_USE_NPUW": "YES",
         "NPU_TURBO": npu_turbo,
         "NPUW_LLM": "YES",

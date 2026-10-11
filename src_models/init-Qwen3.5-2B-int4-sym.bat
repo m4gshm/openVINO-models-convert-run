@@ -1,4 +1,15 @@
-@REM pip install --upgrade "transformers==5.2.0"
+python -m venv qwen3.5
+if not exist ".\qwen3.5\Scripts\activate.bat" (
+  echo ERROR: failed to create venv qwen3.5
+  pause
+  exit /b 1
+)
+call .\qwen3.5\Scripts\activate.bat
+
+pip install -U optimum-intel
+pip install -U "openvino>=2026.4.1"
+pip install -U "transformers==5.2.0"
+
 set MODEL_NAME=Qwen3.5-2B
 set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%

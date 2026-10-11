@@ -1,4 +1,4 @@
-@REM pip install -U "git+https://github.com/huggingface/optimum-intel.git" torchvision Pillow --extra-index-url https://download.pytorch.org/whl/cpu
+@REM pip install -U optimum-intel
 @REM pip install -U "openvino==2026.4.0"
 @REM pip install -U "transformers==5.2.0"
 
