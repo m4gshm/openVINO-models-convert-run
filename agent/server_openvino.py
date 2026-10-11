@@ -374,6 +374,7 @@ def run_openvino(args):
     npu_prefill_hint = args.npu_prefill_hint
     npu_prefill_attention_hint = args.npu_prefill_attention_hint
     npu_generate_attention_hint = args.npu_generate_attention_hint
+    npuw_llm_generate_pyramid = args.npuw_llm_generate_pyramid
     npuw_llm_propagate_slice_up = args.npuw_llm_propagate_slice_up
     npuw_llm_enable_prefix_caching = args.npuw_llm_enable_prefix_caching
     npuw_llm_enable_continuous_prefill = args.npuw_llm_enable_continuous_prefill
@@ -403,7 +404,7 @@ def run_openvino(args):
         "NPUW_LLM_PREFILL_HINT": npu_prefill_hint,
         "NPUW_LLM_PREFILL_CHUNK_SIZE": npuw_llm_prefill_chunk_size,
 
-        "NPUW_LLM_GENERATE_PYRAMID": "YES",
+        "NPUW_LLM_GENERATE_PYRAMID": npuw_llm_generate_pyramid,
         "NPUW_LLM_SHARED_HEAD": "YES",
         "NPUW_PARALLEL_COMPILE": "YES",
         "LOG_LEVEL": "LOG_INFO",
@@ -764,6 +765,8 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--npuw_llm_enable_block_based_kv_cache", type=str, required=False,
                              default=None, choices=enum_values(YesNo),
                              help="%(default)s")
+    args_parser.add_argument("--npuw_llm_generate_pyramid", type=str, required=False,
+                             default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--npuw_devices", type=str, required=False,
