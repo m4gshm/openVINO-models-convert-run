@@ -372,16 +372,19 @@ def run_openvino(args):
 
     npuw_devices = args.npuw_devices
     npu_prefill_hint = args.npu_prefill_hint
-    npu_prefill_attention_hint = args.npu_prefill_attention_hint
-    npu_generate_attention_hint = args.npu_generate_attention_hint
+    npuw_llm_prefill_attention_hint = args.npuw_llm_prefill_attention_hint
+    npuw_llm_generate_attention_hint = args.npuw_llm_generate_attention_hint
     npuw_llm_generate_pyramid = args.npuw_llm_generate_pyramid
     npuw_llm_propagate_slice_up = args.npuw_llm_propagate_slice_up
     npuw_llm_enable_prefix_caching = args.npuw_llm_enable_prefix_caching
     npuw_llm_enable_continuous_prefill = args.npuw_llm_enable_continuous_prefill
     npuw_llm_enable_block_based_kv_cache = args.npuw_llm_enable_block_based_kv_cache
     npuw_llm_prefill_moe_hint = args.npuw_llm_prefill_moe_hint
+    npu_compilation_mode_params = args.npu_compilation_mode_params
     npuw_llm_generate_moe_hint = args.npuw_llm_generate_moe_hint
     npuw_llm_prefill_chunk_size = args.npuw_llm_prefill_chunk_size
+    npuw_llm = args.npuw_llm
+    npuw_pa = args.npuw_pa
     npu_turbo = args.npu_turbo
     npu_compiler_type = args.npu_compiler_type
 
@@ -395,10 +398,8 @@ def run_openvino(args):
         # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
 
         "NPU_COMPILER_TYPE": npu_compiler_type,
-        # "NPU_COMPILATION_MODE_PARAMS": "optimization-level=2 performance-hint-override=latency",
         "NPU_USE_NPUW": "YES",
         "NPU_TURBO": npu_turbo,
-        "NPUW_LLM": "YES",
 
         "NPUW_LLM_GENERATE_HINT": npu_generate_hint,
         "NPUW_LLM_PREFILL_HINT": npu_prefill_hint,
@@ -410,16 +411,24 @@ def run_openvino(args):
         "LOG_LEVEL": "LOG_INFO",
     }
 
+    if npuw_llm:
+        npu_pipeline_properties["NPUW_LLM"] = npuw_llm
+    if npuw_pa:
+        npu_pipeline_properties["NPUW_PA"] = npuw_pa
+
     if npuw_devices:
         npu_pipeline_properties["NPUW_DEVICES"] = npuw_devices
+    if npu_compilation_mode_params:
+        # optimization-level=2 performance-hint-override=latency
+        npu_pipeline_properties["NPU_COMPILATION_MODE_PARAMS"] = npu_compilation_mode_params
     if npuw_llm_prefill_moe_hint:
         npu_pipeline_properties["NPUW_LLM_PREFILL_MOE_HINT"] = npuw_llm_prefill_moe_hint
     if npuw_llm_generate_moe_hint:
         npu_pipeline_properties["NPUW_LLM_GENERATE_MOE_HINT"] = npuw_llm_generate_moe_hint
-    if npu_prefill_attention_hint:
-        npu_pipeline_properties["NPUW_LLM_PREFILL_ATTENTION_HINT"] = npu_prefill_attention_hint
-    if npu_generate_attention_hint:
-        npu_pipeline_properties["NPUW_LLM_GENERATE_ATTENTION_HINT"] = npu_generate_attention_hint
+    if npuw_llm_prefill_attention_hint:
+        npu_pipeline_properties["NPUW_LLM_PREFILL_ATTENTION_HINT"] = npuw_llm_prefill_attention_hint
+    if npuw_llm_generate_attention_hint:
+        npu_pipeline_properties["NPUW_LLM_GENERATE_ATTENTION_HINT"] = npuw_llm_generate_attention_hint
     if npuw_llm_propagate_slice_up:
         npu_pipeline_properties["NPUW_LLM_PROPAGATE_SLICE_UP"] = npuw_llm_propagate_slice_up
     if npuw_llm_enable_prefix_caching:
@@ -739,21 +748,30 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--npu_prefill_hint", type=str, required=False,
                              default=enum_value(PrefillHint.DYNAMIC), choices=enum_values(PrefillHint),
                              help="%(default)s")
-    args_parser.add_argument("--npu_prefill_attention_hint", type=str, required=False,
+    args_parser.add_argument("--npuw_llm_prefill_attention_hint", type=str, required=False,
                              default=None, choices=enum_values(AttentionHint),
                              help="%(default)s")
-    args_parser.add_argument("--npu_generate_attention_hint", type=str, required=False,
+    args_parser.add_argument("--npuw_llm_generate_attention_hint", type=str, required=False,
                              default=None, choices=enum_values(AttentionHint),
                              help="%(default)s")
     args_parser.add_argument("--npuw_llm_prefill_moe_hint", type=str, required=False,
                              default=None, choices=enum_values(MoEHint),
                              help="%(default)s")
+    args_parser.add_argument("--npu_compilation_mode_params", type=str, required=False,
+                             default=None, help="%(default)s")
     args_parser.add_argument("--npuw_llm_generate_moe_hint", type=str, required=False,
                              default=None, choices=enum_values(MoEHint),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_llm", type=str, required=False,
+                             default=enum_value(YesNo.YES), choices=enum_values(YesNo),
+                             help="%(default)s")
+    args_parser.add_argument("--npuw_pa", type=str, required=False,
+                             default=None, choices=enum_values(YesNo),
                              help="%(default)s")
     args_parser.add_argument("--npuw_llm_propagate_slice_up", type=str, required=False,
                              default=None, choices=enum_values(YesNo),
                              help="%(default)s")
+
     args_parser.add_argument("--npuw_llm_enable_prefix_caching", type=str, required=False,
                              default=None, choices=enum_values(YesNo),
                              help="%(default)s")
@@ -766,7 +784,7 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=None, choices=enum_values(YesNo),
                              help="%(default)s")
     args_parser.add_argument("--npuw_llm_generate_pyramid", type=str, required=False,
-                             default=enum_value(YesNo.NO), choices=enum_values(YesNo), help="%(default)s")
+                             default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--npu_turbo", type=str, required=False,
                              default=enum_value(YesNo.YES), choices=enum_values(YesNo), help="%(default)s")
     args_parser.add_argument("--npuw_devices", type=str, required=False,

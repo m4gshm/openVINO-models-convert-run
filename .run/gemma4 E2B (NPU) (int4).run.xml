@@ -16,7 +16,7 @@
     <option name="DEBUG_JUST_MY_CODE" value="true" />
     <option name="RUN_TOOL" value="" />
     <option name="SCRIPT_NAME" value="agent" />
-    <option name="PARAMETERS" value="--model gemma-4-E2B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq --device NPU --max_prompt_len 49152 --npu_turbo YES --npuw_llm_enable_prefix_caching NO --npu_prefill_attention_hint HFA --npu_generate_attention_hint HFA --generate_config_file .config/gemma4_generate_config_npu.json --chat_template_file .config/gemma4_chat_template.jinja" />
+    <option name="PARAMETERS" value="--model gemma-4-E2B-it-qat-q4_0-unquantized-int4-sym-g128-se-awq --device NPU --max_prompt_len 49152 --npu_turbo YES --npuw_llm_enable_prefix_caching NO --npuw_llm_prefill_attention_hint HFA --npuw_llm_generate_attention_hint HFA --generate_config_file .config/gemma4_generate_config_npu.json --chat_template_file .config/gemma4_chat_template.jinja" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="false" />
     <option name="MODULE_MODE" value="true" />
