@@ -54,6 +54,7 @@ class SchedulerOpts(BaseModel):
     cache_size: int | None = None
     cache_interval_multiplier: int | None = None
     max_num_seqs: int | None = None
+    num_linear_attention_blocks: int | None = None
     dynamic_split_fuse: bool | None = None
     enable_prefix_caching: bool | None = None
     use_sparse_attention: bool | None = None

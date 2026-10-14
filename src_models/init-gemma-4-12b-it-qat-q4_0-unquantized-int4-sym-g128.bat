@@ -1,10 +1,3 @@
-python -m venv gemma4
-if not exist ".\gemma4\Scripts\activate.bat" (
-  echo ERROR: failed to create venv gemma4
-  pause
-  exit /b 1
-)
-call .\gemma4\Scripts\activate.bat
 
 pip install "git+https://github.com/huggingface/optimum-intel.git" torchvision Pillow --extra-index-url https://download.pytorch.org/whl/cpu
 pip install -U transformers==5.10.4

@@ -2,7 +2,7 @@
   "max_num_seqs": 1,
   "dynamic_split_fuse": true,
   "max_num_batched_tokens": 4096,
-  "cache_interval_multiplier": 128,
+  "cache_interval_multiplier": 32,
   "enable_prefix_caching": true,
   "use_sparse_attention": true,
   "sparse_attention_config": {

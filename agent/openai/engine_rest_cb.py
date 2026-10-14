@@ -152,7 +152,7 @@ class ContinuousBatchingController(BaseOVController):
                                     finish_reason = generation_output.finish_reason
                                     if not stop_signal and finish_reason and finish_reason != GenerationFinishReason.NONE:
                                         stop_signal = get_stop_signal_by_finish_reason(finish_reason)
-                                        log.debug(f"generation_output has finish_reason '{finish_reason}' converted to "
+                                        log.debug(f"generation_output has finish_reason '{finish_reason.name}' converted to "
                                                   f"stop_signal '{stop_signal}'")
 
                                     if stop_signal:

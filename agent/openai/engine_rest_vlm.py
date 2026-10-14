@@ -18,7 +18,7 @@ from agent.multimodal.media_error import MediaUnsupportedError
 from agent.multimodal.media_inputs import MediaInputs
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
-from agent.openai.engine_rest_common import ControllerConfig, BaseOVController, add_stop_signal, get_tokens_size
+from agent.openai.engine_rest_common import ControllerConfig, BaseOVController, add_stop_signal
 from agent.parser import Parser
 
 log = logging.getLogger(__name__)
@@ -100,7 +100,8 @@ class VlmController(BaseOVController):
                                f"token_handler_info='{token_handler.get_stat_info()}', ")
                     if isinstance(generate_result, DecodedResults):
                         inference_finish_reasons = generate_result.finish_reasons
-                        log_msg += f"reason '{inference_finish_reasons}', "
+                        log_msg += f"reason '{[res.name for res in inference_finish_reasons]
+                        if isinstance(inference_finish_reasons, list) else inference_finish_reasons}', "
                     else:
                         inference_finish_reasons = None
 

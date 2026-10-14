@@ -1,4 +1,6 @@
-@REM transformers==5.7.0
+pip install -U "optimum-intel==2.2.0"
+pip install -U "openvino-genai==2026.4.1" "openvino==2026.4.1" "openvino-tokenizers==2026.4.1"
+
 set MODEL_NAME=LFM2.5-8B-A1B
 set MODEL_DEVELOPER=LiquidAI
 set MODEL_NAME_OUT=%MODEL_NAME%

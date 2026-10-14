@@ -3,8 +3,7 @@ call agent-dev.bat ^
  --draft_model Qwen3.5-9B-nf4-sym-g-1-awq ^
  --detect_cycled_tool_call on ^
  --pipe VLM ^
- --kv_cache_precision u4 ^
- --generate_config_file .config/generate_config_mtp.json ^
+ --generate_config_file .config/generate_config_spec_dec.json ^
  --scheduler_config_file .config/scheduler_config.json ^
  --mtp_mode on ^
  --device NPU ^
@@ -14,7 +13,7 @@ call agent-dev.bat ^
  --npuw_llm_enable_block_based_kv_cache NO ^
  --npuw_llm_enable_continuous_prefill NO ^
  --npuw_llm_enable_prefix_caching YES ^
- --npu_prefill_attention_hint PYRAMID ^
+ --npuw_llm_prefill_attention_hint PYRAMID ^
  --npuw_devices NPU,CPU ^
  --npuw_llm_prefill_moe_hint HOST_ROUTED ^
  --npuw_llm_generate_moe_hint DEVICE_ROUTED

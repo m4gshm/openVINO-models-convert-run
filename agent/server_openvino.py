@@ -248,7 +248,9 @@ def run_openvino(args):
         scheduler_config.max_num_seqs = opts_max_num_seqs
 
     # scheduler_config.num_kv_blocks = 2048
-    # scheduler_config.num_linear_attention_blocks = 256
+    num_linear_attention_blocks = scheduler_opts.num_linear_attention_blocks or default_scheduler_opts.num_linear_attention_blocks
+    if num_linear_attention_blocks:
+        scheduler_config.num_linear_attention_blocks = num_linear_attention_blocks
     use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
     scheduler_config.use_sparse_attention = use_sparse_attention
     attention_opts = scheduler_opts.sparse_attention_config

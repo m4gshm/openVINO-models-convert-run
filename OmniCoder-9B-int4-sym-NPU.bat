@@ -11,4 +11,4 @@ call agent.bat --model OmniCoder-9B-int4-sym-g128-se-awq ^
  --npuw_llm_generate_moe_hint DEVICE_ROUTED ^
  --generate_config_file .config/generate_config.json
 
-@REM   --npu_prefill_attention_hint HFA ^
+@REM   --npuw_llm_prefill_attention_hint HFA ^

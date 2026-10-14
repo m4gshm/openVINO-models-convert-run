@@ -8,7 +8,7 @@ call agent.bat --model Qwen2.5-Coder-1.5B-Instruct-int4-sym-g128-r1-se-awq ^
  --npuw_llm_enable_block_based_kv_cache NO ^
  --npuw_llm_enable_continuous_prefill NO ^
  --npuw_llm_enable_prefix_caching YES ^
- --npu_prefill_attention_hint HFA ^
+ --npuw_llm_prefill_attention_hint HFA ^
  --npuw_devices NPU,GPU ^
  --npuw_llm_prefill_moe_hint HOST_ROUTED ^
  --npuw_llm_generate_moe_hint DEVICE_ROUTED
