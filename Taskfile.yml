@@ -4,9 +4,13 @@ tasks:
   install:
     desc: Install dependencies using uv
     cmds:
+#      - uv python install 3.14
+      - uv venv --clear --python 3.14
       - uv sync
     sources:
+      - pyproject.toml
       - agent/pyproject.toml
+      - experiments/pyproject.toml
     generates:
       - ".venv/**/*"
       - uv.lock
