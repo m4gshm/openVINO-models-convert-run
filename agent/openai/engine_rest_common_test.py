@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import unittest
+from typing import Any, cast
+from unittest.mock import patch
 
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 
@@ -10,6 +12,7 @@ from agent.multimodal.request_media import prepare_messages
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
+from agent.openai.engine_rest_common import disconnect_probe
 from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, make_union, new_chat_history
 
 
@@ -98,6 +101,47 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual("", content)
         self.assertEqual("why", reasoning_content)
         self.assertEqual([tool_call], tool_calls)
+
+
+class DisconnectProbeCase(unittest.TestCase):
+    def test_throttles_underlying_probe_within_interval(self):
+        calls = []
+
+        def fake_is_disconnected(request):
+            calls.append(request)
+            return False
+
+        with patch("agent.openai.engine_rest_common.is_disconnected", fake_is_disconnected):
+            probe = disconnect_probe(cast(Any, object()))
+            for _ in range(50):
+                self.assertFalse(probe())
+        self.assertEqual(1, len(calls))  # one roundtrip per interval window, not per token
+
+    def test_probes_again_after_interval_expired(self):
+        calls = []
+
+        def fake_not_disconnected(_request):
+            calls.append(1)
+            return False
+
+        with patch("agent.openai.engine_rest_common.is_disconnected", fake_not_disconnected):
+            probe = disconnect_probe(cast(Any, object()), interval=0.0)
+            for _ in range(3):
+                self.assertFalse(probe())
+        self.assertEqual(3, len(calls))
+
+    def test_disconnect_latches_true_without_further_probes(self):
+        calls = []
+
+        def fake_disconnected(_request):
+            calls.append(1)
+            return True
+
+        with patch("agent.openai.engine_rest_common.is_disconnected", fake_disconnected):
+            probe = disconnect_probe(cast(Any, object()), interval=0.0)
+            self.assertTrue(probe())
+            self.assertTrue(probe())
+        self.assertEqual(1, len(calls))  # disconnected is final: no more event-loop roundtrips
 
 
 class NewHttpResponseCase(unittest.TestCase):

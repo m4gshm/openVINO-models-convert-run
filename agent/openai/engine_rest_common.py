@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Any, Literal, Iterable
+from typing import Any, Callable, Literal, Iterable
 
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
@@ -377,8 +377,10 @@ class BaseOVController(BaseController):
 
     async def handle_chat_completion(self, body: ChatCompletionRequest,
                                      request: Request) -> StreamingResponse | ChatCompletion:
+        is_client_gone = disconnect_probe(request)
+
         def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
+            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
 
         stream = is_stream_request(body)
         tools = body.tools
@@ -486,8 +488,10 @@ class BaseOVController(BaseController):
 
         self.log_inference_prompt.debug(prompt)
 
+        is_client_gone = disconnect_probe(request)
+
         def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
+            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
 
         generation_config = new_generation_config(temperature=body.temperature,
                                                   generate_opts=self.generate_opts,
@@ -555,13 +559,37 @@ def is_disconnected(request: Request) -> bool:
     disconnected = False
     try:
         loop = request.app.state.main_loop
-        disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.5)
+        disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.1)
         if disconnected:
             log.debug(f"disconnected http request")
     except asyncio.TimeoutError:
         pass
         # log.debug(f"disconnected http request check timeout")
     return disconnected
+
+
+def disconnect_probe(request: Request, interval: float = 0.25) -> Callable[[], bool]:
+    """Throttled client-disconnect probe for the per-token stop check.
+
+    is_disconnected() costs a roundtrip to the event loop; probing it on every token lets a busy
+    loop stall the generation. The probe checks at most once per `interval` and latches the first
+    positive result. stop_signal/closed are checked by the caller on every call regardless.
+    """
+    next_check = 0.0
+    disconnected = False
+
+    def probe() -> bool:
+        nonlocal next_check, disconnected
+        if disconnected:
+            return True
+        now = time.monotonic()
+        if now < next_check:
+            return False
+        next_check = now + interval
+        disconnected = is_disconnected(request)
+        return disconnected
+
+    return probe
 
 
 def new_chat_history(messages: list[ChatCompletionMessageParam] | list[dict],

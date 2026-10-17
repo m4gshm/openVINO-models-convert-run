@@ -1,8 +1,29 @@
+import logging
 import os
 
 log_format_prefix = "%(asctime)s - %(threadName)s - %(name)s - %(levelname)s"
 log_format_detailed = (log_format_prefix + " - [%(filename)s:%(lineno)d] - %(message)s")
 log_format_simple = (log_format_prefix + " - %(message)s")
+
+
+class DropClientResetFilter(logging.Filter):
+    """Drop harmless asyncio noise produced when a client resets a connection.
+
+    On the Windows Proactor loop the transport cleanup
+    (_ProactorBasePipeTransport._call_connection_lost) calls sock.shutdown()
+    on a socket the client already reset, which raises ConnectionResetError
+    [WinError 10054] logged by the "asyncio" logger as "Exception in
+    callback ...". The request is already finished at that point, so the
+    record carries no information. Everything else is kept.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "asyncio" or record.exc_info is None:
+            return True
+        exc = record.exc_info[1]
+        if not isinstance(exc, ConnectionResetError) or getattr(exc, "winerror", None) != 10054:
+            return True
+        return "_call_connection_lost" not in record.getMessage()
 
 
 def logging_config(logs_dir: str):
@@ -63,7 +84,16 @@ def logging_config(logs_dir: str):
                 "encoding": "utf8"
             },
         },
+        "filters": {
+            "drop_client_reset": {
+                "()": "agent.common.log.DropClientResetFilter",
+            },
+        },
         "loggers": {
+            "asyncio": {
+                "filters": ["drop_client_reset"],
+                "propagate": True,
+            },
             "http": {
                 "level": "DEBUG",
                 "handlers": ["file_http"],
