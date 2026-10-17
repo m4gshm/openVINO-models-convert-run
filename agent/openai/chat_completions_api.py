@@ -1,10 +1,10 @@
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Literal, Optional, Union, Dict, Any
 
 from openai.types.chat import ChatCompletionToolChoiceOptionParam
 from pydantic import BaseModel, ConfigDict, Field
 
-CHAT_COMPLETION_CHUNK = "chat.completion.chunk"
-CHAT_COMPLETION = "chat.completion"
+CHAT_COMPLETION_CHUNK: Literal["chat.completion.chunk"] = "chat.completion.chunk"
+CHAT_COMPLETION: Literal["chat.completion"] = "chat.completion"
 
 
 class Function(BaseModel):

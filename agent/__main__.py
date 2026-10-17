@@ -9,6 +9,7 @@ from pydantic.json import pydantic_encoder
 from agent.server import stop_signal
 from agent.server_openai import run_openai_proxy, add_openai_args
 from agent.server_openvino import run_openvino, add_openvino_args
+from agent.typecheck import typecheck
 
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
 os.environ["OPENVINO_NPUW_LOG_LEVEL"] = "DEBUG"
@@ -30,8 +31,13 @@ def main():
     args_parser = argparse.ArgumentParser()
     add_openvino_args(args_parser)
     add_openai_args(args_parser)
+    args_parser.add_argument("--skip_typecheck", action="store_true",
+                             help="skip the mypy startup type check")
 
     args = args_parser.parse_args()
+
+    if not args.skip_typecheck:
+        typecheck()
 
     has_model = not args.model is None
     has_openai_base = bool(args.openai_base_url and args.openai_base_url != "https://api.openai.com/v1")

@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.24.0",
     "numpy",
     "pillow>=11",
+    "beartype>=0.19",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,8 @@ dev = [
     "pylint==4.0.6",
     "astroid==4.0.4",
     "pytest==9.1.1",
+    "mypy==2.4.0",
+    "types-psutil>=7.0",
 ]
 
 [build-system]
@@ -35,6 +38,62 @@ testpaths = ["agent"]
 
 [tool.pylint]
 persistent = false
+
+[tool.mypy]
+python_version = "3.11"
+files = ["agent"]
+# Pragmatic-strict: real type checking of untyped function bodies without
+# demanding annotations everywhere (full --strict costs 680 errors today).
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# Native extensions / optional extras shipping no type stubs.
+module = ["openvino", "openvino.*", "openvino_genai", "openvino_genai.*", "soundfile", "librosa"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Legacy baseline: files with type errors at adoption time (2026-02).
+# Ratchet: fix a file, remove it from this list.
+module = [
+    "agent.parser.gemma4_test",
+    "agent.client.veai.tool_call_fixer",
+    "agent.inference.token_handler",
+    "agent.parser.lfm2",
+    "agent.inference.phrase",
+    "agent.openai.engine_rest_common",
+    "agent.preprocess.tool_call_test",
+    "agent.openai.engine_rest_cb",
+    "agent.multimodal.request_media",
+    "agent.parser",
+    "agent.client.veai",
+    "agent.multimodal.content_parts_test",
+    "agent.inference.phrase_test",
+    "agent.parser.gemma4",
+    "agent.parser.lfm2_test",
+    "agent.openai.engine_rest_vlm",
+    "agent.server_openvino",
+    "agent.preprocess.prompt_escape",
+    "agent.multimodal.model_capabilities_test",
+    "agent.parser.qwen2_test",
+    "agent.parser.qwen3_test",
+    "agent.parser.qwen2",
+    "agent.openai",
+    "agent.openai.logger_rest",
+    "agent.parser.json_fixer",
+    "agent.preprocess.tool_call",
+    "agent.server_openai",
+    "agent.parser.qwen3",
+    "agent.openai.middleware_checkpoint",
+    "agent.preprocess.prompt_escape_test",
+    "agent.client.user_context",
+    "agent.server",
+    "agent.client.veai.tool.edit_file_test",
+    "agent.inference.token_handler_test",
+]
+ignore_errors = true
 
 [tool.uv.workspace]
 members = ["agent", "experiments"]

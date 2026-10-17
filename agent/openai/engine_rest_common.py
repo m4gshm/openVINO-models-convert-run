@@ -526,7 +526,9 @@ def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[
                 delta_content = delta.content
                 if delta_content:
                     full_content += delta_content
-                delta_reasoning_content = delta.reasoning_content
+                # reasoning_content is an optional extra field (openai models use extra="allow"):
+                # plain deltas never carry it and pydantic __getattr__ raises AttributeError
+                delta_reasoning_content = getattr(delta, "reasoning_content", None)
                 if delta_reasoning_content:
                     full_reasoning_content += delta_reasoning_content
                 delta_tool_calls = delta.tool_calls

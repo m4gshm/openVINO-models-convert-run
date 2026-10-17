@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.24.0",
     "numpy",
     "pillow>=11",
+    "beartype>=0.19",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,7 @@ dev = [
     "pylint==4.0.6",
     "astroid==4.0.4",
     "pytest-asyncio>=1.0.0",
+    "mypy==2.4.0",
 ]
 
 [build-system]

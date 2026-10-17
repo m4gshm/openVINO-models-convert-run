@@ -70,123 +70,145 @@ class VlmController(BaseOVController):
         self.executor = ThreadPoolExecutor()
         self.request_lock = threading.Lock()
 
+    def generate_result(self, prompt: str, generation_config: GenerationConfig,
+                        streamer: "StreamerWrapper", media: MediaInputs) -> Any:
+        """Run one blocking pipeline.generate call of any supported pipe type."""
+        pipe = self.pipe
+        if isinstance(pipe, VLMPipeline):
+            return generate_vlm(pipe, prompt, generation_config, streamer, media)
+        if isinstance(pipe, LLMPipeline):
+            if not media.is_empty():
+                raise MediaUnsupportedError(
+                    "LLM pipeline cannot take media inputs, load the model with --pipe VLM")
+            llm_pipe: LLMPipeline = pipe
+            return llm_pipe.generate(inputs=prompt, generation_config=generation_config,
+                                     streamer=streamer)
+        raise NotImplementedError(f"unexpected pipe type {type(pipe)}")
+
+    def wait_for_first_token(self, token_handler: TokenHandler,
+                             start_stream_handling: queue.Queue[bool]) -> bool:
+        """Block until generate reports its first token.
+
+        Returns False when the request is abandoned while waiting (client disconnect or server
+        stop), which is checked every second: a request may queue here behind another
+        long-running generation that still holds request_lock.
+        """
+        while True:
+            if token_handler.is_stop():
+                log.info("inference stopped before first token")
+                return False
+            try:
+                start_stream_handling.get(timeout=1)
+                return True
+            except queue.Empty:
+                pass
+
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
                         token_handler: TokenHandler, media: MediaInputs) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
 
-        with self.request_lock:
-            chunk_queue: queue.Queue[ChatCompletionChunk | None] = queue.Queue()
-            stop_stream_handling: queue.Queue[bool] = queue.Queue()
-            start_stream_handling: queue.Queue[bool] = queue.Queue()
-            before_generate_mem = get_current_memory()
+        chunk_queue: queue.Queue[ChatCompletionChunk | None] = queue.Queue()
+        stop_stream_handling: queue.Queue[bool] = queue.Queue()
+        start_stream_handling: queue.Queue[bool] = queue.Queue()
 
-            def run_inference():
-                try:
+        def run_inference():
+            try:
+                # request_lock must be held exactly while generate runs: this generator gives up
+                # waiting (client disconnect, response timeout) while the pipeline may still be
+                # decoding — during prefill the streamer is not called, so a stop flag cannot
+                # interrupt generation. Releasing the lock earlier lets the next request start a
+                # second concurrent generate, which the pipeline rejects with
+                # 'Generate cannot be called while ContinuousBatchingPipeline is already in running state'
+                with self.request_lock:
                     streamer = StreamerWrapper(token_handler,
                                                start_stream_handling=start_stream_handling,
                                                stop_stream_handling=stop_stream_handling,
                                                chunk_queue=chunk_queue)
+                    before_generate_mem = get_current_memory()
+                    generate_result = self.generate_result(prompt, generation_config, streamer, media)
+                chunk_queue.put_nowait(None)
 
-                    generate_result = start_generate_result(streamer)
-                    chunk_queue.put_nowait(None)
+                metrics = generate_result.perf_metrics if isinstance(generate_result, DecodedResults) else None
 
-                    metrics = generate_result.perf_metrics if isinstance(generate_result, DecodedResults) else None
+                def to_str(d: MeanStdPair) -> str:
+                    return f"std {d.std} , mean {d.mean}"
 
-                    def to_str(d: MeanStdPair) -> str:
-                        return f"std {d.std} , mean {d.mean}"
-
-                    log_msg = (f"inference finished: "
-                               f"token_handler_info='{token_handler.get_stat_info()}', ")
-                    if isinstance(generate_result, DecodedResults):
-                        inference_finish_reasons = generate_result.finish_reasons
-                        log_msg += f"reason '{[res.name for res in inference_finish_reasons]
-                        if isinstance(inference_finish_reasons, list) else inference_finish_reasons}', "
-                    else:
-                        inference_finish_reasons = None
-
-                    if metrics:
-                        log_msg += (
-                            f"num_input_tokens={metrics.get_num_input_tokens()}, "
-                            f"generated_tokens={metrics.get_num_generated_tokens()}, "
-                            f"generate_duration={to_str(metrics.get_generate_duration())}, "
-                            f"inference_duration={to_str(metrics.get_inference_duration())}, "
-                            f"ttft={to_str(metrics.get_ttft())}, "
-                            f"throughput={to_str(metrics.get_throughput())}")
-                        log_msg += vlm_metrics_str(metrics)
-                    if self.log_inference.isEnabledFor(logging.DEBUG):
-                        texts = generate_result.texts if isinstance(generate_result,
-                                                                    DecodedResults) else generate_result
-                        self.log_inference.debug(f"{log_msg}\nresult: {texts}")
-                    else:
-                        self.log_inference.info(log_msg)
-
-                    after_generate_mem = get_current_memory()
-                    generate_cost = after_generate_mem - before_generate_mem
-                    log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
-
-                    inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
-                    if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                        log.info(f"inference finished by unexpected status {inference_finish_reason}")
-
-                except Exception as e:
-                    start_stream_handling.put_nowait(True)
-                    self.log_inference.error(f"inference error: {e}", exc_info=e)
-                    err_str = str(e)
-                    finish_reason: Literal[
-                        "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
-                    chunk_queue.put_nowait(
-                        new_stop_response(content=err_str, finish_reason=finish_reason, model=self.config.model_name,
-                                          role=ROLE_ASSISTANT))
-                    chunk_queue.put_nowait(None)
-
-            def start_generate_result(streamer: StreamerWrapper) -> VLMDecodedResults:
-                pipe = self.pipe
-                if isinstance(pipe, VLMPipeline):
-                    generate_result = generate_vlm(pipe, prompt, generation_config, streamer, media)
-                elif isinstance(pipe, LLMPipeline):
-                    if not media.is_empty():
-                        raise MediaUnsupportedError(
-                            "LLM pipeline cannot take media inputs, load the model with --pipe VLM")
-                    llm_pipe: LLMPipeline = pipe
-                    generate_result = llm_pipe.generate(inputs=prompt, generation_config=generation_config,
-                                                        streamer=streamer)
+                log_msg = (f"inference finished: "
+                           f"token_handler_info='{token_handler.get_stat_info()}', ")
+                if isinstance(generate_result, DecodedResults):
+                    inference_finish_reasons = generate_result.finish_reasons
+                    log_msg += f"reason '{[res.name for res in inference_finish_reasons]
+                    if isinstance(inference_finish_reasons, list) else inference_finish_reasons}', "
                 else:
-                    raise NotImplementedError(f"unexpected pipe type {type(pipe)}")
-                return generate_result
+                    inference_finish_reasons = None
 
-            try:
-                inference_task = self.executor.submit(run_inference)
-                start_stream_handling.get()
-                stop_inference = False
-                while not stop_inference:
-                    if token_handler.is_stop():
-                        log.info("inference stopped by signal")
-                        break
-                    try:
-                        chunk = chunk_queue.get(timeout=20)
-                        if chunk:
-                            chunk.id = response_id
-                            chunk.model = self.config.model_name
-                            yield chunk
-                        else:
-                            stop_inference = True
-                    except queue.Empty:
-                        pass
-                    except TimeoutError:
-                        pass
+                if metrics:
+                    log_msg += (
+                        f"num_input_tokens={metrics.get_num_input_tokens()}, "
+                        f"generated_tokens={metrics.get_num_generated_tokens()}, "
+                        f"generate_duration={to_str(metrics.get_generate_duration())}, "
+                        f"inference_duration={to_str(metrics.get_inference_duration())}, "
+                        f"ttft={to_str(metrics.get_ttft())}, "
+                        f"throughput={to_str(metrics.get_throughput())}")
+                    log_msg += vlm_metrics_str(metrics)
+                if self.log_inference.isEnabledFor(logging.DEBUG):
+                    texts = generate_result.texts if isinstance(generate_result,
+                                                                DecodedResults) else generate_result
+                    self.log_inference.debug(f"{log_msg}\nresult: {texts}")
+                else:
+                    self.log_inference.info(log_msg)
+
+                after_generate_mem = get_current_memory()
+                generate_cost = after_generate_mem - before_generate_mem
+                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
+
+                inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
+                if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
+                    log.info(f"inference finished by unexpected status {inference_finish_reason}")
 
             except Exception as e:
-                log.error(f"chunk processing error: {e}", exc_info=e)
+                start_stream_handling.put_nowait(True)
+                self.log_inference.error(f"inference error: {e}", exc_info=e)
+                err_str = str(e)
+                finish_reason: Literal[
+                    "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
+                chunk_queue.put_nowait(
+                    new_stop_response(content=err_str, finish_reason=finish_reason, model=self.config.model_name,
+                                      role=ROLE_ASSISTANT))
+                chunk_queue.put_nowait(None)
 
-            stop_stream_handling.put_nowait(True)
-            if not inference_task.done():
-                log.info("waiting for inference to complete")
+        try:
+            inference_task = self.executor.submit(run_inference)
+            stop_inference = not self.wait_for_first_token(token_handler, start_stream_handling)
+            while not stop_inference:
+                if token_handler.is_stop():
+                    log.info("inference stopped by signal")
+                    break
                 try:
-                    r = inference_task.result(timeout=20)
-                except Exception as e:
-                    log.error(f"waiting inference completion error: {e}", exc_info=e)
-            log.info("inference handling is done")
+                    chunk = chunk_queue.get(timeout=20)
+                    if chunk:
+                        chunk.id = response_id
+                        chunk.model = self.config.model_name
+                        yield chunk
+                    else:
+                        stop_inference = True
+                except queue.Empty:
+                    pass
+                except TimeoutError:
+                    pass
+
+        except Exception as e:
+            log.error(f"chunk processing error: {e}", exc_info=e)
+
+        stop_stream_handling.put_nowait(True)
+        if not inference_task.done():
+            log.info("waiting for inference to complete")
+            try:
+                r = inference_task.result(timeout=20)
+            except Exception as e:
+                log.error(f"waiting inference completion error: {e}", exc_info=e)
+        log.info("inference handling is done")
 
 
 class StreamerWrapper(py_openvino_genai.StreamerBase):

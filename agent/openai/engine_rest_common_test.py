@@ -1,12 +1,15 @@
 import base64
 import unittest
 
+from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
+
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
+from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai.completions_api import CompletionRequest
-from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, new_chat_history
+from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, make_union, new_chat_history
 
 
 def new_config(**kwargs) -> ControllerConfig:
@@ -69,6 +72,31 @@ class IsStreamRequestCase(unittest.TestCase):
     def test_explicit_flags_are_respected(self):
         self.assertTrue(is_stream_request(ChatCompletionRequest(stream=True)))
         self.assertFalse(is_stream_request(CompletionRequest(prompt="hi", stream=False)))
+
+
+class MakeUnionCase(unittest.TestCase):
+    def test_plain_chunks_without_reasoning_extra(self):
+        # reasoning_content is an optional extra field: deltas of regular tokens (and error
+        # stop responses) do not carry it — direct attribute access used to raise AttributeError
+        chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="Hel", model="m"),
+                  new_chat_completion_chunk(role=ROLE_ASSISTANT, content="lo", model="m"),
+                  new_stop_response(role=ROLE_ASSISTANT, content="boom", finish_reason="stop", model="m")]
+        finish_reason, content, reasoning_content, tool_calls = make_union(iter(chunks))
+        self.assertEqual("stop", finish_reason)
+        self.assertEqual("Helloboom", content)
+        self.assertEqual("", reasoning_content)
+        self.assertEqual([], tool_calls)
+
+    def test_thinking_and_tool_calls_are_aggregated(self):
+        tool_call = new_tool_call(ChoiceDeltaToolCallFunction(name="read_file", arguments="{}"))
+        chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="why", thinking=True, model="m"),
+                  new_chat_completion_chunk(role=ROLE_ASSISTANT, tool_calls=[tool_call], model="m",
+                                            finish_reason="tool_calls")]
+        finish_reason, content, reasoning_content, tool_calls = make_union(iter(chunks))
+        self.assertEqual("tool_calls", finish_reason)
+        self.assertEqual("", content)
+        self.assertEqual("why", reasoning_content)
+        self.assertEqual([tool_call], tool_calls)
 
 
 if __name__ == '__main__':

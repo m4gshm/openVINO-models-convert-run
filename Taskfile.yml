@@ -37,6 +37,11 @@ tasks:
     cmds:
       - uv run pylint agent
 
+  typecheck:
+    desc: Run static type checks (mypy)
+    cmds:
+      - uv run mypy
+
   dist:
     desc: Build standalone executable
     cmds:
