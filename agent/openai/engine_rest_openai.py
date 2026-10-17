@@ -19,7 +19,7 @@ from starlette.responses import StreamingResponse
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT, new_chat_completion_chunk
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, new_http_response_chat
+from agent.openai.engine_rest_common import ControllerConfig, BaseController, is_stream_request, new_http_response_chat
 
 log = logging.getLogger(__name__)
 
@@ -90,13 +90,15 @@ class OpenAiController(BaseController):
         body_model = body.model
         # Content parts (images, audio) are forwarded as they came: plain dicts keep the payload intact.
         messages = [message.model_dump(mode="json", exclude_none=True) for message in body.messages]
-        stream = self.client.chat.completions.create(model=body_model,
-                                                     stream=body.stream | True,
-                                                     messages=messages)
+        # The proxy generator understands only streamed deltas, so the remote call always streams;
+        # a client that asked for a plain response gets the chunks aggregated below instead.
+        remote_stream = self.client.chat.completions.create(model=body_model,
+                                                            stream=True,
+                                                            messages=messages)
 
         def chunk_generator() -> Iterable[ChatCompletionChunk]:
             try:
-                for chunk in stream:
+                for chunk in remote_stream:
                     if chunk.choices:
                         choice = chunk.choices[0]
                         delta = choice.delta
@@ -131,7 +133,7 @@ class OpenAiController(BaseController):
                     response_id=response_id
                 )
 
-        return new_http_response_chat(stream, chunk_generator())
+        return new_http_response_chat(is_stream_request(body), chunk_generator())
 
     def shutdown(self):
         """Clean up OpenAI client."""

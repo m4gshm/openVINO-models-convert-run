@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Any, Literal, Iterable
+from typing import Any, Literal, Iterable, Protocol
 
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
@@ -88,6 +88,10 @@ class ControllerConfig(BaseModel):
                            allow_local_files=self.allow_local_media_files,
                            http_timeout=self.media_http_timeout,
                            audio_sample_rate=self.media_audio_sample_rate)
+
+
+def is_stream_request(body: completions_api.CompletionRequest | ChatCompletionRequest) -> bool:
+    return body.stream is True
 
 
 def new_http_response_chat(stream: bool,
@@ -291,7 +295,7 @@ class BaseController(ABC):
         log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
                   f"x_device_id={x_device_id}, x_request_id={x_request_id}")
 
-        stream = body.stream == True
+        stream = is_stream_request(body)
         messages = body.messages
         log.info(f"inbound history messages {len(messages)}")
 
@@ -364,7 +368,7 @@ class BaseOVController(BaseController):
         def is_stop():
             return self.stop_signal.is_set() or self.closed.is_set() or is_disconnected(request)
 
-        stream = body.stream == True
+        stream = is_stream_request(body)
         tools = body.tools
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
@@ -485,7 +489,7 @@ class BaseOVController(BaseController):
                                      config=self.handler_config,
                                      )
 
-        stream = body.stream | True
+        stream = is_stream_request(body)
         response_id = str(uuid.uuid4())
         prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
         max_length = generation_config.max_length

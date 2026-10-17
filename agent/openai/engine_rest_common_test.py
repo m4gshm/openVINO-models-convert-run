@@ -4,8 +4,9 @@ import unittest
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
-from agent.openai.chat_completions_api import ChatCompletionMessageParam
-from agent.openai.engine_rest_common import ControllerConfig, new_chat_history
+from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
+from agent.openai.completions_api import CompletionRequest
+from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, new_chat_history
 
 
 def new_config(**kwargs) -> ControllerConfig:
@@ -53,6 +54,21 @@ class NewChatHistoryCase(unittest.TestCase):
         stored = history.get_messages()
         self.assertEqual("describe <ov_genai_image_0>", stored[0]["content"])
         self.assertEqual(1, len(prepared.media.images))
+
+
+class IsStreamRequestCase(unittest.TestCase):
+    def test_completions_request_without_stream_flag(self):
+        # /v1/completions default is None; it used to crash with `None | True` TypeError
+        body = CompletionRequest(prompt="hi", max_tokens=256, temperature=0, stop=[])
+        self.assertIsNone(body.stream)
+        self.assertFalse(is_stream_request(body))
+
+    def test_chat_request_defaults_to_streaming(self):
+        self.assertTrue(is_stream_request(ChatCompletionRequest()))
+
+    def test_explicit_flags_are_respected(self):
+        self.assertTrue(is_stream_request(ChatCompletionRequest(stream=True)))
+        self.assertFalse(is_stream_request(CompletionRequest(prompt="hi", stream=False)))
 
 
 if __name__ == '__main__':
