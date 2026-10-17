@@ -140,6 +140,20 @@ earlier turns is sent and decoded again; each item becomes an OpenVINO tag in th
 - Fix all errors and warnings before merging
 - No new `E` (error) or `W` (warning) codes allowed in diffs
 
+### Static Typing
+
+- **mypy** — run via `task typecheck` or `uv run mypy`; config in the root `pyproject.toml`
+- Pragmatic-strict: untyped function bodies are checked, but full annotations are not required
+- Files with pre-existing errors are listed in the `ignore_errors` override (ratchet): fix a
+  file — remove it from the list. New files are checked by default; do not add them to the list
+- The app runs the same check on startup (`agent/typecheck.py`); skip for a quick debug start
+  with `--skip_typecheck` (note: launching via `uvicorn agent.server:app` bypasses it)
+- **beartype** decorates the public response constructors in `agent/openai/chat_api.py` —
+  `Literal` arguments (`Role`, `FinishReason`) are validated at runtime too
+- Optional extension fields of openai SDK models (`ChoiceDelta.reasoning_content`, ...) must be
+  read via `getattr(x, "field", None)` — direct access raises `AttributeError` when the field
+  was never set
+
 ### Distribution
 
 - Standalone builds via PyInstaller: `task dist`
@@ -149,12 +163,13 @@ earlier turns is sent and decoded again; each item becomes an OpenVINO tag in th
 ### Pre-commit Checklist
 
 1. Run `task lint` — zero pylint violations
-2. Run `task test` — all tests pass
-3. Verify no new dependencies unless explicitly approved
-4. Confirm model batch scripts still work after changes
+2. Run `task typecheck` — zero mypy errors
+3. Run `task test` — all tests pass
+4. Verify no new dependencies unless explicitly approved
+5. Confirm model batch scripts still work after changes
 
 Core: `openvino-genai`, `fastapi`, `uvicorn`, `openai`, `pydantic`, `json-repair`, `httpx`, `numpy`,
-`pillow`
+`pillow`, `beartype`
 
 Optional for multimodal input: `soundfile` or `librosa` (more audio formats)
 
@@ -162,6 +177,6 @@ Runtime dependencies must be listed in **both** `pyproject.toml` and `agent/pypr
 is synced from the root project, which does not depend on the `agent` workspace member, so a package
 added only to `agent/pyproject.toml` never lands in `.venv`.
 
-Dev: `pylint`, `astroid`
+Dev: `pylint`, `astroid`, `mypy`, `types-psutil`
 
 Full list in `agent/pyproject.toml`.

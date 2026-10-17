@@ -38,7 +38,8 @@ class LockedController(VlmController):
 
     def __init__(self):
         super().__init__(ControllerConfig(max_prompt_len=4096, model_architectures=set(), model_name="m"),
-                         parser=None, pipe=FakePipe(), handler_config=TokenHandlerConfig(),
+                         parser=None,  # type: ignore[arg-type]  # LockedController never reaches parsing
+                         pipe=FakePipe(), handler_config=TokenHandlerConfig(),
                          stop_signal=threading.Event(), generate_opts=GenerateOpts())
         self.order: list[str] = []
         self.lock_violations: list[str] = []
@@ -62,7 +63,8 @@ class LockedController(VlmController):
 def consume(controller: VlmController, sink: list, ready: threading.Event,
             close_after: int | None = None, closed: threading.Event | None = None):
     gen = controller.chunk_generator(prompt="p", generation_config=GenerationConfig(),
-                                     token_handler=FakeTokenHandler(), media=MediaInputs.empty())
+                                     token_handler=FakeTokenHandler(),  # type: ignore[arg-type]  # duck-typed
+                                     media=MediaInputs.empty())
     ready.set()
     for index, chunk in enumerate(gen):
         sink.append(chunk)

@@ -5,7 +5,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Any, Literal, Iterable, Protocol
+from typing import Any, Literal, Iterable
 
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
@@ -94,16 +94,18 @@ def is_stream_request(body: completions_api.CompletionRequest | ChatCompletionRe
     return body.stream is True
 
 
-def new_http_response_chat(stream: bool,
-                           chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
+async def new_http_response_chat(stream: bool,
+                                 chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
     if stream:
         return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
-    else:
-        return new_chat_completion_union(chunk_generator)
+    # Aggregate off the event loop: pumping the inference generator here stalls the loop, and the
+    # per-token is_disconnected() check (0.5s timeout) then throttles every token of the generation.
+    return await asyncio.to_thread(new_chat_completion_union, chunk_generator)
 
 
-def new_http_response_completions(stream: bool,
-                                  chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
+async def new_http_response_completions(stream: bool,
+                                        chunk_generator: Iterable[ChatCompletionChunk]) -> (
+        StreamingResponse | ChatCompletion | completions_api.CompletionResponse):
     def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
         completions_api.CompletionResponse]:
         def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
@@ -121,8 +123,18 @@ def new_http_response_completions(stream: bool,
 
     if stream:
         return StreamingResponse(stream_generator(chunk_converter(chunk_generator)), media_type="text/event-stream")
-    else:
-        return new_chat_completion_union(chunk_generator)
+
+    def aggregate() -> completions_api.CompletionResponse:
+        # completions endpoint must answer the completions schema (choices[].text), not the chat one
+        finish_reason, full_content, _, _ = make_union(chunk_generator)
+        return completions_api.CompletionResponse(id=str(uuid.uuid4()), created=int(time.time()),
+                                                  choices=[completions_api.CompletionChoice(
+                                                      text=full_content,
+                                                      finish_reason="stop" if finish_reason else None)])
+
+    # same as new_http_response_chat: keep the event loop free while the generator is consumed
+    response: completions_api.CompletionResponse = await asyncio.to_thread(aggregate)
+    return response
 
 
 def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) -> ChatCompletion:
@@ -303,13 +315,13 @@ class BaseController(ABC):
         if last_message:
             if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in \
                     content_text(last_message.content).lower():
-                return new_http_response_chat(stream, [
+                return await new_http_response_chat(stream, [
                     new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
             elif last_message.role == ROLE_TOOL:
                 log_client_generated.debug(content_text(last_message.content))
 
         invalid_response = self.validate_messages(messages, body.tools)
-        return new_http_response_chat(stream, [invalid_response]) if invalid_response \
+        return (await new_http_response_chat(stream, [invalid_response])) if invalid_response \
             else await self.handle_chat_completion(body, request)
 
     @abstractmethod
@@ -386,8 +398,8 @@ class BaseOVController(BaseController):
                 self.prompt_escaper)
         except MediaError as e:
             log.info("multimodal request rejected: %s", e)
-            return new_http_response_chat(stream, [new_chat_completion_chunk(
-                response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name,
+            return await new_http_response_chat(stream, [new_chat_completion_chunk(
+                response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name or "",
                 content=str(e), finish_reason=STOP)])
 
         chat_history = new_chat_history(prepared.messages, tools_raw)
@@ -418,7 +430,7 @@ class BaseOVController(BaseController):
         over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
         if over_limit_response:
-            return new_http_response_chat(stream, [over_limit_response])
+            return await new_http_response_chat(stream, [over_limit_response])
 
         if self.log_inference.isEnabledFor(logging.DEBUG):
             self.log_inference.debug(
@@ -436,7 +448,7 @@ class BaseOVController(BaseController):
         else:
             self.log_inference.info(f"inference start, media='{media.summary()}'")
 
-        user_context = get_veai_context(messages) if is_veai else UserContext()
+        user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
         user_context.messages = messages
         user_context.model_architectures = self.config.model_architectures
         token_handler = TokenHandler(tokenizer=self.tokenizer,
@@ -452,7 +464,7 @@ class BaseOVController(BaseController):
 
         chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                                token_handler=token_handler, media=media)
-        return new_http_response_chat(stream, chunk_generator)
+        return await new_http_response_chat(stream, chunk_generator)
 
     @abstractmethod
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler,
@@ -496,16 +508,16 @@ class BaseOVController(BaseController):
         over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
 
-        return new_http_response_chat(stream, [over_limit_response]) if over_limit_response \
-            else new_http_response_completions(stream,
-                                               self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                                                    token_handler=token_handler,
-                                                                    media=MediaInputs.empty()))
+        return (await new_http_response_chat(stream, [over_limit_response])) if over_limit_response \
+            else await new_http_response_completions(stream,
+                                                     self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                                                          token_handler=token_handler,
+                                                                          media=MediaInputs.empty()))
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         if encode_size >= max_length:
             return new_chat_completion_chunk(response_id=response_id, role=ROLE_ASSISTANT,
-                                             model=self.config.model_name, finish_reason=LENGTH,
+                                             model=self.config.model_name or "", finish_reason=LENGTH,
                                              content=f"prompt exceeds limit: {encode_size} >= {max_length}")
         return None
 
@@ -520,7 +532,9 @@ def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[
     for chunk_data in chunk_generator:
         choices = chunk_data.choices
         if choices:
-            finish_reason = choices[-1].finish_reason or finish_reason
+            raw_reason = choices[-1].finish_reason
+            # legacy remote chunks finish tool calls with 'function_call' — same meaning as tool_calls
+            finish_reason = "tool_calls" if raw_reason == "function_call" else (raw_reason or finish_reason)
             for choice in choices:
                 delta = choice.delta
                 delta_content = delta.content

@@ -133,7 +133,7 @@ class OpenAiController(BaseController):
                     response_id=response_id
                 )
 
-        return new_http_response_chat(is_stream_request(body), chunk_generator())
+        return await new_http_response_chat(is_stream_request(body), chunk_generator())
 
     def shutdown(self):
         """Clean up OpenAI client."""

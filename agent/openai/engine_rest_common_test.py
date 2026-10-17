@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import unittest
 
@@ -8,7 +9,7 @@ from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
-from agent.openai.completions_api import CompletionRequest
+from agent.openai.completions_api import CompletionRequest, CompletionResponse
 from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, make_union, new_chat_history
 
 
@@ -97,6 +98,40 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual("", content)
         self.assertEqual("why", reasoning_content)
         self.assertEqual([tool_call], tool_calls)
+
+
+class NewHttpResponseCase(unittest.TestCase):
+    @staticmethod
+    def chunks():
+        return iter([new_chat_completion_chunk(role="assistant", content="hel"),
+                     new_chat_completion_chunk(role="assistant", content="lo", finish_reason="stop")])
+
+    def test_non_streaming_chat_response_is_aggregated(self):
+        from openai.types.chat import ChatCompletion
+
+        from agent.openai.engine_rest_common import new_http_response_chat
+
+        response = asyncio.run(new_http_response_chat(False, self.chunks()))
+        assert isinstance(response, ChatCompletion)
+        self.assertEqual("hello", response.choices[0].message.content)
+        self.assertEqual("stop", response.choices[0].finish_reason)
+
+    def test_non_streaming_completions_response_keeps_text_schema(self):
+        from agent.openai.engine_rest_common import new_http_response_completions
+
+        response = asyncio.run(new_http_response_completions(False, self.chunks()))
+        assert isinstance(response, CompletionResponse)
+        self.assertEqual("hello", response.choices[0].text)
+        self.assertEqual("stop", response.choices[0].finish_reason)
+
+    def test_streaming_returns_sse_response(self):
+        from starlette.responses import StreamingResponse
+
+        from agent.openai.engine_rest_common import new_http_response_chat
+
+        response = asyncio.run(new_http_response_chat(True, self.chunks()))
+        assert isinstance(response, StreamingResponse)
+        self.assertEqual("text/event-stream", response.media_type)
 
 
 if __name__ == '__main__':

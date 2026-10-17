@@ -55,13 +55,13 @@ def unsupported_message(modality: Modality, modalities: Modalities) -> str:
             f"Run the server on a model that carries the matching encoder with --pipe VLM.")
 
 
-def prepare_messages(messages: list[dict], modalities: Modalities,
+def prepare_messages(messages: list, modalities: Modalities,
                      limits: MediaLimits | None = None,
                      escaper: PromptEscaper = MEDIA_TAGS_ONLY) -> PreparedMessages:
     """Flatten multimodal content parts into prompt text with media tags and decode the media.
 
     Args:
-        messages: OpenAI chat messages as dicts (``model_dump()`` of request models).
+        messages: OpenAI chat messages — dicts or pydantic request models, normalized by ``as_dict()``.
         modalities: modalities accepted by the running model.
         limits: media size/count limits of a single request.
         escaper: neutralizes media tags and special tokens written by the client, applied to

@@ -3,8 +3,9 @@ import queue
 import threading
 import uuid
 from collections import abc
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Iterable
+from typing import Any
 from typing import SupportsInt, Literal
 
 from openai.types.chat import ChatCompletionChunk
@@ -104,7 +105,7 @@ class VlmController(BaseOVController):
                 pass
 
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        token_handler: TokenHandler, media: MediaInputs) -> Iterable[ChatCompletionChunk]:
+                        token_handler: TokenHandler, media: MediaInputs) -> Generator[ChatCompletionChunk, None, None]:
 
         response_id = str(uuid.uuid4())
 
