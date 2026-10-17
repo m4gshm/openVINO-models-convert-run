@@ -1,3 +1,4 @@
+"""Pydantic schemas of the OpenAI chat-completions request, lenient to vendor extensions."""
 from typing import List, Literal, Optional, Union, Dict, Any
 
 from openai.types.chat import ChatCompletionToolChoiceOptionParam
@@ -8,12 +9,14 @@ CHAT_COMPLETION: Literal["chat.completion"] = "chat.completion"
 
 
 class Function(BaseModel):
+    """Function invoked by the model: name plus serialized JSON arguments."""
     model_config = ConfigDict(extra="allow")
     name: str
     arguments: str  # JSON string
 
 
 class ChatCompletionMessageFunctionToolCallParam(BaseModel):
+    """A tool call reference attached to an incoming message."""
     model_config = ConfigDict(extra="allow")
     id: str
     type: str = "function"
@@ -23,6 +26,7 @@ class ChatCompletionMessageFunctionToolCallParam(BaseModel):
 # --- Request Components ---
 
 class ResponseFormat(BaseModel):
+    """Requested output format of the completion."""
     model_config = ConfigDict(extra="allow")
     type: str = "text"  # Can be "text" or "json_object"
 
@@ -63,6 +67,7 @@ class ChatCompletionContentPartParam(BaseModel):
 
 
 class ChatCompletionMessageParam(BaseModel):
+    """One message of a chat completion request."""
     model_config = ConfigDict(extra="allow")
     role: str  # "system", "user", "assistant", "tool", or "function"
     content: Optional[Union[str, List[ChatCompletionContentPartParam]]] = None
@@ -72,6 +77,7 @@ class ChatCompletionMessageParam(BaseModel):
 
 
 class FunctionDefinitionParameters(BaseModel):
+    """JSON-schema description of a tool function parameters."""
     model_config = ConfigDict(extra="allow")
     type: str = "object"
     properties: Dict[str, Any]
@@ -80,6 +86,7 @@ class FunctionDefinitionParameters(BaseModel):
 
 
 class FunctionDefinition(BaseModel):
+    """Tool function definition: name, description and parameters schema."""
     model_config = ConfigDict(extra="allow")
     name: str
     description: Optional[str] = None
@@ -87,12 +94,14 @@ class FunctionDefinition(BaseModel):
 
 
 class ChatCompletionFunctionToolParam(BaseModel):
+    """A function tool advertised to the model."""
     model_config = ConfigDict(extra="allow")
     type: str = "function"
     function: FunctionDefinition
 
 
 class StreamOptions(BaseModel):
+    """Options that modify streaming responses."""
     model_config = ConfigDict(extra="allow")
     include_usage: Optional[bool] = None
 
@@ -100,6 +109,7 @@ class StreamOptions(BaseModel):
 # --- Main Request Schema ---
 
 class ChatCompletionRequest(BaseModel):
+    """Request body of POST /v1/chat/completions."""
     model_config = ConfigDict(extra="allow")
 
     model: str = ""

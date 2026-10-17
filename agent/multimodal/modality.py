@@ -100,7 +100,7 @@ def detect_modalities(model_architectures: set[str],
     """
     detected = {Modality.TEXT}
     pipe_name = (pipe or "").upper()
-    is_vlm = pipe_name == PIPE_VLM or pipe_name == PIPE_CB
+    is_vlm = pipe_name in (PIPE_VLM, PIPE_CB)
     if is_vlm or _matches(model_architectures, VISION_ARCH_HINTS):
         detected.add(Modality.IMAGE)
     # Continuous batching pipeline has no audio inputs in the OpenVINO GenAI API.

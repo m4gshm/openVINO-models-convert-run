@@ -1,3 +1,4 @@
+"""Pydantic models of the OpenAI legacy text-completions endpoint."""
 from typing import List, Optional, Any, Literal
 
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ TEXT_COMPLETION = "text_completion"
 
 
 class CompletionRequest(BaseModel):
+    """Request body of POST /v1/completions."""
     model: Optional[str] = None
     prompt: Optional[str] = None
     max_tokens: Optional[int] = None
@@ -17,6 +19,7 @@ class CompletionRequest(BaseModel):
 
 
 class CompletionChoice(BaseModel):
+    """One completion variant returned in a completions response."""
     text: str
     index: int = 0
     logprobs: Optional[Any] = None
@@ -24,6 +27,7 @@ class CompletionChoice(BaseModel):
 
 
 class CompletionResponse(BaseModel):
+    """Response body of POST /v1/completions."""
     id: str | None
     object: str = TEXT_COMPLETION_CHUNK
     created: int | None = None

@@ -1,3 +1,4 @@
+"""OpenVINO mode entry point: model discovery, engine selection and CLI wiring."""
 import json
 import logging.config
 import multiprocessing
@@ -9,8 +10,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import uvicorn
 from fastapi import FastAPI
+from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
 
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
@@ -25,21 +26,23 @@ from agent.parser.gemma4 import Gemma4ChannelParser
 from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.parser.qwen3 import Qwen3MoeParser
-from agent.server import new_app, enum_value, stop_signal
-from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
+from agent.server import enum_value, new_app, serve_until_stop, stop_signal as app_stop_signal
 
 log = logging.getLogger(__name__)
 
-default_models_dir = "./models"
-default_models_cache_dir = "./models_cache"
+DEFAULT_MODELS_DIR = "./models"
+DEFAULT_MODELS_CACHE_DIR = "./models_cache"
 
 
 class Turn(Enum):
+    """Generic on/off switch values accepted on the command line."""
+    # pylint: disable=invalid-name  # members mirror CLI values
     on = 'on'
     off = 'off'
 
 
 class DeviceType(Enum):
+    """Inference devices the pipeline can be compiled for."""
     GPU = 'GPU'
     NPU = 'NPU'
     CPU = 'CPU'
@@ -47,12 +50,15 @@ class DeviceType(Enum):
 
 
 class Pipe(Enum):
+    """Serving pipeline kinds exposed via --pipe."""
     CB = 'CB'
     VLM = 'VLM'
     LLM = 'LLM'
 
 
 class ParserType(Enum):
+    """Prompt parser families selectable via --parser."""
+    # pylint: disable=invalid-name  # members mirror model family names
     qwen2 = 'qwen2'
     qwen3moe = 'qwen3moe'
     gemma4 = 'gemma4'
@@ -60,43 +66,52 @@ class ParserType(Enum):
 
 
 class AttentionBackend(Enum):
+    """Attention kernels selectable via --attention_backend."""
     PA = 'PA'
     SDPA = 'SDPA'
 
 
 class KvCachePrecision(Enum):
+    """KV cache data types accepted via --kv_cache_precision."""
+    # pylint: disable=invalid-name  # members mirror KV cache dtypes
     u8 = 'u8'
     u4 = 'u4'
     f16 = 'f16'
 
 
 class NpuCompilerType(Enum):
+    """NPU compiler selection strategy."""
     DRIVER = 'DRIVER'
     PLUGIN = 'PLUGIN'
     PREFER_PLUGIN = 'PREFER_PLUGIN'
 
 
 class YesNo(Enum):
+    """Generic yes/no values accepted on the command line."""
     YES = 'YES'
     NO = 'NO'
 
 
 class Level(Enum):
+    """Priority levels for queue/model priorities."""
     HIGH = 'HIGH'
     MEDIUM = 'MEDIUM'
 
 
 class NpuGenerateHint(Enum):
+    """NPUW generate hint values."""
     BEST_PERF = 'BEST_PERF'
     FAST_COMPILE = 'FAST_COMPILE'
 
 
 class PrefillHint(Enum):
+    """NPUW prefill scheduling hint values."""
     DYNAMIC = 'DYNAMIC'
     STATIC = 'STATIC'
 
 
 class AttentionHint(Enum):
+    """Attention shape hints for NPUW LLM prefill/generate."""
     DYNAMIC = 'DYNAMIC'
     STATIC = 'STATIC'
     PYRAMID = 'PYRAMID'
@@ -104,17 +119,21 @@ class AttentionHint(Enum):
 
 
 class PerformanceHint(Enum):
+    """OpenVINO performance hint values."""
     LATENCY = 'LATENCY'
     THROUGHPUT = 'THROUGHPUT'
     CUMULATIVE_THROUGHPUT = 'CUMULATIVE_THROUGHPUT'
 
 
 class MoEHint(Enum):
+    """Mixture-of-experts routing hint values."""
     DENSE = 'DENSE'
     HOST_ROUTED = 'HOST_ROUTED'
     DEVICE_ROUTED = 'DEVICE_ROUTED'
 
 
+# Single CLI entry point: maps arguments onto pipeline/scheduler/parser configuration.
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements
 def run_openvino(args):
     """Run application in OpenVINO mode with local model loading.
 
@@ -139,11 +158,11 @@ def run_openvino(args):
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
     logs_dir = f"./logs/{model_name}/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
     base_log_config = logging_config(logs_dir)
-    log.info(f"logs dir {logs_dir}")
+    log.info("logs dir %s", logs_dir)
 
     logging.config.dictConfig(base_log_config)
 
-    log.info(f"server starting with arguments application arguments: {args}")
+    log.info("server starting with arguments application arguments: %s", args)
 
     # --- Detect model architecture from config.json ---
     model_architectures: set[str] = set()
@@ -164,27 +183,27 @@ def run_openvino(args):
                 else:
                     # old models like Qwen2.5
                     max_position_embeddings = config.get("max_position_embeddings")
-            except Exception as e:
-                log.error(f"error on read {openvino_model_config_json}: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught  # malformed config.json must not abort startup
+                log.error("error on read %s: %s", openvino_model_config_json, e)
     elif not model_path.exists():
-        log.error(f"file or directory doesn't exists: '{model_path}'")
+        log.error("file or directory doesn't exists: '%s'", model_path)
         sys.exit(1)
 
     # --- Detect media capabilities of the model itself (vision / audio encoders) ---
     media_capabilities = read_media_capabilities(model_path)
-    log.info(f"model media capabilities: {media_capabilities.describe()}")
+    log.info("model media capabilities: %s", media_capabilities.describe())
 
     default_generate_opts = get_default_generate_opts()
     # --- Load generate options from file or use defaults ---
     generate_opts_file = args.generate_config_file
     generate_opts: GenerateOpts
     if generate_opts_file:
-        log.info(f"load {generate_opts_file}")
+        log.info("load %s", generate_opts_file)
         try:
             with open(generate_opts_file, "r", encoding="utf-8") as file:
                 generate_opts: GenerateOpts = GenerateOpts.model_validate_json(file.read())
         except FileNotFoundError as e:
-            log.error(f"{e}")
+            log.error("%s", e)
             raise e
     else:
         generate_opts = default_generate_opts
@@ -194,12 +213,12 @@ def run_openvino(args):
     scheduler_opts_file = args.scheduler_config_file
     scheduler_opts: SchedulerOpts
     if scheduler_opts_file:
-        log.info(f"load {scheduler_opts_file}")
+        log.info("load %s", scheduler_opts_file)
         try:
             with open(scheduler_opts_file, "r", encoding="utf-8") as file:
                 scheduler_opts = SchedulerOpts.model_validate_json(file.read())
         except FileNotFoundError as e:
-            log.error(f"{e}")
+            log.error("%s", e)
             raise e
     else:
         scheduler_opts = default_scheduler_opts
@@ -208,12 +227,12 @@ def run_openvino(args):
     chat_template = ''
     chat_template_file = args.chat_template_file
     if chat_template_file:
-        log.info(f"load {chat_template_file}")
+        log.info("load %s", chat_template_file)
         try:
             with open(chat_template_file, "r", encoding="utf-8") as file:
                 chat_template = file.read()
         except FileNotFoundError as e:
-            log.error(f"{e}")
+            log.error("%s", e)
             raise e
 
     # --- Configure prompt length and device ---
@@ -233,14 +252,16 @@ def run_openvino(args):
     if not dynamic_split_fuse is None:
         scheduler_config.dynamic_split_fuse = dynamic_split_fuse
         if dynamic_split_fuse:
-            num_batched_tokens = scheduler_opts.max_num_batched_tokens or default_scheduler_opts.max_num_batched_tokens or 8192
+            num_batched_tokens = (scheduler_opts.max_num_batched_tokens
+                                  or default_scheduler_opts.max_num_batched_tokens or 8192)
             scheduler_config.max_num_batched_tokens = num_batched_tokens
         else:
             scheduler_config.max_num_batched_tokens = max_prompt_len
     opts_cache_size = scheduler_opts.cache_size or default_scheduler_opts.cache_size
     if opts_cache_size:
         scheduler_config.cache_size = opts_cache_size
-    cache_interval_multiplier = scheduler_opts.cache_interval_multiplier or default_scheduler_opts.cache_interval_multiplier
+    cache_interval_multiplier = (scheduler_opts.cache_interval_multiplier
+                                 or default_scheduler_opts.cache_interval_multiplier)
     if cache_interval_multiplier:
         scheduler_config.cache_interval_multiplier = cache_interval_multiplier
     opts_max_num_seqs = scheduler_opts.max_num_seqs or default_scheduler_opts.max_num_seqs
@@ -248,7 +269,8 @@ def run_openvino(args):
         scheduler_config.max_num_seqs = opts_max_num_seqs
 
     # scheduler_config.num_kv_blocks = 2048
-    num_linear_attention_blocks = scheduler_opts.num_linear_attention_blocks or default_scheduler_opts.num_linear_attention_blocks
+    num_linear_attention_blocks = (scheduler_opts.num_linear_attention_blocks
+                                   or default_scheduler_opts.num_linear_attention_blocks)
     if num_linear_attention_blocks:
         scheduler_config.num_linear_attention_blocks = num_linear_attention_blocks
     use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
@@ -256,7 +278,9 @@ def run_openvino(args):
     attention_opts = scheduler_opts.sparse_attention_config
     if use_sparse_attention and attention_opts:
         sparse_attention_config = SparseAttentionConfig()
-        sparse_attention_config.mode = SparseAttentionMode.TRISHAPE if attention_opts.sparse_attention_mode == "TRISHAPE" else SparseAttentionMode.XATTENTION
+        sparse_attention_config.mode = (SparseAttentionMode.TRISHAPE
+                                        if attention_opts.sparse_attention_mode == "TRISHAPE"
+                                        else SparseAttentionMode.XATTENTION)
         sparse_attention_config.num_last_dense_tokens_in_prefill = attention_opts.num_last_dense_tokens_in_prefill
         sparse_attention_config.num_retained_start_tokens_in_cache = attention_opts.num_retained_start_tokens_in_cache
         sparse_attention_config.num_retained_recent_tokens_in_cache = attention_opts.num_retained_recent_tokens_in_cache
@@ -309,10 +333,10 @@ def run_openvino(args):
 
     if not pipe and media_capabilities.has_media:
         pipe = or_default_pipe(pipe, Pipe.VLM)
-        log.info(f"pipe selected by model media capabilities: {enum_value(pipe)}")
+        log.info("pipe selected by model media capabilities: %s", enum_value(pipe))
 
     if not pipe:
-        log.error(f"need define --pipe for model architectures={model_architectures}")
+        log.error("need define --pipe for model architectures=%s", model_architectures)
         sys.exit(1)
 
     # --- Tool handling and inference detection flags ---
@@ -327,10 +351,9 @@ def run_openvino(args):
                 Lfm2Parser() if parser_type == ParserType.lfm2 else \
                     Parser()
 
-    log.info(
-        f"model: path='{model_path}', architectures={model_architectures}, pipe={pipe}, parser='{parser_type}', "
-        f"parser_type='{type(model_parser)}'")
-    log.debug(f"cache dir {model_cache_dir}")
+    log.info("model: path='%s', architectures=%s, pipe=%s, parser='%s', parser_type='%s'",
+             model_path, model_architectures, pipe, parser_type, type(model_parser))
+    log.debug("cache dir %s", model_cache_dir)
 
     npu_generate_hint = args.npu_generate_hint
     performance_hint = args.performance_hint
@@ -339,10 +362,10 @@ def run_openvino(args):
     attention_backend = args.attention_backend
     is_cb = pipe == Pipe.CB
     if is_cb and attention_backend == enum_value(AttentionBackend.PA):
-        log.info(f"erase attention_backend={attention_backend} for unsupported pipe={enum_value(pipe)}")
+        log.info("erase attention_backend=%s for unsupported pipe=%s", attention_backend, enum_value(pipe))
     elif attention_backend is None and not (is_cb or is_device_npu or is_gemma4):
         attention_backend = enum_value(AttentionBackend.PA)
-        log.info(f"force attention_backend={attention_backend}")
+        log.info("force attention_backend=%s", attention_backend)
 
     cores_available = multiprocessing.cpu_count()
     cpu_pipeline_properties = {
@@ -442,7 +465,7 @@ def run_openvino(args):
 
     if max_prompt_len:
         npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
-    # todo llm or pa
+    # decide: llm or pa backend (see commented block below)
     # if attention_backend == enum_value(AttentionBackend.PA):
     #     npu_pipeline_properties["NPUW_PA"] = "YES"
 
@@ -455,7 +478,7 @@ def run_openvino(args):
 
     # --- Select pipeline properties based on device ---
     if not model_path.exists():
-        log.error(f"model path is not existed: {model_path}")
+        log.error("model path is not existed: %s", model_path)
 
     pipeline_properties = npu_pipeline_properties if is_device_npu \
         else cpu_pipeline_properties if device == DeviceType.CPU \
@@ -488,6 +511,7 @@ def run_openvino(args):
         if dflash_mode:
             draft_properties["dflash_mode"] = True
         draft_scheduler_config = SchedulerConfig()
+        # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
         draft_model = py_openvino_genai.draft_model(models_path=draft_model_path, device=device_value,
                                                     scheduler_config=draft_scheduler_config, **draft_properties)
         pipeline_properties["draft_model"] = draft_model
@@ -515,9 +539,9 @@ def run_openvino(args):
     handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
     # --- Choose engine: sequential or continuous batching ---
-    log.info(f"model={model_path}, device={device}, properties={pipeline_properties}, "
-             f"generate_opts={generate_opts.model_dump(exclude_unset=True, exclude_none=True)}, "
-             f"scheduler_config={scheduler_config}")
+    log.info("model=%s, device=%s, properties=%s, generate_opts=%s, scheduler_config=%s",
+             model_path, device, pipeline_properties,
+             generate_opts.model_dump(exclude_unset=True, exclude_none=True), scheduler_config)
     prompt_lookup = args.prompt_lookup == Turn.on.value
     if prompt_lookup:
         pipeline_properties["prompt_lookup"] = True
@@ -532,7 +556,7 @@ def run_openvino(args):
         generate_opts=generate_opts,
         handler_config=handler_config,
         pipeline_properties=pipeline_properties,
-        stop_signal=stop_signal,
+        stop_signal=app_stop_signal,
     ) if not is_cb else init_continuous_batching_engine(
         controller_config=controller_config,
         model_path=str(model_path),
@@ -543,25 +567,11 @@ def run_openvino(args):
         scheduler_config=scheduler_config,
         pipeline_properties=pipeline_properties,
         tokenizer_properties=tokenizer_properties,
-        stop_signal=stop_signal,
+        stop_signal=app_stop_signal,
     )
 
     # --- Start uvicorn server in a daemon thread ---
-    log.info(f"listening {args.host}:{args.port}")
-
-    def server_handle():
-        uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
-
-    server_thread = threading.Thread(target=server_handle, daemon=True)
-    server_thread.start()
-    # handle()
-    try:
-        stopped = False
-        while not stopped:
-            stopped = stop_signal.wait(timeout=1)
-        log.debug(f"main thread finish")
-    except Exception as e:
-        log.debug(f"main thread finish with error: {e}")
+    serve_until_stop(app, args.host, args.port, app_stop_signal, log)
 
 
 def get_or_default[T](val: T | None, default: T | None) -> T | None:
@@ -574,10 +584,13 @@ def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:
     return pipe or default
 
 
+# Pipeline factory over the pybind11 openvino_genai API; kwargs mirror its constructors.
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def init_continuous_batching_engine(controller_config: ControllerConfig,
                                     handler_config: TokenHandlerConfig,
                                     model_path: str, device: str, parser: Parser,
                                     stop_signal: threading.Event,
+                                    # pylint: disable-next=c-extension-no-member  # pybind11 module
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
                                     generate_opts=GenerateOpts(),
                                     pipeline_properties: dict[str, Any] | None = None,
@@ -606,7 +619,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
     """
     # --- Track initial memory usage ---
     start_mem = get_current_memory()
-    log.debug(f"consumed memory: {start_mem:.2f} MB")
+    log.debug("consumed memory: %.2f MB", start_mem)
 
     # --- Ensure all property dicts are initialized ---
     if not pipeline_properties:
@@ -619,21 +632,22 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
     # --- Instantiate the ContinuousBatchingPipeline ---
     # --- Instantiate the ContinuousBatchingPipeline ---
     try:
+        # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
         pipe = py_openvino_genai.ContinuousBatchingPipeline(models_path=model_path,
                                                             scheduler_config=scheduler_config,
                                                             device=device,
                                                             properties=pipeline_properties,
                                                             tokenizer_properties=tokenizer_properties,
                                                             vision_encoder_properties=vision_encoder_properties)
-        log.info(f"model loaded successfully, pipe {type(pipe)}")
+        log.info("model loaded successfully, pipe %s", type(pipe))
 
         # --- Log memory delta after model load ---
         loaded_pipe_mem = get_current_memory()
         delta = loaded_pipe_mem - start_mem
 
-        log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
-    except Exception as e:
-        log.error(f"instantiate pipeline error: {e}", exc_info=e)
+        log.debug("consumed memory: %.2f MB, delta: %.2f MB", loaded_pipe_mem, delta)
+    except Exception as e:  # pylint: disable=broad-exception-caught  # any load failure must exit with a clear log
+        log.error("instantiate pipeline error: %s", e, exc_info=e)
         sys.exit(1)
 
     # --- Wire controller to FastAPI app ---
@@ -644,6 +658,8 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
                                                 stop_signal=stop_signal))
 
 
+# Pipeline factory over the pybind11 openvino_genai API; kwargs mirror its constructors.
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def init_sequential_engine(controller_config: ControllerConfig,
                            handler_config: TokenHandlerConfig,
                            model_path: str,
@@ -680,21 +696,23 @@ def init_sequential_engine(controller_config: ControllerConfig,
 
         # --- Track initial memory usage ---
     start_mem = get_current_memory()
-    log.debug(f"consumed memory: {start_mem:.2f} MB")
+    log.debug("consumed memory: %.2f MB", start_mem)
 
     # --- Instantiate LLMPipeline or VLMPipeline based on vlm flag ---
     pipe = (
+        # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
         py_openvino_genai.VLMPipeline(models_path=model_path, device=device, **pipeline_properties) if vlm else
+        # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
         py_openvino_genai.LLMPipeline(models_path=model_path, device=device, **pipeline_properties)
     )
 
-    log.info(f"model loaded successfully, pipe {type(pipe)}")
+    log.info("model loaded successfully, pipe %s", type(pipe))
 
     # --- Log memory delta after model load ---
     loaded_pipe_mem = get_current_memory()
     delta = loaded_pipe_mem - start_mem
 
-    log.debug(f"consumed memory: {loaded_pipe_mem:.2f} MB, delta: {delta:.2f} MB")
+    log.debug("consumed memory: %.2f MB, delta: %.2f MB", loaded_pipe_mem, delta)
 
     # --- Wire VlmController to FastAPI app ---
     return new_app(VlmController(config=controller_config,
@@ -705,10 +723,11 @@ def init_sequential_engine(controller_config: ControllerConfig,
 
 
 def add_openvino_args(args_parser: ArgumentParser):
+    """Register CLI arguments of the OpenVINO mode."""
     args_parser.add_argument("--host", default="127.0.0.1", help="%(default)s")
     args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
-    args_parser.add_argument("--models_dir", type=str, default=default_models_dir, required=False, help="%(default)s")
-    args_parser.add_argument("--models_cache_dir", type=str, default=default_models_cache_dir, help="%(default)s")
+    args_parser.add_argument("--models_dir", type=str, default=DEFAULT_MODELS_DIR, required=False, help="%(default)s")
+    args_parser.add_argument("--models_cache_dir", type=str, default=DEFAULT_MODELS_CACHE_DIR, help="%(default)s")
     args_parser.add_argument("--model", type=str, default=None, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
 
@@ -813,4 +832,5 @@ def add_openvino_args(args_parser: ArgumentParser):
 
 
 def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
+    """Return the CLI-choice values of an enum class."""
     return [member.value for member in enum_class]

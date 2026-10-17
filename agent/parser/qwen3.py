@@ -1,10 +1,11 @@
+"""Parser of the Qwen3 tool call syntax: ``<function=name>`` blocks with parameters."""
 import logging
 import re
 from typing import Any, Iterable
 
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
-from agent.parser import fill_state_by_prompt_tail
+from agent.parser import fill_state_by_prompt_tail, iter_tool_call_blocks, match_name_and_tail
 from agent.parser.json_fixer import try_to_parse_json_arguments
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
@@ -21,18 +22,14 @@ FUNCTION_END = CLOSE_TAG_PREF + "function>"
 
 
 def parse_name(parameters_block) -> tuple[str | None, str | None]:
-    pattern = f"=(.*?){OPEN_TAG_SUF}(.*)"
-    match = re.search(pattern, parameters_block, re.DOTALL)
-    if match:
-        name = match.group(1).strip()
-        tail = match.group(2).strip()
-        return name, tail
-    else:
-        return None, None
+    """Split a ``function=name ...`` block into the function name and the arguments tail."""
+    return match_name_and_tail(f"=(.*?){OPEN_TAG_SUF}(.*)", parameters_block)
 
 
-def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> tuple[
+# Per-parameter type/expectation bookkeeping that does not decompose cleanly.
+def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> tuple[  # pylint: disable=too-many-locals
     dict[str, Any], bool]:
+    """Parse tool call parameters, casting array and object values declared by the schema."""
     arguments: dict[str, Any] = {}
     partial = False
     if arguments_block.startswith("parameter="):
@@ -83,12 +80,14 @@ def get_arguments(expected_parameters: dict[str, Any], arguments_block: str) -> 
 
 
 def is_expected_type(exp_type: str, possible_types: Any) -> bool | Any:
+    """True when ``exp_type`` matches a single expected type or one of the variants."""
     if isinstance(possible_types, Iterable):
         return exp_type in possible_types
     return exp_type == possible_types
 
 
 def parse_function_call(state: ParserState, function_block: str, partial: bool) -> tuple[ParsedFunctionCall, bool]:
+    """Parse a single function block, marking ``partial`` on unfinished arguments."""
     function_block_rstrip = function_block.rstrip()
     if function_block_rstrip.endswith(FUNCTION_END):
         function_block = function_block_rstrip[:-len(FUNCTION_END)]
@@ -96,7 +95,8 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
     func_name, tail = parse_name(function_block)
     if not func_name is None:
         expected_parameters = state.get_function_parameters(func_name)
-        log.debug(f"found expected_parameters: function={func_name}, expected_parameters={expected_parameters}")
+        log.debug("found expected_parameters: function=%s, expected_parameters=%s",
+                  func_name, expected_parameters)
         expected_properties_dict = expected_parameters if isinstance(expected_parameters, dict) else None
         arguments, partial_param = get_arguments(expected_properties_dict, tail or "")
         if partial_param:
@@ -109,6 +109,8 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
 
 
 class Qwen3MoeParser(QwenBaseParser):
+    """Parser for Qwen3 thinking models with the parameter-block tool call syntax."""
+
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         if not prompt:
@@ -121,24 +123,12 @@ class Qwen3MoeParser(QwenBaseParser):
         return state
 
     def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
-        tool_call_expression = tool_call_expression.lstrip()
-        tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
-
+        """Parse ``<tool_call>`` blocks holding ``<function=name>`` definitions."""
         parsed_calls: list[ParsedFunctionCall] = []
         partial = False
-        for call_block in tool_call_blocks:
-            if len(call_block) == 0:
-                continue
-
-            call_block_rstrip = call_block.rstrip()
-            if call_block_rstrip.endswith(TOOL_CALL_END):
-                call_block = call_block_rstrip[:-len(TOOL_CALL_END)]
-
-            call_block = call_block.lstrip()
-            function_blocks = call_block.split(FUNCTION_START_PREF)
+        for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
+                                                        FUNCTION_START_PREF):
             for function_block in function_blocks:
-                if len(function_block) == 0:
-                    continue
                 parsed_function_call, partial = parse_function_call(state, function_block, partial)
 
                 if parsed_function_call:

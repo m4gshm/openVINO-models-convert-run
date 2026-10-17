@@ -1,10 +1,13 @@
+"""Tests of engine_rest_common: config, chat history, stream flag, aggregation and probes."""
 import asyncio
 import base64
 import unittest
 from typing import Any, cast
 from unittest.mock import patch
 
+from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
+from starlette.responses import StreamingResponse
 
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
@@ -12,25 +15,31 @@ from agent.multimodal.request_media import prepare_messages
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
-from agent.openai.engine_rest_common import disconnect_probe
-from agent.openai.engine_rest_common import ControllerConfig, is_stream_request, make_union, new_chat_history
+from agent.openai.engine_rest_common import (ControllerConfig, disconnect_probe, is_stream_request,
+                                             make_union, new_chat_history, new_http_response_chat,
+                                             new_http_response_completions)
 
 
 def new_config(**kwargs) -> ControllerConfig:
+    """Controller config with sane defaults, overridable via kwargs."""
     return ControllerConfig(max_prompt_len=4096, model_architectures=set(), **kwargs)
 
 
 class ControllerConfigCase(unittest.TestCase):
+    """Tests of ControllerConfig modality and media limit helpers."""
     def test_text_only_by_default(self):
+        """A config without declared modalities reports text only."""
         config = new_config()
         self.assertEqual(["text"], config.modalities_of().names())
 
     def test_text_is_always_reported(self):
+        """Text is reported alongside any declared media modality."""
         config = new_config(modalities={"image"})
         self.assertTrue(config.modalities_of().supports(Modality.TEXT))
         self.assertTrue(config.modalities_of().supports(Modality.IMAGE))
 
     def test_media_limits_come_from_config(self):
+        """Media size/count/local-file/http limits are taken from the config."""
         config = new_config(max_media_bytes=1024, max_media_items=3,
                             allow_local_media_files=True, media_http_timeout=1.5)
         limits = config.media_limits()
@@ -41,18 +50,22 @@ class ControllerConfigCase(unittest.TestCase):
 
 
 class NewChatHistoryCase(unittest.TestCase):
+    """Tests of chat history building from OpenAI-style messages."""
     def test_request_models_are_accepted(self):
+        """Pydantic request messages are converted to plain history dicts."""
         messages = [ChatCompletionMessageParam(role="user", content="hi")]
         stored = new_chat_history(messages).get_messages()
         self.assertEqual("user", stored[0]["role"])
         self.assertEqual("hi", stored[0]["content"])
 
     def test_tools_are_registered(self):
+        """Tools passed with the request land in the history."""
         tools = [{"type": "function", "function": {"name": "read_file"}}]
         history = new_chat_history([{"role": "user", "content": "hi"}], tools)
         self.assertEqual(1, len(history.get_tools()))
 
     def test_media_tags_reach_the_history(self):
+        """Prepared media parts become ov_genai tags in the stored content."""
         png = "data:image/png;base64," + base64.b64encode(new_png(rgb_pixels(2, 2))).decode()
         messages = [{"role": "user", "content": [{"type": "text", "text": "describe "},
                                                  {"type": "image_url", "image_url": {"url": png}}]}]
@@ -64,22 +77,28 @@ class NewChatHistoryCase(unittest.TestCase):
 
 
 class IsStreamRequestCase(unittest.TestCase):
+    """Tests of the stream flag reader."""
     def test_completions_request_without_stream_flag(self):
+        """A completions request without the stream flag is not streaming."""
         # /v1/completions default is None; it used to crash with `None | True` TypeError
         body = CompletionRequest(prompt="hi", max_tokens=256, temperature=0, stop=[])
         self.assertIsNone(body.stream)
         self.assertFalse(is_stream_request(body))
 
     def test_chat_request_defaults_to_streaming(self):
+        """A chat request defaults to streaming."""
         self.assertTrue(is_stream_request(ChatCompletionRequest()))
 
     def test_explicit_flags_are_respected(self):
+        """Explicit stream flags win over the defaults."""
         self.assertTrue(is_stream_request(ChatCompletionRequest(stream=True)))
         self.assertFalse(is_stream_request(CompletionRequest(prompt="hi", stream=False)))
 
 
 class MakeUnionCase(unittest.TestCase):
+    """Tests of chunk aggregation into a single response."""
     def test_plain_chunks_without_reasoning_extra(self):
+        """Deltas without the reasoning extra aggregate without AttributeError."""
         # reasoning_content is an optional extra field: deltas of regular tokens (and error
         # stop responses) do not carry it — direct attribute access used to raise AttributeError
         chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="Hel", model="m"),
@@ -92,6 +111,7 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual([], tool_calls)
 
     def test_thinking_and_tool_calls_are_aggregated(self):
+        """Reasoning content and tool calls are collected across chunks."""
         tool_call = new_tool_call(ChoiceDeltaToolCallFunction(name="read_file", arguments="{}"))
         chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="why", thinking=True, model="m"),
                   new_chat_completion_chunk(role=ROLE_ASSISTANT, tool_calls=[tool_call], model="m",
@@ -104,7 +124,9 @@ class MakeUnionCase(unittest.TestCase):
 
 
 class DisconnectProbeCase(unittest.TestCase):
+    """Tests of the throttled disconnect probe."""
     def test_throttles_underlying_probe_within_interval(self):
+        """The underlying probe runs at most once per interval window."""
         calls = []
 
         def fake_is_disconnected(request):
@@ -118,6 +140,7 @@ class DisconnectProbeCase(unittest.TestCase):
         self.assertEqual(1, len(calls))  # one roundtrip per interval window, not per token
 
     def test_probes_again_after_interval_expired(self):
+        """The probe runs again once the interval has expired."""
         calls = []
 
         def fake_not_disconnected(_request):
@@ -131,6 +154,7 @@ class DisconnectProbeCase(unittest.TestCase):
         self.assertEqual(3, len(calls))
 
     def test_disconnect_latches_true_without_further_probes(self):
+        """Once disconnected, the probe latches True without further transport calls."""
         calls = []
 
         def fake_disconnected(_request):
@@ -145,34 +169,29 @@ class DisconnectProbeCase(unittest.TestCase):
 
 
 class NewHttpResponseCase(unittest.TestCase):
+    """Tests of response construction for streaming and non-streaming modes."""
     @staticmethod
     def chunks():
+        """Fresh iterator of two assistant chunks."""
         return iter([new_chat_completion_chunk(role="assistant", content="hel"),
                      new_chat_completion_chunk(role="assistant", content="lo", finish_reason="stop")])
 
     def test_non_streaming_chat_response_is_aggregated(self):
-        from openai.types.chat import ChatCompletion
-
-        from agent.openai.engine_rest_common import new_http_response_chat
-
+        """Chunks are aggregated into a single ChatCompletion when streaming is off."""
         response = asyncio.run(new_http_response_chat(False, self.chunks()))
         assert isinstance(response, ChatCompletion)
         self.assertEqual("hello", response.choices[0].message.content)
         self.assertEqual("stop", response.choices[0].finish_reason)
 
     def test_non_streaming_completions_response_keeps_text_schema(self):
-        from agent.openai.engine_rest_common import new_http_response_completions
-
+        """Non-streaming completions keep the text-completions schema."""
         response = asyncio.run(new_http_response_completions(False, self.chunks()))
         assert isinstance(response, CompletionResponse)
         self.assertEqual("hello", response.choices[0].text)
         self.assertEqual("stop", response.choices[0].finish_reason)
 
     def test_streaming_returns_sse_response(self):
-        from starlette.responses import StreamingResponse
-
-        from agent.openai.engine_rest_common import new_http_response_chat
-
+        """Streaming mode returns a text/event-stream response."""
         response = asyncio.run(new_http_response_chat(True, self.chunks()))
         assert isinstance(response, StreamingResponse)
         self.assertEqual("text/event-stream", response.media_type)

@@ -1,3 +1,4 @@
+"""Tests for user context parsing from the Veai system prompt."""
 import unittest
 from importlib.resources import files
 from pathlib import Path
@@ -8,7 +9,10 @@ TEST_RESOURCES = "test_resources"
 
 
 class UserContextCase(unittest.TestCase):
+    """Checks user context extraction from the Veai system prompt."""
+
     def test_parse(self):
+        """OS info and project path must be extracted from project_information."""
         veai_project_information_file = files(__package__).joinpath(TEST_RESOURCES, "veai_project_information.txt")
         veai_project_information = veai_project_information_file.read_text(encoding="utf-8")
         context = _get_context(veai_project_information)

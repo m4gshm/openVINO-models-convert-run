@@ -1,3 +1,4 @@
+"""Reconstruction of user context (files, OS, project dir) from the Veai conversation."""
 import json
 import logging
 from collections import defaultdict
@@ -21,10 +22,12 @@ log: Logger = logging.getLogger(__name__)
 
 
 def is_veai_agent(messages: list[ChatCompletionMessageParam]) -> bool:
+    """Check that the conversation is a Veai Agent session."""
     return is_agent(messages, "You are Veai Agent")
 
 
 def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext | None:
+    """Extract the user context carried by the first (system) message."""
     # class ContextField(Enum):
     #     OS_INFO = 'OS info', lambda uc: uc.os
     #     PROJECT_ABSOLUTE_PATH = 'Project absolute path', lambda uc: uc.workdir
@@ -84,6 +87,7 @@ def _get_context(system_prompt: str | list[dict[str, Any]] | None) -> UserContex
 
 
 def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) -> UserContextFiles:
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks  # message-scan dispatcher; splitting it is a separate refactor
     list_dir_call: dict[str, str] = {}
     list_dir_result: dict[str, list[str]] = {}
     file_content_result: dict[Path, bytes | None] = {}
@@ -95,7 +99,7 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
     read_contents = {}
     read_files: dict[Path, dict[int, tuple[int, str]]] = {}
     write_statuses = dict[str, str]()
-    START_LINE = "start_line"
+    start_line_key = "start_line"
     for message in messages:
         is_tool = message.role == "tool"
         if is_tool:
@@ -118,7 +122,9 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                 # reset prev read file
             elif message.name == edit_file:
                 # reset prev read file
-                # '{"result":"success with json content","content":{"file_path":"agent/requirements.txt","failed_edits":[]}}'
+                # edit_file tool result example:
+                # '{"result":"success with json content","content":'
+                # '{"file_path":"agent/requirements.txt","failed_edits":[]}}'
                 pass
 
         tool_calls = message.tool_calls
@@ -147,13 +153,13 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                     if target_file:
                         removed_file_content = clean_read_files(target_file, read_files)
                         if removed_file_content:
-                            log.debug(f"file content removed from context by {edit_file}, file={target_file}")
+                            log.debug("file content removed from context by %s, file=%s", edit_file, target_file)
             elif function_name == read_file:
                 arguments = parse_arguments(function)
                 if isinstance(arguments, dict):
                     target_file = get_target_file_as_path(arguments)
                     if target_file:
-                        start_line_int = as_int_or_none(arguments.get(START_LINE))
+                        start_line_int = as_int_or_none(arguments.get(start_line_key))
                         end_line_int = as_int_or_none(arguments.get(END_LINE))
                         if not (start_line_int is None or end_line_int is None):
                             lines_ranges = read_files.setdefault(target_file, {})
@@ -162,15 +168,15 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
     files_hierarchy = tree_structure()
     if root:
         add_path_to_dict(files_hierarchy, root)
-    for call_id, dir in list_dir_call.items():
-        if dir != ".":
-            add_path_to_dict(files_hierarchy, dir)
+    for call_id, directory in list_dir_call.items():
+        if directory != ".":
+            add_path_to_dict(files_hierarchy, directory)
 
     for file_name, line_ranges_with_call_id in read_files.items():
         if len(line_ranges_with_call_id) > 1:
             # merge
             start_lines = {}
-            for start_line, (end_line, call_id) in line_ranges_with_call_id.items():
+            for start_line, (_end_line, call_id) in line_ranges_with_call_id.items():
                 content = read_contents.get(call_id)
                 if content:
                     start_lines[start_line] = content
@@ -184,7 +190,7 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
                 file_content_result[file_name] = text.encode('utf-8')
         else:
             items = line_ranges_with_call_id.items()
-            start_line, (end_line, call_id) = next(iter(items))
+            start_line, (_end_line, call_id) = next(iter(items))
             content = read_contents.get(call_id)
             text = content.get(TEXT, None) if content else None
             if text:
@@ -193,20 +199,24 @@ def _get_files(root: Path | None, messages: list[ChatCompletionMessageParam]) ->
     return UserContextFiles(file_content_result)
 
 
-def clean_read_files(target_file: Path, read_files: dict[Path, dict[int, tuple[int, str]]]) -> dict[int, tuple[
-    int, str]] | None:
+def clean_read_files(target_file: Path,
+                     read_files: dict[Path, dict[int, tuple[int, str]]]) -> dict[int, tuple[int, str]] | None:
+    """Drop and return the tracked line ranges of the file after write/edit."""
     return read_files.pop(target_file, None)
 
 
 def as_int_or_none(val: Any | None) -> int | None:
+    """Return the value as int; None when it is neither str nor int."""
     if isinstance(val, str):
         return int(val)
-    elif isinstance(val, int):
+    if isinstance(val, int):
         return val
     return None
 
 
 def read_list_dir(message: ChatCompletionMessageParam) -> list[str] | None:
+    # pylint: disable=too-many-nested-blocks  # guard chain over optional result fields; early-return rewrite is a separate refactor
+    """Return directory tree lines from a list_dir tool result message."""
     parsed_content = parse_content(message)
     result = parsed_content.get("result")
     if result == "success with json content":
@@ -235,42 +245,47 @@ def read_list_dir(message: ChatCompletionMessageParam) -> list[str] | None:
                                 content = file.read()
                                 subdirs = content.split("\n")
                         except FileNotFoundError:
-                            log.error(f"dump file not found: {dump_file_name}")
+                            log.error("dump file not found: %s", dump_file_name)
                             subdirs = None
                 return subdirs
     return None
 
 
 def get_target_file_as_path(arguments: dict) -> Path | None:
+    """Return the target_file argument as a Path, if present."""
     target_file = arguments.get("target_file")
     return Path(target_file) if target_file else None
 
 
 def parse_arguments(function: Function) -> Any:
+    """Parse model-generated tool-call arguments, degrading to empty dict on failure."""
     arguments_str = function.arguments
     try:
         arguments = json.loads(arguments_str)
-    except Exception as e:
-        log.error(f"function arguments parsing error, function='{function.name}', error='{e}'")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # model-generated JSON: any failure must degrade to {}
+        log.error("function arguments parsing error, function='%s', error='%s'", function.name, e)
         arguments = {}
     return arguments
 
 
 def parse_content(message: ChatCompletionMessageParam) -> Any:
+    """Parse a tool-result message content, degrading to empty dict on failure."""
     content = content_text(message.content)
     try:
         parsed_content = json.loads(content)
-    except Exception as e:
-        log.error(f"error on parse content of tool_call={message.tool_call_id}, content='{content}'")
+    except Exception:  # pylint: disable=broad-exception-caught  # model-generated JSON: any failure must degrade to {}
+        log.error("error on parse content of tool_call=%s, content='%s'", message.tool_call_id, content)
         parsed_content = {}
     return parsed_content
 
 
 def tree_structure() -> defaultdict:
+    """Build an infinitely nested defaultdict used as a path tree."""
     return defaultdict(tree_structure)
 
 
 def add_path_to_dict(tree: defaultdict, path: str | Path):
+    """Add the path parts into the nested tree, branch per path segment."""
     path = path if isinstance(path, Path) else Path(path)
     parts = path.parts
     current = tree

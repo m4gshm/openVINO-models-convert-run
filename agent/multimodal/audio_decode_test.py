@@ -1,3 +1,4 @@
+"""Tests for WAV decoding, resampling and the audio tensor conversion."""
 import struct
 import unittest
 
@@ -43,7 +44,10 @@ def sine(samples: int, cycles: float = 4) -> np.ndarray:
 
 
 class DecodeWavCase(unittest.TestCase):
+    """Tests of raw WAV container decoding."""
+
     def test_pcm16_mono(self):
+        """16 bit mono PCM decodes back to the original samples."""
         expected = sine(64)
         samples, sample_rate = decode_wav(new_wav(pcm16(expected), 8000, 1, PCM_16))
         self.assertEqual(8000, sample_rate)
@@ -51,28 +55,33 @@ class DecodeWavCase(unittest.TestCase):
         self.assertTrue(np.allclose(expected, samples, atol=2 / 32767))
 
     def test_pcm8_mono_is_unsigned(self):
+        """8 bit unsigned PCM is rescaled to the [-1, 1] range."""
         encoded = np.round((np.array([0.0, 1.0, -1.0], dtype=np.float32) * 127) + 128).astype(np.uint8)
         samples, _ = decode_wav(new_wav(encoded.tobytes(), 16000, 1, PCM_8))
         self.assertTrue(np.allclose([0.0, 0.992, -0.992], samples, atol=0.01))
 
     def test_pcm24_mono(self):
+        """24 bit PCM decodes with negligible error."""
         expected = sine(32)
         samples, _ = decode_wav(new_wav(pcm24(expected), 16000, 1, PCM_24))
         self.assertTrue(np.allclose(expected, samples, atol=1e-5))
 
     def test_pcm32_mono(self):
+        """32 bit PCM decodes with negligible error."""
         expected = sine(16)
         payload = np.round(expected.astype(np.float64) * 2147483647).astype("<i4").tobytes()
         samples, _ = decode_wav(new_wav(payload, 16000, 1, PCM_32))
         self.assertTrue(np.allclose(expected, samples, atol=1e-6))
 
     def test_ieee_float32(self):
+        """IEEE float32 payload is decoded as is."""
         expected = sine(16)
         payload = expected.astype("<f4").tobytes()
         samples, _ = decode_wav(new_wav(payload, 16000, 1, 32, WAVE_FORMAT_IEEE_FLOAT))
         self.assertTrue(np.allclose(expected, samples, atol=1e-6))
 
     def test_stereo_downmixes_to_mono(self):
+        """Stereo input is mixed down to mono."""
         left = np.ones(8, dtype=np.float32)
         right = -np.ones(8, dtype=np.float32)
         interleaved = np.stack([left, right], axis=1).reshape(-1)
@@ -81,37 +90,48 @@ class DecodeWavCase(unittest.TestCase):
         self.assertTrue(np.allclose(np.zeros(8), samples, atol=1e-3))
 
     def test_truncated_data_chunk_is_ignored(self):
+        """Bytes beyond the data chunk are ignored."""
         wav = new_wav(pcm16(sine(8)), 16000, 1, PCM_16)
         samples, _ = decode_wav(wav + b"\x00" * 3)
         self.assertEqual(8, samples.size)
 
     def test_rejects_non_wav(self):
+        """Non-RIFF payloads raise MediaDecodeError."""
         with self.assertRaises(MediaDecodeError):
             decode_wav(b"NOT RIFF DATA")
 
     def test_rejects_unsupported_sample_width(self):
+        """Unsupported sample widths raise MediaDecodeError."""
         wav = new_wav(b"\x00" * 16, 16000, 1, 12)
         with self.assertRaises(MediaDecodeError):
             decode_wav(wav)
 
 
 class HelpersCase(unittest.TestCase):
+    """Tests of mono mixdown and resampling helpers."""
+
     def test_to_mono_averages_channels(self):
+        """to_mono averages interleaved stereo channels."""
         samples = np.array([1.0, -1.0, 0.5, 0.5], dtype=np.float32)
         self.assertTrue(np.allclose([0.0, 0.5], to_mono(samples, 2)))
 
     def test_resample_doubles_rate(self):
+        """resample interpolates to double the sample count."""
         samples = np.array([0.0, 1.0], dtype=np.float32)
         resampled = resample(samples, 8000, 16000)
         self.assertEqual(4, resampled.size)
 
     def test_resample_keeps_target_rate(self):
+        """resample is a no-op at the target rate."""
         samples = sine(32)
         self.assertTrue(np.array_equal(samples, resample(samples, TARGET_SAMPLE_RATE)))
 
 
 class DecodeAudioTensorCase(unittest.TestCase):
+    """Tests of decode_audio producing OpenVINO tensors."""
+
     def test_tensor_is_float32_at_target_rate(self):
+        """decode_audio yields a float32 tensor at the target sample rate."""
         expected = sine(100)
         tensor = decode_audio(new_wav(pcm16(expected), 8000, 1, PCM_16), "wav")
         shape = tuple(tensor.shape)
@@ -121,11 +141,13 @@ class DecodeAudioTensorCase(unittest.TestCase):
         self.assertLessEqual(float(np.max(np.abs(np.asarray(tensor.data)))), 1.0)
 
     def test_undecodable_payload_reports_supported_formats(self):
+        """Undecodable payloads report the supported formats."""
         with self.assertRaises(MediaDecodeError) as context:
             decode_audio(b"this is not an audio stream at all", None)
         self.assertIn("WAV", str(context.exception))
 
     def test_overflowing_samples_are_normalized(self):
+        """Out-of-range float samples are normalized to [-1, 1]."""
         payload = np.array([2.0, -4.0, 1.0], dtype=np.float32).astype("<f4").tobytes()
         tensor = decode_audio(new_wav(payload, 16000, 1, 32, WAVE_FORMAT_IEEE_FLOAT), "wav")
         samples = np.asarray(tensor.data)
@@ -133,6 +155,7 @@ class DecodeAudioTensorCase(unittest.TestCase):
         self.assertAlmostEqual(-1.0, float(samples.min()), places=5)
 
     def test_unknown_media_format_reports_hint(self):
+        """Unknown formats raise MediaDecodeError with a hint."""
         with self.assertRaises(MediaDecodeError):
             decode_audio(b"\xff\xfb\x90\x00" + b"\x00" * 64, "mp3")
 

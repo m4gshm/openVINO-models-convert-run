@@ -1,3 +1,4 @@
+"""Shared plumbing of the REST engines: config, request preparation, generation config and streaming."""
 import asyncio
 import logging
 import threading
@@ -12,7 +13,7 @@ from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
-from openvino_genai.py_openvino_genai import GenerationConfig
+from openvino_genai.py_openvino_genai import GenerationConfig  # pylint: disable=no-name-in-module  # compiled extension module
 from pydantic import BaseModel
 from starlette import status
 from starlette.requests import Request
@@ -56,14 +57,17 @@ USER_SELECT_INTERRUPT = "interrupt"
 
 
 class TokenizeRequest(BaseModel):
+    """Request body of the /tokenize endpoint."""
     input: str
 
 
 class DetokenizeRequest(BaseModel):
+    """Request body of the /detokenize endpoint."""
     tokens: list[int]
 
 
 class ControllerConfig(BaseModel):
+    """Static per-model configuration shared by all endpoints."""
     model_name: str | None = None
     max_prompt_len: int
     model_architectures: set[str]
@@ -91,11 +95,13 @@ class ControllerConfig(BaseModel):
 
 
 def is_stream_request(body: completions_api.CompletionRequest | ChatCompletionRequest) -> bool:
+    """Return True when the client asked for a streaming response."""
     return body.stream is True
 
 
 async def new_http_response_chat(stream: bool,
                                  chunk_generator: Iterable[ChatCompletionChunk]) -> StreamingResponse | ChatCompletion:
+    """Wrap chunks into an SSE streaming or aggregated chat completion response."""
     if stream:
         return StreamingResponse(stream_generator(chunk_generator), media_type="text/event-stream")
     # Aggregate off the event loop: pumping the inference generator here stalls the loop, and the
@@ -106,13 +112,17 @@ async def new_http_response_chat(stream: bool,
 async def new_http_response_completions(stream: bool,
                                         chunk_generator: Iterable[ChatCompletionChunk]) -> (
         StreamingResponse | ChatCompletion | completions_api.CompletionResponse):
+    """Wrap chunks into an SSE streaming or aggregated text-completions response."""
     def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
         completions_api.CompletionResponse]:
+        """Convert chat chunks into text-completion responses."""
         def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
+            """Map one chat chunk to a completions response."""
             return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
                 convert_choice(c) for c in r.choices])
 
         def convert_choice(chat_completion_choice: Choice) -> completions_api.CompletionChoice:
+            """Map one chat choice to a text choice carrying the delta content."""
             delta = chat_completion_choice.delta
             content = delta.content if delta and delta.content else ""
             reason: Literal["stop"] | None = "stop" if chat_completion_choice.finish_reason else None
@@ -138,12 +148,16 @@ async def new_http_response_completions(stream: bool,
 
 
 def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) -> ChatCompletion:
+    """Aggregate a chunk stream into a single non-streaming ChatCompletion."""
     finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
     response_id = str(uuid.uuid4())
     return new_chat_completion(response_id=response_id, finish_reason=finish_reason, content=full_content,
                                reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
 
 
+# Flat option mapping; grouping the parameters into a config object is a separate refactor.
+# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+# pylint: disable=too-many-branches,too-many-statements
 def new_generation_config(generate_opts: GenerateOpts,
                           temperature: float | None,
                           max_completion_tokens: int | None,
@@ -154,6 +168,7 @@ def new_generation_config(generate_opts: GenerateOpts,
                           logprobs: bool | None = None,
                           stop: list[str] | str | None = None,
                           ) -> GenerationConfig:
+    """Translate request parameters and default options into an openvino_genai.GenerationConfig."""
     generation_config = GenerationConfig()
     num_assistant_tokens = generate_opts.num_assistant_tokens
     if not num_assistant_tokens is None:
@@ -232,16 +247,23 @@ def new_generation_config(generate_opts: GenerateOpts,
     return generation_config
 
 
+# pylint: enable=too-many-arguments,too-many-positional-arguments,too-many-locals
+# pylint: enable=too-many-branches,too-many-statements
+
+
 def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
+    """Return the number of tokens the tokenizer produces for a prompt."""
     encode_size = tokenizer.encode(prompt).input_ids.size
     return encode_size
 
 
-class BaseController(ABC):
+class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # dependency bundle of shared state
+    """Endpoint-independent plumbing shared by all engines."""
     def __init__(self, config: ControllerConfig,
                  handler_config: TokenHandlerConfig,
                  generate_opts: GenerateOpts,
                  stop_signal: threading.Event):
+        """Store config, handlers and the stop signal shared by the endpoints."""
         # self.parser = parser
         self.generate_opts = generate_opts
         self.handler_config = handler_config
@@ -258,10 +280,14 @@ class BaseController(ABC):
         return JSONResponse(content={"status": "ok"})
 
     def shutdown(self):
+        """Mark the controller closed so stop checks start returning True."""
         self.closed.set()
 
-    def validation_exception_handler(self, request: Request, exc: RequestValidationError):
-        log.error(f"request validation error: {exc.errors()}")
+    # `request` is part of the starlette exception-handler contract even though unused.
+    def validation_exception_handler(self, request: Request,  # pylint: disable=unused-argument
+                                     exc: RequestValidationError):
+        """Convert request validation errors into a 422 JSON response."""
+        log.error("request validation error: %s", exc.errors())
 
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -269,6 +295,7 @@ class BaseController(ABC):
         )
 
     def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
+        """Return an intervention chunk for cycled tool calls, or None when the request is fine."""
         if self.config.is_detect_cycled_tool_call:
             request_user_select = detect_select_options(tools)
             preprocess_tool_call = PreprocessToolCall()
@@ -290,7 +317,7 @@ class BaseController(ABC):
                                               function=question.to_openai_function_call())
                     tool_calls.append(tool_call)
                 else:
-                    content = (msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_)
+                    content = msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_
                 return new_chat_completion_chunk(finish_reason=STOP,
                                                  role=ROLE_ASSISTANT,
                                                  content=content,
@@ -298,18 +325,19 @@ class BaseController(ABC):
         return None
 
     async def chat(self, body: ChatCompletionRequest, request: Request):
+        """Shared /v1/chat/completions entry: checkpoint guard, validation, dispatch."""
         headers = request.headers
         host = headers.get("host")
         user_agent = headers.get("user-agent")
         x_device_id = headers.get("x-device-id")
         x_request_id = headers.get("x-request-id")
 
-        log.debug(f"http request: host='{host}', user_agent='{user_agent}', "
-                  f"x_device_id={x_device_id}, x_request_id={x_request_id}")
+        log.debug("http request: host='%s', user_agent='%s', x_device_id=%s, x_request_id=%s",
+                  host, user_agent, x_device_id, x_request_id)
 
         stream = is_stream_request(body)
         messages = body.messages
-        log.info(f"inbound history messages {len(messages)}")
+        log.info("inbound history messages %s", len(messages))
 
         last_message = messages[-1] if messages else None
         if last_message:
@@ -317,7 +345,7 @@ class BaseController(ABC):
                     content_text(last_message.content).lower():
                 return await new_http_response_chat(stream, [
                     new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
-            elif last_message.role == ROLE_TOOL:
+            if last_message.role == ROLE_TOOL:
                 log_client_generated.debug(content_text(last_message.content))
 
         invalid_response = self.validate_messages(messages, body.tools)
@@ -327,21 +355,25 @@ class BaseController(ABC):
     @abstractmethod
     async def handle_chat_completion(self, body: ChatCompletionRequest,
                                      request: Request) -> StreamingResponse | ChatCompletion:
-        pass
+        """Produce chunks for a chat completion request; implemented per engine."""
 
     @abstractmethod
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
-        pass
+        """Produce chunks for a legacy text completion request; implemented per engine."""
 
     @abstractmethod
     async def models(self) -> ModelsListResponse:
-        pass
+        """List the served models."""
 
 
 class BaseOVController(BaseController):
-    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,
+    """Base for OpenVINO-backed engines: prompt building and shared endpoints."""
+
+    # Constructor wires the OpenVINO engine context; grouping into a config is a separate refactor.
+    def __init__(self, config: ControllerConfig, parser: Parser, tokenizer: Tokenizer,  # pylint: disable=R0913,R0917
                  handler_config: TokenHandlerConfig,
                  generate_opts: GenerateOpts, stop_signal: threading.Event):
+        """Wire parser, tokenizer and the shared controller state."""
         super().__init__(config, handler_config, generate_opts, stop_signal)
         self.parser = parser
         # self.generate_opts = generate_opts
@@ -357,6 +389,7 @@ class BaseOVController(BaseController):
         # self.stop_signal = stop_signal
 
     async def models(self) -> ModelsListResponse:
+        """Report the single configured model with its modalities."""
         current_time = int(time.time())
         return ModelsListResponse(data=[ModelObject(
             id=self.config.model_name,
@@ -377,6 +410,9 @@ class BaseOVController(BaseController):
 
     async def handle_chat_completion(self, body: ChatCompletionRequest,
                                      request: Request) -> StreamingResponse | ChatCompletion:
+        """Run the full local pipeline: prepare messages, build prompt, generate chunks."""
+        # Long orchestration; extracting stages is a separate refactor.
+        # pylint: disable=too-many-locals
         is_client_gone = disconnect_probe(request)
 
         def is_stop():
@@ -407,8 +443,8 @@ class BaseOVController(BaseController):
         chat_history = new_chat_history(prepared.messages, tools_raw)
         media = prepared.media
         history_get_messages = chat_history.get_messages()
-        log.debug(f"chat history: messages={len(history_get_messages)}, tools={len(chat_history.get_tools())}, "
-                  f"extra_context={extra_context}, media='{media.summary()}'")
+        log.debug("chat history: messages=%s, tools=%s, extra_context=%s, media='%s'",
+                  len(history_get_messages), len(chat_history.get_tools()), extra_context, media.summary())
 
         prompt = self.tokenizer.apply_chat_template(history=chat_history,
                                                     tools=tools_raw,
@@ -420,8 +456,7 @@ class BaseOVController(BaseController):
 
         generation_config = new_generation_config(temperature=body.temperature,
                                                   generate_opts=self.generate_opts,
-                                                  max_completion_tokens=(
-                                                          body.max_tokens or body.max_completion_tokens),
+                                                  max_completion_tokens=body.max_tokens or body.max_completion_tokens,
                                                   top_p=body.top_p, frequency_penalty=body.frequency_penalty,
                                                   logprobs=body.logprobs, stop=body.stop)
 
@@ -436,19 +471,22 @@ class BaseOVController(BaseController):
 
         if self.log_inference.isEnabledFor(logging.DEBUG):
             self.log_inference.debug(
-                f"inference start: "
-                f"prompt_tokens_amount={prompt_tokens_amount}, "
-                f"do_sample={generation_config.do_sample}, "
-                f"max_length={generation_config.max_length}, "
-                f"max_new_tokens={generation_config.max_new_tokens}, "
-                f"temperature={generation_config.temperature:.2f}, "
-                f"top_p={generation_config.top_p:.2f}, top_k={generation_config.top_k}, "
-                f"min_p={generation_config.min_p:.2f}, repetition_penalty={generation_config.repetition_penalty:.2f}, "
-                f"presence_penalty={generation_config.presence_penalty:.2f}, "
-                f"frequency_penalty={generation_config.frequency_penalty:.2f}"
-            )
+                "inference start: "
+                "prompt_tokens_amount=%s, "
+                "do_sample=%s, "
+                "max_length=%s, "
+                "max_new_tokens=%s, "
+                "temperature=%.2f, "
+                "top_p=%.2f, top_k=%s, "
+                "min_p=%.2f, repetition_penalty=%.2f, "
+                "presence_penalty=%.2f, "
+                "frequency_penalty=%.2f",
+                prompt_tokens_amount, generation_config.do_sample, generation_config.max_length,
+                generation_config.max_new_tokens, generation_config.temperature, generation_config.top_p,
+                generation_config.top_k, generation_config.min_p, generation_config.repetition_penalty,
+                generation_config.presence_penalty, generation_config.frequency_penalty)
         else:
-            self.log_inference.info(f"inference start, media='{media.summary()}'")
+            self.log_inference.info("inference start, media='%s'", media.summary())
 
         user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
         user_context.messages = messages
@@ -481,6 +519,7 @@ class BaseOVController(BaseController):
         """
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
+        """Run the legacy completions pipeline on top of the same chunk generator."""
         # a raw prompt is the client's own template, so special tokens are intended there,
         # but no media is attached to it and a media tag would only fail generation
         prompt = MEDIA_TAGS_ONLY.escape(body.prompt or "")
@@ -512,13 +551,14 @@ class BaseOVController(BaseController):
         over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
                                                       response_id=response_id)
 
-        return (await new_http_response_chat(stream, [over_limit_response])) if over_limit_response \
-            else await new_http_response_completions(stream,
-                                                     self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                                                          token_handler=token_handler,
-                                                                          media=MediaInputs.empty()))
+        if over_limit_response:
+            return await new_http_response_chat(stream, [over_limit_response])
+        return await new_http_response_completions(
+            stream, self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                         token_handler=token_handler, media=MediaInputs.empty()))
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
+        """Return a length-stop chunk when the prompt does not fit, else None."""
         if encode_size >= max_length:
             return new_chat_completion_chunk(response_id=response_id, role=ROLE_ASSISTANT,
                                              model=self.config.model_name or "", finish_reason=LENGTH,
@@ -528,6 +568,7 @@ class BaseOVController(BaseController):
 
 def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[
     Literal["stop", "length", "tool_calls", "content_filter"], str, str, list[ChoiceDeltaToolCall]]:
+    """Aggregate chunks into finish reason, content, reasoning content and tool calls."""
     full_content = ""
     full_reasoning_content = ""
     full_tool_calls: list[ChoiceDeltaToolCall] = []
@@ -556,12 +597,13 @@ def make_union(chunk_generator: Iterable[ChatCompletionChunk]) -> tuple[
 
 
 def is_disconnected(request: Request) -> bool:
+    """Check with a short timeout whether the client connection is gone."""
     disconnected = False
     try:
         loop = request.app.state.main_loop
         disconnected = asyncio.run_coroutine_threadsafe(request.is_disconnected(), loop).result(0.1)
         if disconnected:
-            log.debug(f"disconnected http request")
+            log.debug("disconnected http request")
     except asyncio.TimeoutError:
         pass
         # log.debug(f"disconnected http request check timeout")
@@ -594,6 +636,7 @@ def disconnect_probe(request: Request, interval: float = 0.25) -> Callable[[], b
 
 def new_chat_history(messages: list[ChatCompletionMessageParam] | list[dict],
                      tools_raw: list[dict[str, Any]] | None = None) -> ChatHistory:
+    """Build an openvino_genai.ChatHistory from request messages and tools."""
     chat_history = ChatHistory()
     for message in messages:
         model_dump = message.model_dump() if hasattr(message, "model_dump") else message
@@ -604,12 +647,14 @@ def new_chat_history(messages: list[ChatCompletionMessageParam] | list[dict],
 
 
 def is_function_tool(tool: Any) -> bool:
+    """Return True when the tool entry is a function tool."""
     return getattr(tool, "type", None) == "function"
 
 
 def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam] | None, is_veai: bool,
                                     is_fix_tool_type: bool = False) -> tuple[
     list[dict[str, Any]], dict[str, FunctionDefinitionParameters]]:
+    """Split tools into raw dicts and a name-to-parameters map, applying the veai fix when asked."""
     function_parameters: dict[str, FunctionDefinitionParameters] = {}
     tools_raw: list[dict[str, Any]] = []
     is_fix = is_veai and is_fix_tool_type
@@ -630,18 +675,20 @@ def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam]
 
 
 def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:
+    """Serialize chunks as SSE data lines."""
     for chunk in chunk_generator:
         yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
 
 
 def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSignal):
+    """Attach the finish reason to the last choice or append a final stop response."""
     choices = responses[-1].choices if responses else None
     finish_reason = get_finish_str(stop_signal)
     if choices:
         last_choice = choices[-1]
         last_choice.finish_reason = finish_reason
-        log.debug(f"add finish_reason to the last choice, finish_reason={finish_reason}")
+        log.debug("add finish_reason to the last choice, finish_reason=%s", finish_reason)
     else:
-        log.debug(f"add stop message at the end, finish_reason={finish_reason}")
+        log.debug("add stop message at the end, finish_reason=%s", finish_reason)
         responses.append(new_stop_response(finish_reason=finish_reason, role=None))
     return responses

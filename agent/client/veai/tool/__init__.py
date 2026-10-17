@@ -1,8 +1,9 @@
-from abc import ABC, abstractmethod
+"""Base marker for Veai IDE tool call builders."""
+from abc import ABC
 
 
-class Tool(ABC):
-    pass
+class Tool(ABC):  # pylint: disable=too-few-public-methods  # marker base for IDE tool builders
+    """Marker base class shared by all Veai IDE tool call builders."""
     # @staticmethod
     # @abstractmethod
     # def name(self) -> str:

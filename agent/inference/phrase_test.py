@@ -1,3 +1,4 @@
+"""Tests for the Phrase duplicate/loop detector and its visualization helpers."""
 import cProfile
 import json
 import pstats
@@ -14,7 +15,10 @@ TEST_RESOURCES = "test_resources/phrase"
 
 
 class PhraseTestCase(unittest.TestCase):
+    """Unit tests of Phrase loop detection and duplicated-parts visualization."""
+
     def test_loop_tokens(self):
+        """A run of identical tokens must raise LoopError."""
         repeated_string = "a" + ("b" * DEFAULT_DUPLICATED_TOKENS_LIMIT)
 
         phrase = Phrase()
@@ -23,6 +27,7 @@ class PhraseTestCase(unittest.TestCase):
                 phrase.add_token(token)
 
     def test_loop_lines(self):
+        """Repeated duplicated lines must raise LoopError keeping the normal output."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages.txt")
         loop_messages = loop_messages_file.read_text()
 
@@ -53,6 +58,7 @@ class PhraseTestCase(unittest.TestCase):
                           'first\n'), phrase.full)
 
     def test_loop_lines6(self):
+        """Loop inside a tool call payload must raise LoopError with the duplicated fragment."""
         loop_tokens_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line6.json")
         loop_tokens_text = loop_tokens_file.read_text()
         loop_tokens_json = json.loads(loop_tokens_text)
@@ -65,6 +71,7 @@ class PhraseTestCase(unittest.TestCase):
         exception = context.exception
         error_message = exception.message
         self.assertEqual('Generated content appears to be a loop', error_message)
+        # pylint: disable=line-too-long  # long literal expectations
         self.assertEqual('-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent-consumer-jdbc/../idempotent', exception.payload)
         self.assertEqual(('<function=read_file>\n'
                           '<parameter=target_file>\n'
@@ -72,6 +79,7 @@ class PhraseTestCase(unittest.TestCase):
                          phrase.full)
 
     def test_loop_lines_2(self):
+        """Feed loop_messages_2 tokens without expecting an exception."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages_2.txt")
         loop_messages = loop_messages_file.read_text()
 
@@ -96,6 +104,7 @@ class PhraseTestCase(unittest.TestCase):
         #                  'first\n', phrase.full)
 
     def test_loop_line_duplicated(self):
+        """A repeated single line must raise LoopError with all copies kept."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "looo_line_duplicated.txt")
         loop_messages = loop_messages_file.read_text()
 
@@ -117,6 +126,7 @@ class PhraseTestCase(unittest.TestCase):
                           'duplicated\n'), phrase.full)
 
     def test_loop_in_one_line_false_case(self):
+        """Duplication-like content must not raise LoopError."""
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line_false_case.txt").read_text(
             encoding="utf-8")
         phrase = Phrase()
@@ -125,16 +135,16 @@ class PhraseTestCase(unittest.TestCase):
             phrase.add_token(token)
 
         # no errors
-        pass
 
     def test_loop_in_one_line(self):
+        """Loop inside one long line must raise LoopError and clean the line state."""
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
         phrase = Phrase()
         with self.assertRaises(LoopError) as context:
             for token in loop_messages:
                 phrase.add_token(token)
 
-        self.maxDiff = None
+        self.maxDiff = None  # pylint: disable=invalid-name  # unittest attribute
         self.assertEqual(('ingframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementAttribute;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlElementValue;\\nimport '
                           'org.springframework.orm.jpa.persistenceunit.PersistenceUnitXmlNode;\\nimport '
@@ -173,6 +183,8 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual({}, phrase.duplicates_islands_reversed)
 
     def test_no_loop_but_has_duplicates(self):
+        """Success-case content with duplicates must not raise and renders visualizations."""
+        # pylint: disable=line-too-long  # long literal expectations
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line3_success_case.txt").read_text(
             encoding="utf-8")
 
@@ -217,14 +229,15 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual(loop_part1, loop_part2)
 
     def test_duplicated_parts_simple(self):
+        """Visualize duplicated parts of a small looping sample."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line.txt")
         loop_messages = loop_messages_file.read_text()
 
         profiler = cProfile.Profile()
         profiler.enable()
 
-        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
-            loop_messages)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = (
+            get_islands_of_duplicated_parts(loop_messages))
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
@@ -241,14 +254,15 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual(loop_part1, loop_part2)
 
     def test_duplicated_parts_repeated_consonants(self):
+        """Visualize duplicated parts with repeated consonant tokens."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line4.txt")
         loop_messages = loop_messages_file.read_text()
 
         profiler = cProfile.Profile()
         profiler.enable()
 
-        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
-            loop_messages)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = (
+            get_islands_of_duplicated_parts(loop_messages))
 
         # Format and display the statistics
         stats = pstats.Stats(profiler).sort_stats('cumtime')
@@ -270,7 +284,8 @@ class PhraseTestCase(unittest.TestCase):
             'r------A-;------------------------------------------------------------------------------------',
             unused_tokens_as_end_of_phrase)
 
-    def test_duplicated_parts_big(self):
+    def test_duplicated_parts_big(self):  # pylint: disable=too-many-locals  # prepares many visualizations at once
+        """Visualize duplicated parts and the last-part islands of a big sample."""
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line2.txt").read_text(encoding="utf-8")
         loop_messages_expected_result = files(__package__).joinpath(TEST_RESOURCES,
                                                                     "loop_in_line2_result.txt").read_text(
@@ -283,8 +298,8 @@ class PhraseTestCase(unittest.TestCase):
         profiler = cProfile.Profile()
         profiler.enable()
 
-        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = get_islands_of_duplicated_parts(
-            loop_messages)
+        duplicate_ranges, duplicate_reversed_ranges, duplicates_islands_reversed, line, line_tokens = (
+            get_islands_of_duplicated_parts(loop_messages))
 
         start, end = get_last_part_border(line, duplicates_islands_reversed)
         last_part_islands_reversed = layout_last_island(line, start, end)
@@ -295,8 +310,8 @@ class PhraseTestCase(unittest.TestCase):
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats(10)  # Print the top 10 bottlenecks
 
-        island_loop_part1 = visualize_reversed_ranges(line, last_part_of_last_part_islands_reversed)
-        visual_last_island = visualize_islands_reversed(line, last_part_of_last_part_islands_reversed)
+        _island_loop_part1 = visualize_reversed_ranges(line, last_part_of_last_part_islands_reversed)
+        _visual_last_island = visualize_islands_reversed(line, last_part_of_last_part_islands_reversed)
 
         unused_tokens = visualize_tokens(line, line_tokens)
         loop_part1 = visualize_reversed_ranges(line, duplicate_reversed_ranges)
@@ -308,9 +323,8 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual(loop_part1, loop_part2)
         self.assertEqual(loop_messages_expected_islands, visual_islands)
 
-        pass
-
     def test_duplicated_parts_case5(self):
+        """Replay case 5 tokens and compare the full accumulated text."""
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_in_line5_success_case.json").read_text(
             encoding="utf-8")
 
@@ -330,19 +344,18 @@ class PhraseTestCase(unittest.TestCase):
         # self.assertEqual((''), loop_part1)
         # self.assertEqual((''), visual_islands)
 
-        pass
-
     def test_duplicated_cycle_phrase_false_case(self):
+        """A cycled-phrase false case must not raise LoopError."""
         loop_messages = files(__package__).joinpath(TEST_RESOURCES, "loop_cycled_phrase_false_case.txt").read_text()
 
         phrase = Phrase()
         for token in loop_messages:
             phrase.add_token(token)
-        pass
 
 
 def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
     dict[int, int], dict[int, int], dict[int, int], list[str], dict[str, set[int]]]:
+    """Run the pair detector over the message tokens and return the island state."""
     line = list[str]()
     line_tokens = dict[str, set[int]]()
     duplicate_reversed_ranges = dict[int, int]()

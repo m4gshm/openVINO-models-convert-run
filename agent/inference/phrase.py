@@ -1,3 +1,4 @@
+"""Token-level duplicate analysis that detects looped generation."""
 import logging
 
 from agent.inference.loop_error import LoopError, ERROR_APPEARS_TO_BE_A_LOOP
@@ -15,10 +16,12 @@ log = logging.getLogger(__name__)
 
 
 def join_str(result: list[str]) -> str:
+    """Join a list of strings into one string."""
     return "".join(result)
 
 
 def visualize_reversed_ranges(line: list[str], reversed_ranges: dict[int, int]) -> str:
+    """Render the line keeping tokens of duplicated ranges stored end-to-start."""
     result: list[str] = ["-"] * len(line)
     i = len(line) - 1
     while i >= 0:
@@ -34,8 +37,9 @@ def visualize_reversed_ranges(line: list[str], reversed_ranges: dict[int, int]) 
 
 
 def visualize_tokens(line: list[str], tokens: dict[str, set[int]]) -> str:
+    """Render the line keeping tokens at the positions each token occupies."""
     result: list[str] = ["-"] * len(line)
-    for token, positions in tokens.items():
+    for _token, positions in tokens.items():
         for position in positions:
             result[position] = line[position]
 
@@ -43,6 +47,7 @@ def visualize_tokens(line: list[str], tokens: dict[str, set[int]]) -> str:
 
 
 def visualize_islands_reversed(line: list[str], duplicates_islands_reversed: dict[int, int]) -> str:
+    """Render duplicated islands (end-to-start map), marking each island with its own symbol."""
     symbols = ["-", "*", "&", "+", "#", "~"]
     current_symbol = 0
     result: list[str] = [" "] * len(line)
@@ -56,6 +61,7 @@ def visualize_islands_reversed(line: list[str], duplicates_islands_reversed: dic
 
 
 def visualize_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> str:
+    """Render the line keeping tokens of the duplicated ranges."""
     result: list[str] = ["-"] * len(line)
     for start, end in duplicate_ranges.items():
         i = start
@@ -65,17 +71,18 @@ def visualize_ranges(line: list[str], duplicate_ranges: dict[int, int]) -> str:
     return join_str(result)
 
 
-def process_duplicate_pairs(token: str,
+def process_duplicate_pairs(token: str,  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements  # internal step of the loop detector, params mirror the shared detector state
                             line: list[str],
                             single_tokens: dict[str, set[int]],
                             duplicated_ranges_reversed: dict[int, int],
                             duplicate_ranges: dict[int, int],
                             duplicated_words: dict[tuple, set[int]],
                             islands: dict[int, int], duplicates_islands_reversed: dict[int, int]):
+    """Register duplicate phrase pairs completed by the given token."""
     token_positions = single_tokens[token]
 
     duplicated_phrases_active = dict[tuple, set[int]]()
-    for i, token_position in enumerate(token_positions):
+    for _, token_position in enumerate(token_positions):
         prev_token_position = token_position - 1
 
         if token_position <= 0:
@@ -99,10 +106,10 @@ def process_duplicate_pairs(token: str,
                 add_duplicated_pair(line, single_tokens, duplicate_ranges, duplicated_ranges_reversed,
                                     duplicated_words, token_positions, islands, duplicates_islands_reversed, phrase,
                                     position_end)
-    return
 
 
 def layout_last_island(line: list[str], start: int, end: int) -> dict[int, int]:
+    """Re-run pair detection over the given span and return its duplicate islands (end-to-start)."""
     token_positions = dict[str, set[int]]()
     duplicate_reversed_ranges = dict[int, int]()
     duplicate_ranges = dict[int, int]()
@@ -119,6 +126,7 @@ def layout_last_island(line: list[str], start: int, end: int) -> dict[int, int]:
 
 def get_last_part_border(line: list[str], line_islands_reversed: dict[int, int] | None) -> tuple[
     int | None, int | None]:
+    """Return start and end of the last island covering the tail of the line."""
     amount = len(line)
     last_part_start: int | None = None
     last_part_end: int | None = None
@@ -135,15 +143,19 @@ def get_last_part_border(line: list[str], line_islands_reversed: dict[int, int] 
 
 
 def get_island_sizes(line_islands_reversed: dict[int, int] | None) -> list[int]:
+    """Return sizes of the islands stored end-to-start."""
     return [(end - start + 1) for end, start in
             line_islands_reversed.items()] if line_islands_reversed is not None else []
 
 
-def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], duplicate_ranges: dict[int, int],
+def add_duplicated_pair(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements
+        # Island merge bookkeeping over the shared detector state.
+        line: list[str], single_tokens: dict[str, set[int]], duplicate_ranges: dict[int, int],
                         duplicated_ranges_reversed: dict[int, int], duplicated_words: dict[tuple[str, ...], set[int]],
                         touched_positions: set[int],
                         islands: dict[int, int], duplicates_islands_reversed: dict[int, int], phrase: tuple[str, ...],
                         phrase_end: int):
+    """Register a duplicated phrase and merge it with neighbouring duplicate islands."""
     phrase_start = phrase_end - (len(phrase) - 1)
     phrase_end_old = duplicate_ranges.get(phrase_start)
     if not phrase_end_old is None and phrase_end_old != phrase_end:
@@ -154,7 +166,7 @@ def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], dup
     duplicated_words.setdefault(phrase, set[int]()).add(phrase_start)
 
     island_start = duplicates_islands_reversed.get(phrase_end)
-    if island_start is None:
+    if island_start is None:  # pylint: disable=too-many-nested-blocks  # dense island merge
         island_start = phrase_start
         island_end = phrase_end
 
@@ -197,7 +209,6 @@ def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], dup
         if is_left_extended or is_right_extended:
             duplicates_islands_reversed[island_end] = island_start
             islands[island_start] = island_end
-            pass
         else:
             has_left_phrase = False
             has_right_phrase = False
@@ -215,7 +226,6 @@ def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], dup
             if not (has_left_phrase and has_right_phrase):
                 duplicates_islands_reversed[island_end] = island_start
                 islands[island_start] = island_end
-                pass
             else:
                 # already in island
                 pass
@@ -234,6 +244,7 @@ def add_duplicated_pair(line: list[str], single_tokens: dict[str, set[int]], dup
 
 def find_left_island(duplicates_islands_reversed: dict[int, int], islands: dict[int, int],
                      phrase_start: int) -> int | None:
+    """Find, detach and return the island ending at or right before phrase_start."""
     for left_island_end in [phrase_start, phrase_start - 1]:
         if left_island_end >= 0:
             left_island_start = duplicates_islands_reversed.get(left_island_end)
@@ -246,6 +257,7 @@ def find_left_island(duplicates_islands_reversed: dict[int, int], islands: dict[
 
 def find_right_island(duplicates_islands_reversed: dict[int, int], islands: dict[int, int], line: list[str],
                       phrase_end: int) -> int | None:
+    """Find, detach and return the island starting at or right after phrase_end."""
     for right_island_start in [phrase_end, phrase_end + 1]:
         if right_island_start < len(line):
             right_island_end = islands.get(right_island_start)
@@ -257,44 +269,50 @@ def find_right_island(duplicates_islands_reversed: dict[int, int], islands: dict
 
 
 def add_token(token: str, line: list[str]):
+    """Append a token to the line being assembled."""
     line.append(token)
 
 
 def add_check_duplicate_tokens(token_positions: dict[str, set[int]], token: str, position: int):
+    """Remember the position of a token for future duplicate pair checks."""
     token_positions.setdefault(token, set[int]()).add(position)
 
 
 def get_word(line: list[str], start: int, end: int) -> str:
+    """Join the line slice between start and end into one word."""
     return join_str(line[start:end + 1])
 
 
-def delete_from_ranges(duplicate_ranges: dict[int, int],
+# Internal helper over the shared detector state.
+def delete_from_ranges(duplicate_ranges: dict[int, int],  # pylint: disable=too-many-arguments,too-many-positional-arguments
                        duplicated_ranges_reversed: dict[int, int],
                        duplicated_words: dict[tuple[str, ...], set[int]],
                        touched_positions: set[int],
                        line: list[str],
                        position_start: int, position_end: int):
-    pass
+    """Remove the duplicated range and word covering the given span."""
     phrase = get_word(line, position_start, position_end)
     delete_word(duplicate_ranges, duplicated_ranges_reversed, duplicated_words, touched_positions, line, phrase,
                 position_start)
     clear_ranges(duplicate_ranges, duplicated_ranges_reversed, touched_positions, position_start, position_end)
-    pass
 
 
 def clear_ranges(duplicate_ranges: dict[int, int], duplicated_ranges_reversed: dict[int, int],
                  touched_positions: set[int], position_start: int, position_end: int):
+    """Drop the range entries and forget the touched positions."""
     del duplicate_ranges[position_start]
     del duplicated_ranges_reversed[position_end]
     touched_positions.difference_update(range(position_start, position_end + 1))
 
 
-def delete_word(duplicate_ranges: dict[int, int],
+# Internal helper over the shared detector state.
+def delete_word(duplicate_ranges: dict[int, int],  # pylint: disable=too-many-arguments,too-many-positional-arguments
                 duplicated_ranges_reversed: dict[int, int],
                 duplicated_words: dict[tuple[str, ...], set[int]],
                 touched_positions: set[int],
                 line: list[str],
                 phrase: tuple[str, ...], position_start: int):
+    """Forget one position of the duplicated word, cleaning ranges of the last remaining copy."""
     phrase_positions = duplicated_words.get(phrase)
     if phrase_positions:
         phrase_positions.remove(position_start)
@@ -307,12 +325,15 @@ def delete_word(duplicate_ranges: dict[int, int],
             del duplicated_words[phrase]
 
 
-def find_duplicated_with_longest_last(last_part_start: int | None, last_word: tuple[str, ...],
+def find_duplicated_with_longest_last(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
+        # Merge search over the shared detector state.
+        last_part_start: int | None, last_word: tuple[str, ...],
                                       start_positions: list[int],
                                       duplicates_check_tail: list[str],
                                       duplicated_ranges_reversed: dict[int, int],
                                       duplicated_words: dict[tuple[str, ...], set[int]]) -> tuple[
     tuple[str, ...] | None, list[int]]:
+    """Extend the last duplicated word leftwards while merged copies keep matching."""
     merged_word: tuple[str, ...] | None = None
     end_positions = list[int]()
     for start_position in start_positions:
@@ -331,14 +352,14 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: tu
     while not merged_word is None and len(start_positions) > 1:
         new_merged_word: tuple[str, ...] | None = None
         new_end_positions = list[int]()
-        shift = (len(merged_word) - 1)
+        shift = len(merged_word) - 1
         for end_position in end_positions:
             start_position = end_position - shift
             prev_word_start = duplicated_ranges_reversed.get(start_position)
             if prev_word_start in end_positions:
                 # loop
                 break
-            elif not prev_word_start is None and prev_word_start >= last_part_start:
+            if not prev_word_start is None and prev_word_start >= last_part_start:
                 prev_word = tuple(duplicates_check_tail[prev_word_start: start_position + 1])
                 if duplicated_words.get(prev_word):
                     join = tuple(duplicates_check_tail[prev_word_start: end_position + 1])
@@ -364,8 +385,10 @@ def find_duplicated_with_longest_last(last_part_start: int | None, last_word: tu
     return merged_word, end_positions
 
 
-class Phrase:
-    def __init__(self, is_detect_looped_inference: bool = True,
+class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state spans tokens, lines, ranges, words and islands
+    """Incremental line builder that raises LoopError when generation starts looping."""
+
+    def __init__(self, is_detect_looped_inference: bool = True,  # pylint: disable=too-many-arguments,too-many-positional-arguments  # public tuning knobs
                  strat_duplicates_detect_from: int = 50, last_part_duplicates_rate: float = 0.5,
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
@@ -400,13 +423,15 @@ class Phrase:
 
     @property
     def full(self):
+        """Return the full generated text accumulated so far."""
         join = join_str(self.tokens)
         return join
 
-    def add_token(self, token: str) -> list[str]:
+    def add_token(self, token: str) -> list[str]:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks  # hot loop-detection path over the shared state
+        """Consume the next generated token and raise LoopError when a loop is detected."""
         added_lines = list[str]()
         if token == "":
-            log.error(f"empty token")
+            log.error("empty token")
             token = " "
 
         prev_token = self.tokens[-1] if self.tokens else None
@@ -422,7 +447,7 @@ class Phrase:
                     raise LoopError(payload=token, message=f"Duplicated tokens (amount={i})")
 
         token_lines = token.splitlines(keepends=True)
-        for token_part in token_lines:
+        for token_part in token_lines:  # pylint: disable=too-many-nested-blocks  # per-part loop of the stream handler
             if not token_part:
                 pass
             add_token(token_part, self.current_line)
@@ -448,9 +473,10 @@ class Phrase:
                                                                                not last_part_end is None) else 0
                     total_tokens_amount = len(duplicates_check_tail)
                     last_part_rate = last_part_size / total_tokens_amount
-                    if last_part_rate > self.last_part_duplicates_rate and last_part_rate - self.last_island_rate > 0.01:
-                        log.debug(
-                            f"duplicates detector: last_part_rate={last_part_rate}, last_island_rate={self.last_island_rate}")
+                    if (last_part_rate > self.last_part_duplicates_rate
+                            and last_part_rate - self.last_island_rate > 0.01):
+                        log.debug("duplicates detector: last_part_rate=%s, last_island_rate=%s",
+                                  last_part_rate, self.last_island_rate)
                         # self.last_island_rate = last_part_rate
                         last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
                         # sub_island_sizes = get_island_sizes(last_sub_islands)
@@ -466,9 +492,10 @@ class Phrase:
                         total_tokens_amount = len(duplicates_check_tail)
                         last_part_rate2 = subpart_size / total_tokens_amount
 
-                        if delta_rate <= self.last_subpart_end_line_delta_rate and last_part_rate2 >= self.last_subpart_duplicates_rate:
-                            log.debug(
-                                f"duplicates detector: delta_rate={delta_rate}, last_part_rate2={last_part_rate2}")
+                        if (delta_rate <= self.last_subpart_end_line_delta_rate
+                                and last_part_rate2 >= self.last_subpart_duplicates_rate):
+                            log.debug("duplicates detector: delta_rate=%s, last_part_rate2=%s",
+                                      delta_rate, last_part_rate2)
                             last_duplicated_range_start = self.duplicate_ranges_reversed[last_part_end]
                             last_word = tuple(duplicates_check_tail[last_duplicated_range_start: last_part_end + 1])
                             last_word_positions = self.duplicated_words[last_word]
@@ -485,13 +512,10 @@ class Phrase:
 
                             if not longest_last_duplicated_word is None and len(end_positions) > 1:
                                 longest_last_duplicated_word_str = "".join(list(longest_last_duplicated_word))
-                                log.debug(f"duplicated word info: word='{longest_last_duplicated_word_str}', "
-                                          f"end_positions={end_positions}, "
-                                          f"duplicates_check_tail={duplicates_check_tail}")
+                                log.debug("duplicated word info: word='%r', end_positions=%s, duplicates_check_tail=%s",
+                                          longest_last_duplicated_word_str, end_positions, duplicates_check_tail)
                                 duplicated_payload = "".join(list(longest_last_duplicated_word) * len(end_positions))
                                 raise LoopError(payload=duplicated_payload, message=ERROR_APPEARS_TO_BE_A_LOOP)
-                            else:
-                                pass
             else:
                 current_line = self.current_line
                 current_line_str = join_str(current_line)
@@ -546,17 +570,18 @@ class Phrase:
                         if cycle_start and cycle_end:
                             cycled_phrase = "\n".join([lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
                             payload = "\n".join(lines)
-                            log.error(
-                                f"cycled phrase detected:\npayload={payload}\ncycled_phrase={cycled_phrase}\ncycle_start={cycle_start}, cycle_end={cycle_end}")
+                            log.error("cycled phrase detected:\npayload=%s\ncycled_phrase=%s\n"
+                                      "cycle_start=%s, cycle_end=%s",
+                                      payload, cycled_phrase, cycle_start, cycle_end)
                             raise LoopError(payload=cycled_phrase, message="Cycled phrase detected")
-                        else:
-                            duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
-                            if len(duplicated_phrase.strip()) > 0:
-                                log.debug(f"duplicated phrase '{duplicated_phrase}', times {len_start_positions}")
+                        duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
+                        if len(duplicated_phrase.strip()) > 0:
+                            log.debug("duplicated phrase '%s', times %s", duplicated_phrase, len_start_positions)
 
                     # duplicated_lines_amount = self.current_line_duplicated_count + 1  # len(duplicated_lines)
                     # duplicated_rate = duplicated_lines_amount / lines_amount
-                    # if duplicated_rate >= self.duplicated_lines_rate_limit and duplicated_lines_amount >= self.duplicated_lines_limit:
+                    # if duplicated_rate >= self.duplicated_lines_rate_limit and \
+                    #        duplicated_lines_amount >= self.duplicated_lines_limit:
                     #     payload = "\n".join(lines[-duplicated_lines_amount:])
                     #     log.error(f"duplicated lines detected:\n{payload}")
                     #     raise LoopError(payload=payload,
@@ -567,6 +592,7 @@ class Phrase:
         return added_lines
 
     def clean_current_line(self):
+        """Reset the per-line duplicate detection state after a completed line."""
         self.current_line.clear()
         self.current_line_has_no_pair_tokens.clear()
         self.duplicate_ranges_reversed.clear()

@@ -1,3 +1,4 @@
+"""Concurrency tests of the VLM controller request lock."""
 import threading
 import time
 import unittest
@@ -12,10 +13,11 @@ from agent.openai.engine_rest_common import ControllerConfig
 from agent.openai.engine_rest_vlm import VlmController
 
 
-class FakePipe:
+class FakePipe:  # pylint: disable=too-few-public-methods  # duck-typed stub
     """Duck-typed pipe: VlmController only calls get_tokenizer on init."""
 
     def get_tokenizer(self):
+        """Return a tokenizer-less pipe handle."""
         return None
 
 
@@ -23,12 +25,15 @@ class FakeTokenHandler:
     """Just enough of TokenHandler for the streamer and the consumer loop."""
 
     def is_stop(self) -> bool:
+        """Never report stop: the fake keeps streaming."""
         return False
 
     def handle_tokens(self, _tokens):
+        """Return one fixed assistant chunk for any token batch."""
         return [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="ok", model="m")], None
 
     def get_stat_info(self):
+        """Return a placeholder stat line."""
         return "fake"
 
 
@@ -62,6 +67,7 @@ class LockedController(VlmController):
 
 def consume(controller: VlmController, sink: list, ready: threading.Event,
             close_after: int | None = None, closed: threading.Event | None = None):
+    """Run the chunk generator to the end, optionally closing it early like a disconnected client."""
     gen = controller.chunk_generator(prompt="p", generation_config=GenerationConfig(),
                                      token_handler=FakeTokenHandler(),  # type: ignore[arg-type]  # duck-typed
                                      media=MediaInputs.empty())
@@ -76,7 +82,9 @@ def consume(controller: VlmController, sink: list, ready: threading.Event,
 
 
 class VlmControllerRequestLockCase(unittest.TestCase):
+    """Tests that request_lock serializes generate_result calls."""
     def test_generate_is_not_reentered_until_the_running_one_returns(self):
+        """A long-running generate blocks the second call until the first returns."""
         controller = LockedController()
 
         first_chunks: list = []

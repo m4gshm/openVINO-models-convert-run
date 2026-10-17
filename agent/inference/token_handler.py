@@ -1,3 +1,4 @@
+"""Converts decoded model tokens into OpenAI chat completion chunks."""
 import collections
 import logging
 import time
@@ -7,7 +8,8 @@ from typing import Sequence, SupportsInt, Callable, List, Literal
 
 from openai.types.chat import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall
-from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason
+# Native openvino_genai extension exposes these members dynamically.
+from openvino_genai.py_openvino_genai import Tokenizer, GenerationFinishReason  # pylint: disable=no-name-in-module
 from pydantic import TypeAdapter, BaseModel
 
 from agent import inference
@@ -24,6 +26,7 @@ log_inference_generated = logging.getLogger(inference.log.name + ".generated")
 
 
 class TokenHandlerConfig(BaseModel):
+    """Tuning knobs of the token stream handler."""
     tool_call_parting_duration_warning: timedelta = timedelta(minutes=3)
     tool_call_parting_duration_limit: timedelta = timedelta(minutes=10)
     prevent_no_assistant_inference_output: bool = True
@@ -34,6 +37,7 @@ class TokenHandlerConfig(BaseModel):
 
 
 class StopSignal(Enum):
+    """Stop reasons paired with the native GenerationFinishReason."""
     STOP = "stop", GenerationFinishReason.STOP
     TOOL_CALL = "tool_call", GenerationFinishReason.TOOL_CALL
     CANCEL = "cancel", GenerationFinishReason.STOP
@@ -51,26 +55,28 @@ class StopSignal(Enum):
         return self.value
 
     @property
-    def value(self) -> str:
+    def value(self) -> str:  # pylint: disable=invalid-overridden-method  # intentional: expose the str value alongside the native finish reason
         return self._value_
 
     @property
     def finish_reason(self):
+        """Return the native GenerationFinishReason paired with this stop signal."""
         return self._finish_reason_
 
 
 def get_finish_str(stop_signal: StopSignal) -> Literal["stop", "length", "tool_calls", "content_filter"]:
+    """Map a stop signal to the OpenAI finish reason string."""
     if stop_signal == StopSignal.TOOL_CALL:
         return "tool_calls"
-    elif stop_signal == StopSignal.CANCEL:
+    if stop_signal == StopSignal.CANCEL:
         return "content_filter"
-    elif stop_signal == StopSignal.LENGTH:
+    if stop_signal == StopSignal.LENGTH:
         return "length"
-    else:
-        return "stop"
+    return "stop"
 
 
 def get_stop_signal_by_finish_reason(finish_reason: GenerationFinishReason) -> StopSignal | None:
+    """Reverse lookup of the stop signal by the native finish reason."""
     for e in StopSignal:
         if e.finish_reason == finish_reason:
             return e
@@ -78,6 +84,7 @@ def get_stop_signal_by_finish_reason(finish_reason: GenerationFinishReason) -> S
 
 
 def line_encoded(last_line: str, tokenizer: Tokenizer) -> Sequence[SupportsInt]:
+    """Encode a line into token ids with the model tokenizer."""
     encode = tokenizer.encode(last_line, True)
     data = encode.input_ids.data
     data_ = data[0]
@@ -85,39 +92,48 @@ def line_encoded(last_line: str, tokenizer: Tokenizer) -> Sequence[SupportsInt]:
 
 
 def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
+    """Decode token ids back to strings, keeping special tokens."""
     return [tokenizer.decode(tokens=[token], skip_special_tokens=False) for token in tokens]
 
 
 def to_openai_tool_call(function: ParsedFunctionCall) -> ChoiceDeltaToolCall:
+    """Convert a parsed function call into an OpenAI tool call chunk."""
     return new_tool_call(function.to_openai_function_call())
 
 
 def markdown_bold(value) -> str:
+    """Wrap the value into markdown bold."""
     return f"**{value}**"
 
 
 def markdown_back_tick(value) -> str:
+    """Wrap the value into markdown backticks."""
     return f"`{value}`"
 
 
 def markdown_file_content(value, mime: str = "") -> str:
+    """Wrap the value into a markdown fenced code block."""
     return f"```{mime}\n{value}\n```"
 
 
 def markdown_json(value: str) -> str:
+    """Wrap the value into a markdown json code block."""
     return markdown_file_content(value, "json")
 
 
 def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> str | None:
+    """Format a tool call loop error as a markdown warning block."""
     return ((markdown_bold("WARNING: " + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
         loop_error)
 
 
 def now() -> float:
+    """Return the monotonic clock used for parsing time measurements."""
     return time.perf_counter()
 
 
 def print_log(phrase: Phrase):
+    """Log the accumulated phrase into the generated logger."""
     full = phrase.full
     if full:
         log_inference_generated.debug(full)
@@ -127,8 +143,9 @@ type ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedF
 
 
 class TokenHandler:
+    """Converts decoded model tokens into OpenAI chat completion chunks."""
 
-    def __init__(self,
+    def __init__(self,  # pylint: disable=too-many-arguments,too-many-positional-arguments  # constructor of the stream handler, args mirror engine wiring
                  tokenizer: Tokenizer,
                  prompt: str,
                  parser: Parser,
@@ -148,10 +165,12 @@ class TokenHandler:
         self.is_stop = is_stop
 
     def get_stat_info(self):
+        """Return generation statistics of the processor."""
         return self.processor.get_stat_info()
 
     def handle_tokens(self, tokens: collections.abc.Sequence[SupportsInt]) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
+        """Decode the incoming tokens and process them into chat completion chunks."""
         is_stop = self.is_stop
         if is_stop and is_stop():
             log.info("handle tokens is stopped")
@@ -168,11 +187,13 @@ class TokenHandler:
 
 
 def end(amount: int) -> str:
+    """Return the English plural suffix for the given amount."""
     return "s" if amount != 1 else ""
 
 
 def fix_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
                    parsed_function_calls: list[ParsedFunctionCall]) -> list[ParsedFunctionCall]:
+    """Apply the tool fixer to parsed calls and debug-log the before and after."""
     if not tool_fixer:
         fixed_tool_calls = parsed_function_calls
     else:
@@ -188,13 +209,14 @@ def fix_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
             adapter = TypeAdapter(List[ParsedFunctionCall])
             parsed_str = adapter.dump_json(parsed_function_calls).decode("utf-8")
             fixed_str = adapter.dump_json(fixed_tool_calls).decode("utf-8")
-            log.debug(f"tool calls: parsed={parsed_str}, fixed={fixed_str}")
+            log.debug("tool calls: parsed=%s, fixed=%s", parsed_str, fixed_str)
     return fixed_tool_calls
 
 
 def fix_tool_calls_and_convert_to_choice_delta_tool_calls(tool_fixer: ToolFixer, user_context: UserContext | None,
                                                           parsed_function_calls: list[ParsedFunctionCall]
                                                           ) -> list[ChoiceDeltaToolCall]:
+    """Fix parsed tool calls and convert them into OpenAI tool call chunks."""
     return list(map(to_openai_tool_call, fix_tool_calls(tool_fixer, user_context, parsed_function_calls)))
 
 
@@ -203,15 +225,17 @@ def fix_and_chat_complete_parsed_tool_calls(tool_fixer: ToolFixer,
                                             parsed_function_calls: list[ParsedFunctionCall],
                                             tool_call_expression: str, role: Role | None
                                             ) -> tuple[ChatCompletionChunk, StopSignal]:
+    """Fix parsed tool calls and wrap them into a chat completion chunk."""
     tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(tool_fixer, user_context, parsed_function_calls)
     if len(tool_calls) == 0:
-        log.info(f"unparsed tool calls: {tool_call_expression}")
+        log.info("unparsed tool calls: %s", tool_call_expression)
         return new_chat_completion_chunk(role=role, content=tool_call_expression), StopSignal.CANCEL
-    else:
-        return new_chat_completion_chunk(role=role, tool_calls=tool_calls), StopSignal.TOOL_CALL
+    return new_chat_completion_chunk(role=role, tool_calls=tool_calls), StopSignal.TOOL_CALL
 
 
-class TokenProcessor:
+class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps parser, phrase and timing state of one stream
+    """Stateful processor turning decoded tokens into chat completion chunks and stop signals."""
+
     def __clean_phrase(self):
         print_log(self.phrase)
         new_phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
@@ -228,7 +252,7 @@ class TokenProcessor:
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
 
-    def __init__(self,
+    def __init__(self,  # pylint: disable=too-many-arguments,too-many-positional-arguments  # constructor of the stream processor, args mirror engine wiring
                  prompt: str,
                  parser: Parser,
                  init_chat_events: bool,
@@ -264,21 +288,24 @@ class TokenProcessor:
         self.role_initialized = False
 
     def get_stat_info(self) -> str | None:
+        """Return generation statistics, or None before the first processed token."""
         stat_info = None
         start_time = self.start_time
         if start_time:
-            now = datetime.now(timezone.utc)
-            time_delta = now - start_time
+            finished_at = datetime.now(timezone.utc)
+            time_delta = finished_at - start_time
             amount = self.token_counter
             total_seconds = time_delta.total_seconds()
             ttft = (start_time - self.create_time).total_seconds()
             stat_info = (
-                f"generated {amount} token{end(amount)} in {time_delta} sec, {amount / total_seconds} t/sec), ttft {ttft} sec"
+                f"generated {amount} token{end(amount)} in {time_delta} sec, "
+                f"{amount / total_seconds} t/sec), ttft {ttft} sec"
             )
         return stat_info
 
     def process_tokens(self, decoded_tokens: list[str]) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
+        """Process a decoded token batch and return chunks with an optional stop signal."""
         if self.start_time is None:
             self.start_time = datetime.now(timezone.utc)
         state = self.state
@@ -286,7 +313,7 @@ class TokenProcessor:
         try:
             for token in decoded_tokens:
                 self.token_counter += 1
-                log.debug(f"token '{token}', num {self.token_counter}")
+                log.debug("token '%s', num %s", token, self.token_counter)
                 token_result, stop_signal = self.process_token(token, self.token_counter)
                 if not self.role_initialized and token_result:
                     choices = token_result[0].choices
@@ -300,15 +327,17 @@ class TokenProcessor:
                 if stop_signal:
                     # log
                     return result, stop_signal
-        except Exception as e:
-            log.error(f"streamer error: {e}", exc_info=e)
+        except Exception as e:  # pylint: disable=broad-exception-caught  # streaming barrier: any parser error must degrade to an error chunk, not kill the stream
+            log.error("streamer error: %s", e, exc_info=e)
             result.append(new_stop_response(role=state.role, content=markdown_bold(f"StreamerError:{e}")))
             return result, StopSignal.CANCEL
 
         return result, None
 
-    def process_token(self, token: str, token_number: int) -> tuple[
+    # Single dispatch over parser events; splitting would scatter the state transitions.
+    def process_token(self, token: str, token_number: int) -> tuple[  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         list[ChatCompletionChunk], StopSignal | None]:
+        """Process one decoded token and dispatch it by the current parser event."""
         now_time = now()
         result: list[ChatCompletionChunk] = []
         stop_signal = None
@@ -326,14 +355,15 @@ class TokenProcessor:
         elif parser.is_sequence_end(state, token):
             conversation_end_result, stop_signal = self.conversation_end(state, token_number)
             result.extend(conversation_end_result)
-        elif self.expect_role and current_event == StateEvent.CONVERSATION and token_number - self.token_conversation_start_number == 1:
+        elif (self.expect_role and current_event == StateEvent.CONVERSATION
+              and token_number - self.token_conversation_start_number == 1):
             if len(token.rstrip()) > 0:  # conversation role
                 self.set_role(token, state)
             else:
                 log.debug("empty role for conversation start")
         elif parser.is_think_start(state, token):
             if current_event == StateEvent.TOOL_CALL:
-                log.debug(f"tool call is finished by generated thinking tag: '{token}'")
+                log.debug("tool call is finished by generated thinking tag: '%s'", token)
                 tool_call, stop_signal = self.tool_call_end(state, token)
                 result.append(tool_call)
             else:
@@ -342,7 +372,7 @@ class TokenProcessor:
             self.thinking_end(state)
         elif parser.is_tool_call_start(state, token):
             if current_event == StateEvent.TOOL_CALL:
-                log.debug(f"tool call is finished by starting new tool call: '{token}'")
+                log.debug("tool call is finished by starting new tool call: '%s'", token)
                 tool_call, stop_signal = self.tool_call_end(state, token)
                 if stop_signal == StopSignal.TOOL_CALL:
                     stop_signal = None
@@ -357,14 +387,14 @@ class TokenProcessor:
 
         elif parser.is_tool_response_start(state, token):
             state.start_event(StateEvent.TOOL_RESPONSE)
-            log.debug(f"tool response start: {token}")
+            log.debug("tool response start: %s", token)
         elif parser.is_tool_response_end(state, token):
             state.finish_current_event(StateEvent.TOOL_RESPONSE, log)
-            log.debug(f"tool response end: {token}")
+            log.debug("tool response end: %s", token)
         elif parser.is_fim_middle(state, token):
             state.start_event(StateEvent.FIM_MIDDLE)
         elif parser.is_end(state, token):
-            log.debug(f"parsed end: {token}")
+            log.debug("parsed end: %s", token)
             stop_signal = StopSignal.STOP
         elif current_event == StateEvent.TOOL_CALL:
             loop_error: str | None = None
@@ -372,7 +402,7 @@ class TokenProcessor:
             try:
                 tool_call_phrase.add_token(token)
             except LoopError as e:
-                log.error(f"tool call error (loop): {e}")
+                log.error("tool call error (loop): %s", e)
                 loop_error = markdown_tool_call_loop_error(e.message + " (tool call)", e.payload)
 
             if loop_error:
@@ -380,37 +410,39 @@ class TokenProcessor:
                 result.append(new_chat_completion_chunk(role=state.role, content=loop_error))
                 result.append(tool_call)
             else:
-                parsing_time = timedelta(seconds=(now_time - self.tool_call_parsing_start_time))
-                if not self.tool_call_parsing_long_time_warned and parsing_time >= self.config.tool_call_parting_duration_warning:
-                    time = format_time(self.config.tool_call_parting_duration_warning)
-                    warning_msg = markdown_bold(f"WARNING: Long tool call calling({time})") + "\n"
+                parsing_time = timedelta(seconds=now_time - self.tool_call_parsing_start_time)
+                if (not self.tool_call_parsing_long_time_warned
+                        and parsing_time >= self.config.tool_call_parting_duration_warning):
+                    formatted = format_time(self.config.tool_call_parting_duration_warning)
+                    warning_msg = markdown_bold(f"WARNING: Long tool call calling({formatted})") + "\n"
                     result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
                     self.tool_call_parsing_long_time_warned = True
-                elif self.tool_call_parsing_max_time_warned and parsing_time >= self.config.tool_call_parting_duration_limit:
-                    time = format_time(self.config.tool_call_parting_duration_limit)
-                    warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {time}.\n"
+                elif (self.tool_call_parsing_max_time_warned
+                      and parsing_time >= self.config.tool_call_parting_duration_limit):
+                    formatted = format_time(self.config.tool_call_parting_duration_limit)
+                    warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {formatted}.\n"
                                                 ) + markdown_file_content(tool_call_phrase.full)
                     result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
                     self.tool_call_parsing_max_time_warned = True
                 tool_call_snapshot_time = now_time - self.tool_call_parsing_tick
                 if tool_call_snapshot_time >= 10:
                     self.tool_call_parsing_tick = now_time
-                    log.debug(f"tool call part: {tool_call_phrase.full}")
+                    log.debug("tool call part: %s", tool_call_phrase.full)
         else:
             phrase: Phrase = self.phrase
             handle_delay_end = False
             if state.is_streaming_delayed:
-                log.debug(f"delayed phrase: {phrase.full}")
+                log.debug("delayed phrase: %s", phrase.full)
                 delay_end = parser.is_delay_streaming_end(state, token)
                 if delay_end:
-                    log.info(f"delay streaming finish: token '{token}', token num '{token_number}'")
+                    log.info("delay streaming finish: token '%s', token num '%s'", token, token_number)
                     handle_delay_end = True
                     state.is_streaming_delayed = False
             else:
                 delay_start = parser.is_delay_streaming_start(state, token)
                 if delay_start:
                     state.is_streaming_delayed = delay_start
-                    log.info(f"delay streaming start: token '{token}', token num '{token_number}'")
+                    log.info("delay streaming start: token '%s', token num '%s'", token, token_number)
                     # restart phrase
                     phrase = self.__clean_phrase()
 
@@ -419,7 +451,7 @@ class TokenProcessor:
                 new_lines = phrase.add_token(token)
             except LoopError as e:
                 new_lines = None
-                log.error(f"loop error: {e}")
+                log.error("loop error: %s", e)
                 loop_error = markdown_tool_call_loop_error(e.message, e.payload)
 
             thinking = state.has_event(StateEvent.THINK)
@@ -437,7 +469,7 @@ class TokenProcessor:
                     self.phrase_tick = now_time
 
                 if new_lines and len(new_lines) > 0:
-                    log.info(f"{state.role} phrase: '{"".join(new_lines)}', last token num: {token_number}")
+                    log.info("%s phrase: '%s', last token num: %s", state.role, "".join(new_lines), token_number)
 
                 if handle_delay_end:
                     delayed_result, stop_signal = self.handle_delayed(phrase)
@@ -449,19 +481,20 @@ class TokenProcessor:
                     erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
                     is_assistant = ROLE_ASSISTANT == state.role
                     if not is_assistant:
-                        log.warning(f"unexpected role {state.role}")
+                        log.warning("unexpected role %s", state.role)
                     if is_assistant or not self.config.prevent_no_assistant_inference_output:
                         if not erase:
                             result.append(new_chat_completion_chunk(role=state.role, content=token,
                                                                     thinking=thinking))
                         else:
-                            log.debug(f"erase token: {token}")
+                            log.debug("erase token: %s", token)
                     else:
-                        log.warning(f"prevent generating by unexpected role {state.role}, token '{token}'")
+                        log.warning("prevent generating by unexpected role %s, token '%s'", state.role, token)
         state.finalize(token)
         return result, stop_signal
 
     def handle_delayed(self, phrase: Phrase) -> tuple[list[ChatCompletionChunk], StopSignal | None]:
+        """Emit the delayed phrase as content or finish it as a tool call."""
         result = list[ChatCompletionChunk]()
         parser = self.parser
         state = self.state
@@ -481,15 +514,17 @@ class TokenProcessor:
         return result, stop_signal
 
     def set_role(self, token: str, state: ParserState):
+        """Apply the conversation role parsed from the token."""
         self.expect_role = False
         self.prev_role = state.role
 
         new_role = ROLE_ASSISTANT if token == self.parser.get_assistant_role_name() else token
         state.role = new_role
-        log.debug(f"set conversation role {state.role}, prev {self.prev_role}")
+        log.debug("set conversation role %s, prev %s", state.role, self.prev_role)
 
     def conversation_end(self, state: ParserState, token_number: int) -> tuple[
         list[ChatCompletionChunk], StopSignal | None]:
+        """Finalize the conversation and flush the accumulated phrase."""
         result: list[ChatCompletionChunk] = []
         stop_signal: Literal[StopSignal.STOP, StopSignal.TOOL_CALL, StopSignal.CANCEL]
         if state.is_streaming_delayed:
@@ -501,8 +536,7 @@ class TokenProcessor:
         elif state.get_current_event() == StateEvent.TOOL_CALL:
             # sometimes Qwen3.5 ends tool call by end conversation token
             if log.isEnabledFor(logging.DEBUG):
-                log.debug(
-                    f"tool call ended by end conversation token '{self.tool_call_phrase.full}'")
+                log.debug("tool call ended by end conversation token '%s'", self.tool_call_phrase.full)
             else:
                 log.info("tool call ended by end conversation token")
             state.finish_current_event(StateEvent.TOOL_CALL)
@@ -523,12 +557,11 @@ class TokenProcessor:
 
             phrase = phrase.full.rstrip()
             if len(phrase) == 0:
-                log.debug(f"empty conversation end, role {state.role}")
+                log.debug("empty conversation end, role %s", state.role)
                 self.empty_conversation_counter += 1
             else:
                 self.empty_conversation_counter = 0
-                log.info(
-                    f"{state.role} conversation end by: {phrase}, last token num: {token_number}")
+                log.info("%s conversation end by: %s, last token num: %s", state.role, phrase, token_number)
                 self.__clean_phrase()
 
             if self.empty_conversation_counter > self.config.empty_conversation_counter_max:
@@ -540,14 +573,14 @@ class TokenProcessor:
         return result, stop_signal
 
     def conversation_start(self, state: ParserState, tail: str, token_number: int):
+        """Open a conversation event and detect the role token."""
         state.start_event(StateEvent.CONVERSATION)
         self.no_conversation_counter = 0
         self.token_conversation_start_number = token_number
 
         phrase = self.phrase.full.rstrip()
         if len(phrase) > 0:
-            log.info(
-                f"phrase before conversation: '{phrase}', last token num: {token_number}")
+            log.info("phrase before conversation: '%s', last token num: %s", phrase, token_number)
 
         # check role in place
         if tail:
@@ -556,6 +589,7 @@ class TokenProcessor:
             self.expect_role = True
 
     def handle_tool_call(self, state: ParserState) -> tuple[ChatCompletionChunk, StopSignal]:
+        """Parse the accumulated tool call phrase and turn it into a chunk."""
         parser = self.parser
         tool_call_phrase = self.tool_call_phrase
         tool_call_expression = tool_call_phrase.full
@@ -563,7 +597,7 @@ class TokenProcessor:
         tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(self.tool_fixer, self.user_context,
                                                                            parsed_function_calls)
         if len(tool_calls) == 0:
-            log.info(f"unparsed tool calls: {tool_call_expression}")
+            log.info("unparsed tool calls: %s", tool_call_expression)
             chunk, stop_signal = new_chat_completion_chunk(role=state.role,
                                                            content=tool_call_expression), StopSignal.CANCEL
         else:
@@ -572,25 +606,27 @@ class TokenProcessor:
         return chunk, stop_signal
 
     def tool_call_end(self, state: ParserState, token: str | None) -> tuple[ChatCompletionChunk, StopSignal]:
+        """Finish the tool call event and return the resulting chunk."""
         self.tool_call_parsing_start_time = None
         tool_call_phrase = self.tool_call_phrase
         state.finish_current_event(expected_state=StateEvent.TOOL_CALL)
         if token:
             try:
                 tool_call_phrase.add_token(token)
-            except LoopError as e:
-                log.warning(f"loop at the end of tool call {tool_call_phrase.full}")
-        log.debug(f"tool call end: {tool_call_phrase.full}")
+            except LoopError:
+                log.warning("loop at the end of tool call %s", tool_call_phrase.full)
+        log.debug("tool call end: %s", tool_call_phrase.full)
 
         return self.handle_tool_call(state)
 
     def tool_call_start(self, state: ParserState, token: str):
+        """Start the tool call event and arm its parsing timers."""
         state.start_event(StateEvent.TOOL_CALL)
-        log.debug(f"tool call start: {token}")
+        log.debug("tool call start: %s", token)
 
         phrase = self.phrase.full.rstrip()
         if len(phrase) > 0:
-            log.info(f"{state.role} phrase before tool call: '{phrase}'")
+            log.info("%s phrase before tool call: '%s'", state.role, phrase)
             self.__clean_phrase()
 
         now_time = now()
@@ -599,17 +635,19 @@ class TokenProcessor:
         self.tool_call_phrase.add_token(token)
 
     def thinking_end(self, state: ParserState):
+        """Close the thinking event, possibly starting tool call parsing."""
         now_time = now()
         state.finish_current_event(expected_state=StateEvent.THINK)
         if state.has_event(StateEvent.TOOL_CALL):
             self.tool_call_parsing_start_time = now_time
-            log.warning(
-                f"stop think token inside tool_call: '{self.tool_call_phrase.full}', phrase: '{self.phrase.full}'")
+            log.warning("stop think token inside tool_call: '%s', phrase: '%s'",
+                        self.tool_call_phrase.full, self.phrase.full)
         log.debug("thinking is over")
 
     def thinking_start(self, state: ParserState):
+        """Open the thinking event, aborting pending tool call parsing."""
         state.start_event(StateEvent.THINK)
         if state.has_event(StateEvent.TOOL_CALL):
             self.tool_call_parsing_start_time = None
-            log.warning(f"start think token inside tool_call {self.tool_call_phrase.full}")
+            log.warning("start think token inside tool_call %s", self.tool_call_phrase.full)
         log.debug("thinking is starting")

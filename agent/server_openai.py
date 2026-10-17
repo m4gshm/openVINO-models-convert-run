@@ -1,9 +1,9 @@
+"""OpenAI proxy mode: forwards requests to a remote OpenAI-compatible API."""
 import logging
 import sys
 import threading
 from argparse import ArgumentParser
 
-import uvicorn
 from fastapi import FastAPI
 
 from agent.common.metric_mem import get_current_memory
@@ -11,8 +11,7 @@ from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import get_default_generate_opts, GenerateOpts
 from agent.openai.engine_rest_common import ControllerConfig
 from agent.openai.engine_rest_openai import OpenAiController
-from agent.parser import Parser
-from agent.server import new_app
+from agent.server import new_app, serve_until_stop
 
 log = logging.getLogger(__name__)
 
@@ -28,11 +27,7 @@ def run_openai_proxy(args):
         log.error("OpenAI API key is required for OpenAI proxy mode")
         sys.exit(1)
 
-    log.info(f"starting OpenAI proxy mode: base_url={args.openai_base_url}")
-
-    from agent.parser import Parser
-    from agent.openai.engine_rest_common import ControllerConfig
-    from agent.inference.token_handler import TokenHandlerConfig
+    log.info("starting OpenAI proxy mode: base_url=%s", args.openai_base_url)
 
     # --- Build configuration objects ---
     # The proxy neither decodes media nor judges capabilities: content parts are forwarded as they
@@ -48,7 +43,6 @@ def run_openai_proxy(args):
     stop_signal = threading.Event()
     default_generate_opts = get_default_generate_opts()
     generate_opts = default_generate_opts
-    parser = Parser()
 
     # --- Initialize engine and start server ---
     app = init_openai_engine(
@@ -56,33 +50,19 @@ def run_openai_proxy(args):
         handler_config=handler_config,
         api_key=args.openai_api_key,
         base_url=args.openai_base_url,
-        parser=parser,
         stop_signal=stop_signal,
         generate_opts=generate_opts,
     )
 
-    log.info(f"listening {args.host}:{args.port}")
-
-    def server_handle():
-        uvicorn.run(app, host=args.host, port=args.port, reload=False, timeout_graceful_shutdown=0)
-
-    server_thread = threading.Thread(target=server_handle, daemon=True)
-    server_thread.start()
-
-    try:
-        stopped = False
-        while not stopped:
-            stopped = stop_signal.wait(timeout=1)
-        log.debug(f"main thread finish")
-    except Exception as e:
-        log.debug(f"main thread finish with error: {e}")
+    serve_until_stop(app, args.host, args.port, stop_signal, log)
 
 
+# Keyword config-object factory mirroring the controller constructor.
+# pylint: disable=too-many-arguments,too-many-positional-arguments
 def init_openai_engine(controller_config: ControllerConfig,
                        handler_config: TokenHandlerConfig,
                        api_key: str,
                        base_url: str,
-                       parser: Parser,
                        stop_signal: threading.Event,
                        generate_opts=GenerateOpts()) -> FastAPI:
     """
@@ -99,16 +79,14 @@ def init_openai_engine(controller_config: ControllerConfig,
         parser: Parser for model-specific token handling
         stop_signal: Threading event for stopping inference
         generate_opts: Generation options (temperature, max_tokens, etc.)
-        model_name_override: Optional override for model name in responses
 
     Returns:
         FastAPI: Initialized FastAPI application with OpenAI controller
     """
     start_mem = get_current_memory()
-    log.debug(f"consumed memory: {start_mem:.2f} MB")
+    log.debug("consumed memory: %.2f MB", start_mem)
 
-    log.info(
-        f"initializing OpenAI engine: base_url={base_url}")
+    log.info("initializing OpenAI engine: base_url=%s", base_url)
 
     controller = OpenAiController(
         config=controller_config,
@@ -121,12 +99,13 @@ def init_openai_engine(controller_config: ControllerConfig,
 
     loaded_mem = get_current_memory()
     delta = loaded_mem - start_mem
-    log.debug(f"consumed memory: {loaded_mem:.2f} MB, delta: {delta:.2f} MB")
+    log.debug("consumed memory: %.2f MB, delta: %.2f MB", loaded_mem, delta)
 
     return new_app(controller)
 
 
 def add_openai_args(args_parser: ArgumentParser):
+    """Register CLI arguments of the OpenAI proxy mode."""
     args_parser.add_argument("--openai_api_key", type=str, default="", help="OpenAI API key")
     args_parser.add_argument("--openai_base_url", type=str, default="https://api.openai.com/v1",
                              help="OpenAI API base URL")

@@ -1,3 +1,4 @@
+"""Tests for edit_file tool-call argument fixing."""
 import unittest
 from importlib.resources import files
 from pathlib import Path
@@ -10,8 +11,10 @@ TEST_RESOURCES = "test_resources"
 
 
 class EditFileTestCase(unittest.TestCase):
+    """Checks edit_file call repair against a real build file from resources."""
 
     def test_add_old_file(self):
+        """new_text from file content must be rebuilt with reconstructed old_text."""
         src_file = files(__package__).joinpath(TEST_RESOURCES,
                                                "gemma4/build.gradle.kts")
         src_file_bytes = src_file.read_bytes()
@@ -22,7 +25,7 @@ class EditFileTestCase(unittest.TestCase):
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES,
                                                      "gemma4/edit_file_no_old_text.txt")
         tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        calls, _partial = parser.parse_tool_calls(state, tool_call_text)
         fixed = fix_edit_file(calls[0], context=user_context)
 
         self.assertEqual({'allow_multiple_matches': False,
@@ -43,7 +46,8 @@ class EditFileTestCase(unittest.TestCase):
                                                  '    '
                                                  'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
+                                                 'implementation("org.springframework.boot:'
+                                                 'spring-boot-autoconfigure")\n'
                                                  '\n'
                                                  '    implementation("org.jooq:jooq")\n'
                                                  '    '
@@ -71,7 +75,8 @@ class EditFileTestCase(unittest.TestCase):
                                                  '    '
                                                  'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
+                                                 'implementation("org.springframework.boot:'
+                                                 'spring-boot-autoconfigure")\n'
                                                  '\n'
                                                  '    implementation("org.jooq:jooq")\n'
                                                  '    '

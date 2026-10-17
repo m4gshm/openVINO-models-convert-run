@@ -1,15 +1,20 @@
+"""Call builder for the run_configuration tool."""
 from agent.client.veai.tool import Tool
 from agent.parser import ParsedFunctionCall
 
-function_name = "run_configuration"
+FUNCTION_NAME = "run_configuration"
 
 
 class RunConfiguration(Tool):
+    """Builds run_configuration tool calls from repaired arguments."""
+
     @property
     def name(self) -> str:
-        return function_name
+        """Tool name as declared in tool definitions."""
+        return FUNCTION_NAME
 
     @staticmethod
+    # pylint: disable=too-many-arguments,too-many-positional-arguments  # signature mirrors the IDE run_configuration tool API
     def new_call(target_file: str,
                  configuration_name: str,
                  timeout: int,
@@ -17,7 +22,8 @@ class RunConfiguration(Tool):
                  configuration_run_arguments: list[str],
                  configuration_environment_variables: list[str],
                  files_to_collect_coverage: list[str]) -> ParsedFunctionCall:
-        return ParsedFunctionCall(name=function_name, arguments={
+        """Build the parsed function call with run configuration fields."""
+        return ParsedFunctionCall(name=FUNCTION_NAME, arguments={
             "target_file": target_file,
             "configuration_name": configuration_name,
             "timeout": timeout,

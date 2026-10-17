@@ -1,3 +1,4 @@
+"""VLM engine controller backed by openvino_genai VLMPipeline, with an LLM-pipe fallback."""
 import logging
 import queue
 import threading
@@ -10,8 +11,9 @@ from typing import SupportsInt, Literal
 
 from openai.types.chat import ChatCompletionChunk
 from openvino_genai import VLMPipeline, GenerationFinishReason, py_openvino_genai, StreamingStatus
-from openvino_genai.py_openvino_genai import DecodedResults, LLMPipeline, MeanStdPair, \
-    VLMDecodedResults, GenerationConfig
+# openvino_genai is a compiled extension module; pylint cannot see its members statically.
+from openvino_genai.py_openvino_genai import (  # pylint: disable=no-name-in-module
+    DecodedResults, LLMPipeline, MeanStdPair, VLMDecodedResults, GenerationConfig)
 
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, StopSignal
@@ -64,8 +66,14 @@ def vlm_metrics_str(metrics: Any) -> str:
 
 
 class VlmController(BaseOVController):
-    def __init__(self, config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
-                 handler_config: TokenHandlerConfig, stop_signal: threading.Event, generate_opts: GenerateOpts):
+    """Engine controller running a VLM (or plain LLM) pipeline in a worker executor."""
+
+    # Wired from server args; grouping the parameters into a config is a separate refactor.
+    def __init__(self,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                 config: ControllerConfig, parser: Parser, pipe: VLMPipeline | LLMPipeline,
+                 handler_config: TokenHandlerConfig, stop_signal: threading.Event,
+                 generate_opts: GenerateOpts):
+        """Wire the VLM/LLM pipeline and the shared controller state."""
         super().__init__(config, parser, pipe.get_tokenizer(), handler_config, generate_opts, stop_signal)
         self.pipe = pipe
         self.executor = ThreadPoolExecutor()
@@ -104,8 +112,10 @@ class VlmController(BaseOVController):
             except queue.Empty:
                 pass
 
-    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,
-                        token_handler: TokenHandler, media: MediaInputs) -> Generator[ChatCompletionChunk, None, None]:
+    # Streaming orchestration; splitting it into helpers is a separate refactor.
+    def chunk_generator(self, prompt: str, generation_config: GenerationConfig,  # pylint: disable=too-many-statements
+                        token_handler: TokenHandler,
+                        media: MediaInputs) -> Generator[ChatCompletionChunk, None, None]:
 
         response_id = str(uuid.uuid4())
 
@@ -156,21 +166,21 @@ class VlmController(BaseOVController):
                 if self.log_inference.isEnabledFor(logging.DEBUG):
                     texts = generate_result.texts if isinstance(generate_result,
                                                                 DecodedResults) else generate_result
-                    self.log_inference.debug(f"{log_msg}\nresult: {texts}")
+                    self.log_inference.debug("%s\nresult: %s", log_msg, texts)
                 else:
                     self.log_inference.info(log_msg)
 
                 after_generate_mem = get_current_memory()
                 generate_cost = after_generate_mem - before_generate_mem
-                log.debug(f"consumed memory: {after_generate_mem:.2f} MB, generate delta: {generate_cost:.2f} MB")
+                log.debug("consumed memory: %.2f MB, generate delta: %.2f MB", after_generate_mem, generate_cost)
 
                 inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                 if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                    log.info(f"inference finished by unexpected status {inference_finish_reason}")
+                    log.info("inference finished by unexpected status %s", inference_finish_reason)
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught  # any failure must reach the client as an error stop-response
                 start_stream_handling.put_nowait(True)
-                self.log_inference.error(f"inference error: {e}", exc_info=e)
+                self.log_inference.error("inference error: %s", e, exc_info=e)
                 err_str = str(e)
                 finish_reason: Literal[
                     "length", "stop"] = "length" if "<= m_max_prompt_len" in err_str else "stop"
@@ -199,22 +209,25 @@ class VlmController(BaseOVController):
                 except TimeoutError:
                     pass
 
-        except Exception as e:
-            log.error(f"chunk processing error: {e}", exc_info=e)
+        except Exception as e:  # pylint: disable=broad-exception-caught  # a chunk-processing failure must not kill the generator
+            log.error("chunk processing error: %s", e, exc_info=e)
 
         stop_stream_handling.put_nowait(True)
         if not inference_task.done():
             log.info("waiting for inference to complete")
             try:
-                r = inference_task.result(timeout=20)
-            except Exception as e:
-                log.error(f"waiting inference completion error: {e}", exc_info=e)
+                inference_task.result(timeout=20)
+            except Exception as e:  # pylint: disable=broad-exception-caught  # a timeout must not crash the endpoint
+                log.error("waiting inference completion error: %s", e, exc_info=e)
         log.info("inference handling is done")
 
 
-class StreamerWrapper(py_openvino_genai.StreamerBase):
+class StreamerWrapper(py_openvino_genai.StreamerBase):  # pylint: disable=c-extension-no-member  # runtime member of the compiled module
+    """Bridges pipeline token callbacks into the response chunk queue."""
+
     def __init__(self, streamer: TokenHandler, chunk_queue: queue.Queue[ChatCompletionChunk | None],
                  stop_stream_handling: queue.Queue[bool], start_stream_handling: queue.Queue[bool]):
+        """Bind the token handler and the queues shared with the generator."""
         super().__init__()
         self.streamer = streamer
         self.started = False
@@ -223,9 +236,10 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
         self.chunk_queue = chunk_queue
 
     def end(self) -> None:
-        pass
+        """Required StreamerBase hook: nothing to do on stream end."""
 
     def write(self, tokens: abc.Sequence[SupportsInt]) -> StreamingStatus:
+        """Handle one token batch: emit chunks and map the stop signal to StreamingStatus."""
         if not self.started:
             self.start_stream_handling.put(True)
             self.started = True
@@ -243,8 +257,8 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):
 
         if stop_signal == StopSignal.STOP:
             return StreamingStatus.STOP
-        elif stop_signal == StopSignal.TOOL_CALL:
+        if stop_signal == StopSignal.TOOL_CALL:
             return StreamingStatus.TOOL_CALL_STOP
-        elif stop_signal == StopSignal.CANCEL:
+        if stop_signal == StopSignal.CANCEL:
             return StreamingStatus.CANCEL
         return StreamingStatus.RUNNING

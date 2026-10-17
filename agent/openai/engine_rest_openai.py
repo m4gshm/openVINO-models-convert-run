@@ -1,3 +1,4 @@
+"""OpenAI proxy controller: forwards requests to a remote OpenAI-compatible endpoint."""
 import importlib
 import logging
 import threading
@@ -13,6 +14,8 @@ from agent.openai.models_api import ModelsListResponse, ModelObject
 _openai_pkg = importlib.import_module('openai')
 openai = _openai_pkg
 _openai_types_chat = importlib.import_module('openai.types.chat')
+# The imports below must run after the openai importlib workaround above.
+# pylint: disable=wrong-import-position,wrong-import-order,ungrouped-imports
 from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
@@ -49,7 +52,9 @@ class OpenAiController(BaseController):
     OpenVINO cannot load native accelerators.
     """
 
-    def __init__(self, config: ControllerConfig, api_key: str,
+    # Wired from server args; grouping the parameters into a config is a separate refactor.
+    def __init__(self,  # pylint: disable=too-many-arguments,too-many-positional-arguments
+                 config: ControllerConfig, api_key: str,
                  base_url: str, handler_config: TokenHandlerConfig,
                  stop_signal: threading.Event, generate_opts: GenerateOpts):
         """
@@ -70,7 +75,7 @@ class OpenAiController(BaseController):
 
         # Initialize OpenAI client
         self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
-        log.info(f"OpenAI client initialized: base_url={base_url}")
+        log.info("OpenAI client initialized: base_url=%s", base_url)
 
     async def models(self) -> ModelsListResponse:
         models = self.client.models.list()
@@ -103,8 +108,8 @@ class OpenAiController(BaseController):
                         choice = chunk.choices[0]
                         delta = choice.delta
                         content = delta.content if hasattr(delta, 'content') and delta.content else None
-                        reasoning_content = delta.reasoning_content if hasattr(delta,
-                                                                               'reasoning_content') and delta.reasoning_content else None
+                        has_reasoning = hasattr(delta, 'reasoning_content') and delta.reasoning_content
+                        reasoning_content = delta.reasoning_content if has_reasoning else None
                         thinking = not reasoning_content is None
                         role = delta.role if hasattr(delta, 'role') else None
 
@@ -120,11 +125,11 @@ class OpenAiController(BaseController):
                         yield our_chunk
 
                         if choice.finish_reason:
-                            log.debug(f"generation finished: finish_reason={choice.finish_reason}")
+                            log.debug("generation finished: finish_reason=%s", choice.finish_reason)
                             # break
 
-            except Exception as e:
-                log.error(f"inference error: {e}", exc_info=e)
+            except Exception as e:  # pylint: disable=broad-exception-caught  # safety net: any failure of the remote stream must become an error stop-response
+                log.error("inference error: %s", e, exc_info=e)
                 yield new_stop_response(
                     content=str(e),
                     finish_reason="stop",

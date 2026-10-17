@@ -1,9 +1,11 @@
+"""Pydantic models of the OpenAI GET /v1/models endpoint."""
 from typing import List, Optional
 
 from pydantic import BaseModel
 
 
 class ModelPermission(BaseModel):
+    """Permission entry attached to a served model."""
     id: str
     object: str = "model_permission"
     created: int
@@ -19,6 +21,7 @@ class ModelPermission(BaseModel):
 
 
 class ModelObject(BaseModel):
+    """Metadata of a single served model."""
     id: Optional[str] = None
     object: str = "model"
     created: Optional[int] = None
@@ -31,5 +34,6 @@ class ModelObject(BaseModel):
 
 
 class ModelsListResponse(BaseModel):
+    """Response body of GET /v1/models."""
     object: str = "list"
     data: List[ModelObject]

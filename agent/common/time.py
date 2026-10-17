@@ -1,7 +1,9 @@
+"""Human-friendly time span formatting."""
 from datetime import timedelta
 
 
 def format_time(td: timedelta) -> str:
+    """Format a timedelta as the largest non-zero period, e.g. '2 hours'."""
     seconds = int(td.total_seconds())
     periods = [
         ('day', 86400),

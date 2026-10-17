@@ -80,7 +80,7 @@ class MediaInputs:
         return ", ".join(f"{name}={count}" for name, count in sorted(counts.items())) or "no media"
 
 
-class MediaLoader:
+class MediaLoader:  # pylint: disable=too-few-public-methods  # single-purpose stateful media decoder
     """Resolves and decodes media references, enforcing the request limits."""
 
     def __init__(self, limits: MediaLimits):

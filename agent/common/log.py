@@ -1,11 +1,14 @@
+"""Logging configuration shared by the server entry points."""
 import logging
 import os
 
-log_format_prefix = "%(asctime)s - %(threadName)s - %(name)s - %(levelname)s"
-log_format_detailed = (log_format_prefix + " - [%(filename)s:%(lineno)d] - %(message)s")
-log_format_simple = (log_format_prefix + " - %(message)s")
+LOG_FORMAT_PREFIX = "%(asctime)s - %(threadName)s - %(name)s - %(levelname)s"
+LOG_FORMAT_DETAILED = LOG_FORMAT_PREFIX + " - [%(filename)s:%(lineno)d] - %(message)s"
+LOG_FORMAT_SIMPLE = LOG_FORMAT_PREFIX + " - %(message)s"
 
 
+# Filter-style callback class: a single hook method is its whole interface.
+# pylint: disable=too-few-public-methods
 class DropClientResetFilter(logging.Filter):
     """Drop harmless asyncio noise produced when a client resets a connection.
 
@@ -27,17 +30,18 @@ class DropClientResetFilter(logging.Filter):
 
 
 def logging_config(logs_dir: str):
+    """Build a dictConfig for console, app and per-purpose rotating file handlers."""
     os.makedirs(logs_dir, exist_ok=True)
     return {
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
             "simple": {
-                "format": log_format_simple,
+                "format": LOG_FORMAT_SIMPLE,
                 "datefmt": "%Y-%m-%d %H:%M:%S"
             },
             "detailed": {
-                "format": log_format_detailed
+                "format": LOG_FORMAT_DETAILED
             },
         },
         "handlers": {

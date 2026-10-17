@@ -1,11 +1,11 @@
-import json
+"""Parser of the Gemma channel syntax: ``<|channel>`` turns and ``call:name{args}`` tool calls."""
 import logging
-import re
 from typing import Any
 
 import agent
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
-from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall
+from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall, iter_tool_call_blocks, \
+    match_name_and_tail
 from agent.parser.json_fixer import try_to_parse_json_arguments, OBJECT_START, OBJECT_END, ARRAY_START, ARRAY_END
 
 NEW_LINE_UNIX = "\n"
@@ -40,15 +40,18 @@ log = logging.getLogger(__name__)
 
 
 class ParserState(agent.parser.ParserState):
+    """Gemma parsing context that remembers the previous token."""
 
     def __init__(self, supported_functions: dict[str, dict] | None = None):
         super().__init__(supported_functions)
         self.prev_token: str | None = None
 
     def finalize(self, token: str):
+        """Remember the very last token for the think-start detection."""
         self.prev_token = token
 
     def get_prev_token(self) -> str | None:
+        """Return the previous token stripped, or None before the first token."""
         prev_token = self.prev_token
         if prev_token:
             prev_token = prev_token.strip()
@@ -63,7 +66,10 @@ VALUE_TAG_WRAPPER = "<|\"|>"
 STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
 
 
-def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[dict[str, Any], list[str], str]:
+# Character-level state machine over the argument list; splitting it would obscure the grammar.
+def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
+        dict[str, Any], list[str], str]:
+    """Parse ``name:value`` pairs and bare values into named and anonymous lists."""
     arguments_block = arguments_block.strip()
     if not arguments_block:
         return {}, [], ""
@@ -90,7 +96,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                 clean_v = strip_unquote_if_wrapped_by_empty_and_quoted(unescape(v))
                 named_parameters[clean_k] = cast_value(clean_v)
         else:
-            log.error(f"unrepairable json arguments: {arguments_block}")
+            log.error("unrepairable json arguments: %s", arguments_block)
         unparsed_tail = ""
     else:
         arguments = dict[str, Any]()
@@ -152,7 +158,7 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                 # elif object_expect and token == object_end:
                 #     # log
                 #     break
-                elif word or (not word and token != ' '):
+                elif word or (not word and token != ' '):  # pylint: disable=no-else-break  # also reachable when the branch above missed its conditional break
                     word += token
             else:
                 # expected value
@@ -231,25 +237,20 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
         for i, v in enumerate(anonymous_parameters):
             anonymous_parameters[i] = unescape(v)
 
-    log.debug(
-        f"tool call object parsed: src='{arguments_block}', named_parameters='{named_parameters}', "
-        f"anonymous_parameters='{anonymous_parameters}', unparsed_tail='{unparsed_tail}'")
+    log.debug("tool call object parsed: src='%s', named_parameters='%s', "
+              "anonymous_parameters='%s', unparsed_tail='%s'",
+              arguments_block, named_parameters, anonymous_parameters, unparsed_tail)
 
     return named_parameters, anonymous_parameters, unparsed_tail
 
 
 def parse_name(parameters_block) -> tuple[str | None, str | None]:
-    pattern = r"(.*?)({.*})"
-    match = re.search(pattern, parameters_block, re.DOTALL)
-    if match:
-        name = match.group(1).strip()
-        tail = match.group(2).strip()
-        return name, tail
-    else:
-        return None, None
+    """Split a ``call:name {...}`` block into the function name and the arguments tail."""
+    return match_name_and_tail(r"(.*?)({.*})", parameters_block)
 
 
 def is_start_by_wrapper(word: str):
+    """Return the string wrapper the word starts with, or None."""
     for wrapper in STR_WRAPPERS:
         if word.startswith(wrapper):
             return wrapper
@@ -257,10 +258,12 @@ def is_start_by_wrapper(word: str):
 
 
 def is_end_by_wrapper(word: str | Any, wrapper: str) -> bool:
+    """True when the word ends by the wrapper and the wrapper is not escaped."""
     return word and word.endswith(wrapper) and not word.endswith("\\" + wrapper)
 
 
 def clean(dirty_val: Any) -> Any:
+    """Recursively strip the wrapping braces/quotes and unescape a string value."""
     if isinstance(dirty_val, str):
         stripped = dirty_val.strip()
         if stripped.startswith("{") or stripped.startswith("\""):
@@ -272,16 +275,18 @@ def clean(dirty_val: Any) -> Any:
 
 
 def strip(val: Any):
+    """Strip surrounding spaces of strings, logging the change."""
     if isinstance(val, str):
         if val.startswith(" ") or val.endswith(" "):
             old = val
             new = val.strip()
-            log.debug(f"strip '{old}' to '{new}'")
+            log.debug("strip '%s' to '%s'", old, new)
             val = new
     return val
 
 
 def unquote(val: Any) -> Any:
+    """Drop the first and the last quote of a quoted string."""
     if isinstance(val, str):
         if val.startswith("\"") or val.startswith("'"):
             val = val[1:len(val)]
@@ -291,6 +296,7 @@ def unquote(val: Any) -> Any:
 
 
 def strip_unquote_if_wrapped_by_empty_and_quoted(val: Any):
+    """Strip padding spaces and a wrapping quote pair around a value."""
     if isinstance(val, str):
         stripped = val
         last_left_empty = -1
@@ -304,7 +310,7 @@ def strip_unquote_if_wrapped_by_empty_and_quoted(val: Any):
         next_after_e = last_left_empty + 1
         if stripped and next_after_e < len(stripped):
             symb_next_after_empty = stripped[next_after_e] if stripped else None
-            if symb_next_after_empty and (symb_next_after_empty == "\"" or symb_next_after_empty == "'"):
+            if symb_next_after_empty and symb_next_after_empty in ('"', "'"):
                 left_quoted = symb_next_after_empty
                 stripped = stripped[next_after_e + 1:]
 
@@ -314,21 +320,22 @@ def strip_unquote_if_wrapped_by_empty_and_quoted(val: Any):
             if symb_last and symb_last == left_quoted:
                 stripped = stripped[:-1]
 
-        log.debug(f"strip '{val}' to '{stripped}'")
+        log.debug("strip '%s' to '%s'", val, stripped)
         return stripped
-    else:
-        return val
+    return val
 
 
-unescaped = [("\\\"", "\""), ("\\r\\n", NEW_LINE_WINDOWS), (NEW_LINE_WINDOWS, NEW_LINE_UNIX), ("\\n", NEW_LINE_UNIX), ("\\t", "\t")]
+unescaped = [("\\\"", "\""), ("\\r\\n", NEW_LINE_WINDOWS),
+             (NEW_LINE_WINDOWS, NEW_LINE_UNIX), ("\\n", NEW_LINE_UNIX), ("\\t", "\t")]
 
 
 def unescape(val: str | Any):
+    """Replace escaped sequences by the real characters, recursively in lists and dicts."""
     if isinstance(val, str):
         for (old, new) in unescaped:
             if old in val:
                 after = val.replace(old, new)
-                log.debug(f"unescaped '{old}' by '{new}':\nbefore={val}\nafter={after}")
+                log.debug("unescaped '%s' by '%s':\nbefore=%s\nafter=%s", old, new, val, after)
                 val = after
     elif isinstance(val, list):
         list_val = [unescape(lv) for lv in val]
@@ -342,18 +349,20 @@ def unescape(val: str | Any):
 
 
 def cast_value(val: str | Any):
+    """Cast the textual null/false/true literals to their Python values."""
     if isinstance(val, str):
         low_val = val.lower()
         if low_val == "null":
             return None
-        elif low_val == "false":
+        if low_val == "false":
             return False
-        elif low_val == "true":
+        if low_val == "true":
             return True
     return val
 
 def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
-    log.debug(f"parse array from '{array_str}'")
+    """Parse a ``[{...}, {...}]`` array tail into objects and the remaining tail."""
+    log.debug("parse array from '%s'", array_str)
     next_token_i = 0
     parsed_object_in_array, parsed_anonymous_in_array, unparsed_tail = parse_object_arguments(
         arguments_block=array_str[next_token_i:], array_end_expect=True)
@@ -370,8 +379,8 @@ def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
             array_tail = array_tail[next_token_i:]
             next_token_i = 0
             break
-        elif token == OBJECT_END:
-            log.warning(f"unexpected object end {token} at index {next_token_i} in array tail '{array_tail}'")
+        if token == OBJECT_END:
+            log.warning("unexpected object end %s at index %s in array tail '%s'", token, next_token_i, array_tail)
             next_token_i += 1
         else:
             if token == ARGS_DELIM:
@@ -388,6 +397,8 @@ def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
 
 
 class Gemma4ChannelParser(Parser[ParserState]):
+    """Parser for the Gemma channel/turn markup and ``call:`` tool calls."""
+
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         state = super().new_state(prompt, supported_functions, init_chat_events)
@@ -396,7 +407,7 @@ class Gemma4ChannelParser(Parser[ParserState]):
     def process_chat_prompt(self, prompt: str) -> str:
         expected = f"{TURN_START}{self.get_assistant_role_name()}\n"
         if not prompt.endswith(expected):
-            log.debug(f"parser appends prompt by {expected}")
+            log.debug("parser appends prompt by %s", expected)
             prompt += expected
         return prompt
 
@@ -445,32 +456,18 @@ class Gemma4ChannelParser(Parser[ParserState]):
         return ROLE
 
     def parse_tool_calls(self, state: ParserState, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
-        tool_call_expression = tool_call_expression.lstrip()
-        tool_call_blocks = tool_call_expression.split(TOOL_CALL_START)
-
+        """Parse ``<|tool_call>`` blocks holding ``call:name{...}`` definitions."""
         parsed_calls: list[ParsedFunctionCall] = []
         partial = False
-        for call_block in tool_call_blocks:
-            if len(call_block) == 0:
-                continue
-
-            call_block_rstrip = call_block.rstrip()
-            if call_block_rstrip.endswith(TOOL_CALL_END):
-                call_block = call_block_rstrip[:-len(TOOL_CALL_END)]
-
-            call_block = call_block.lstrip()
-            function_blocks = call_block.split(FUNCTION_START_PREF)
+        for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
+                                                        FUNCTION_START_PREF):
             for function_block in function_blocks:
-                if len(function_block) == 0:
-                    continue
-                function_block = function_block.rstrip()
-
                 func_name, tail = parse_name(function_block)
                 if func_name is None:
                     # log
                     continue
 
-                arguments, anonymous_parameters, unparsed_tail = parse_object_arguments(tail or "")
+                arguments, anonymous_parameters, _ = parse_object_arguments(tail or "")
 
                 parsed_calls.append(
                     ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_parameters))

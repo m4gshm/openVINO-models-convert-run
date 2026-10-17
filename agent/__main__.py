@@ -1,10 +1,9 @@
+"""CLI entry point: argument dispatch to the OpenVINO or the OpenAI proxy server."""
 import argparse
 import logging.config
 import os
 import signal
 import sys
-
-from pydantic.json import pydantic_encoder
 
 from agent.server import stop_signal
 from agent.server_openai import run_openai_proxy, add_openai_args
@@ -19,8 +18,9 @@ os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 log = logging.getLogger(__name__)
 
 
-def handle_exit_signal(signum, frame):
-    log.info(f"handle signal {signum}")
+def handle_exit_signal(signum, _frame):
+    """Set the shared stop signal on SIGINT/SIGTERM so server threads wind down."""
+    log.info("handle signal %s", signum)
     stop_signal.set()
 
 
@@ -28,6 +28,7 @@ signal.signal(signal.SIGINT, handle_exit_signal)
 signal.signal(signal.SIGTERM, handle_exit_signal)
 
 def main():
+    """Parse CLI arguments and run the selected server mode."""
     args_parser = argparse.ArgumentParser()
     add_openvino_args(args_parser)
     add_openai_args(args_parser)

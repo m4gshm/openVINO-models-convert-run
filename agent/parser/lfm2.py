@@ -1,3 +1,4 @@
+"""Parser of the LFM2 python-tuple tool call syntax and delayed json phrases."""
 import ast
 import logging
 import re
@@ -18,6 +19,8 @@ TOOL_CALL_END = "<|tool_call_end|>"
 
 
 class Lfm2Parser(Parser):
+    """Parser for LFM2 models emitting python-tuple style tool calls."""
+
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:
         if not prompt:
@@ -64,8 +67,8 @@ class Lfm2Parser(Parser):
                 parsed_function_calls = parse_function_call(function_block)
                 if parsed_function_calls:
                     parsed_calls.extend(parsed_function_calls)
-            except SyntaxError as e:
-                log.error(f"unparseable tool call: {function_block}")
+            except SyntaxError:
+                log.error("unparseable tool call: %s", function_block)
 
         return parsed_calls, partial
 
@@ -75,7 +78,7 @@ class Lfm2Parser(Parser):
 
     def is_delay_streaming_start(self, state: ParserState, token: str) -> bool:
         token_rsplit = token.strip()
-        return token_rsplit == ARRAY_START or token_rsplit == OBJECT_START
+        return token_rsplit in (ARRAY_START, OBJECT_START)
 
     def is_delay_streaming_end(self, state: ParserState, token: str) -> bool:
         return False
@@ -85,7 +88,8 @@ class Lfm2Parser(Parser):
         return parse_delayed_phrase(full)
 
 
-def parse_delayed_phrase(delayed_raw_json: str) -> DelayedResult | None:
+def parse_delayed_phrase(delayed_raw_json: str) -> DelayedResult | None:  # pylint: disable=too-many-branches  # shape checks
+    """Parse a delayed json phrase into content and tool calls, warning on mismatches."""
     parsed_json = try_to_parse_json(delayed_raw_json)
     if parsed_json is None:
         return None
@@ -100,28 +104,28 @@ def parse_delayed_phrase(delayed_raw_json: str) -> DelayedResult | None:
         if isinstance(content, str):
             handled_content = content
         else:
-            log.warning(f"unexpected content type='{type(content)}', content='{content}'")
+            log.warning("unexpected content type='%s', content='%s'", type(content), content)
 
     tool_calls = parsed_json.get("tool_calls")
     if tool_calls is None:
         pass
     elif not isinstance(tool_calls, list):
-            log.warning(f"unexpected tool_calls type='{type(tool_calls)}', content='{tool_calls}'")
+        log.warning("unexpected tool_calls type='%s', content='%s'", type(tool_calls), tool_calls)
     else:
         parsed_tool_calls = list[ParsedFunctionCall]()
         for tool_call in tool_calls:
             if not isinstance(tool_call, dict):
-                log.warning(f"unexpected tool_call type='{type(tool_call)}', content='{tool_call}'")
+                log.warning("unexpected tool_call type='%s', content='%s'", type(tool_call), tool_call)
             else:
                 name = tool_call.get("name")
                 arguments = tool_call.get("arguments")
                 if not (name is None or arguments is None):
                     if not isinstance(name, str):
-                        log.warning(f"unexpected tool_call name type='{type(name)}', content='{name}'")
+                        log.warning("unexpected tool_call name type='%s', content='%s'", type(name), name)
 
                     if not isinstance(arguments, dict):
-                        log.warning(f"unexpected tool_call arguments type='{type(arguments)}',"
-                                    f" content='{arguments}'")
+                        log.warning("unexpected tool_call arguments type='%s', content='%s'",
+                                    type(arguments), arguments)
                 parsed_tool_calls.append(ParsedFunctionCall(name=name, arguments=arguments))
         if len(parsed_tool_calls) > 0:
             handled_tool_calls = parsed_tool_calls
@@ -130,46 +134,42 @@ def parse_delayed_phrase(delayed_raw_json: str) -> DelayedResult | None:
             handled_content or handled_tool_calls) else None
 
 
-def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
-    clean_function_block = function_block.strip("[]")
-    tree: ast.Expression | None = None
-    stop = False
-    cycle = 0
-    while not stop:
+def _repaired_tuple_block(clean_function_block: str) -> ast.Expression:
+    """Ast-parse a tuple expression, iteratively repairing missing colons and brackets."""
+    while True:
         try:
-            cycle += 1
-            tree: ast.Expression = ast.parse(clean_function_block, mode="eval")
-            stop = True
+            return ast.parse(clean_function_block, mode="eval")
         except SyntaxError as e:
             offset = e.offset
-            log.debug(f"parsing error: message='{e.msg}' line={e.lineno}, offset={offset}, trying to fix")
-            if e.msg == "':' expected after dictionary key":
-                start_str = ""
-                if offset > 0:
-                    prev = clean_function_block[offset - 1]
-                    if prev == '\'' or prev == '"':
-                        start_str = prev
-                clean_function_block = insert_str(clean_function_block, ":" + start_str, offset)
-            else:
-                pattern = r"closing parenthesis '(?P<closing>.)' does not match opening parenthesis '(?P<opening>.)'"
-                match = re.search(pattern, e.msg)
-                if match:
-                    closing_bracket = match.group("closing")
-                    opening_bracket = match.group("opening")
-                    if opening_bracket == "{":
-                        new_closing_bracket = "}"
-                    elif opening_bracket == "[":
-                        new_closing_bracket = "]"
-                    else:
-                        new_closing_bracket = None
-                    if not new_closing_bracket is None:
-                        clean_function_block = insert_str(clean_function_block, new_closing_bracket, offset - 1)
-                    else:
-                        raise e
-                else:
-                    raise e
+            log.debug("parsing error: message='%s' line=%s, offset=%s, trying to fix", e.msg, e.lineno, offset)
+            clean_function_block = _repair_tuple_syntax(clean_function_block, e, offset)
 
-    body = tree.body
+
+def _repair_tuple_syntax(clean_function_block: str, error: SyntaxError, offset: int | None) -> str:
+    """Insert the colon or closing bracket requested by the ast error, or re-raise."""
+    if error.msg == "':' expected after dictionary key":
+        start_str = ""
+        if offset > 0:
+            prev = clean_function_block[offset - 1]
+            if prev in ('\'', '"'):
+                start_str = prev
+        return insert_str(clean_function_block, ":" + start_str, offset)
+    pattern = r"closing parenthesis '(?P<closing>.)' does not match opening parenthesis '(?P<opening>.)'"
+    match = re.search(pattern, error.msg)
+    if not match:
+        raise error
+    opening_bracket = match.group("opening")
+    if opening_bracket == "{":
+        return insert_str(clean_function_block, "}", offset - 1)
+    if opening_bracket == "[":
+        return insert_str(clean_function_block, "]", offset - 1)
+    raise error
+
+
+def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
+    """Parse an LFM2 ``func(arg=value, ...)`` tuple into calls, repairing broken syntax."""
+    clean_function_block = function_block.strip("[]")
+    body = _repaired_tuple_block(clean_function_block).body
 
     elements = body.elts if isinstance(body, ast.Tuple) else [body]
 
@@ -192,14 +192,14 @@ def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
         if not arguments and element_args:
             first = element_args[0]
             if isinstance(first, ast.Dict):
-                for i, k in enumerate(first.keys):
-                    v = first.values[i]
-                    if not isinstance(k, ast.Constant):
-                        log.error(f"unexpected key type={type(k)}, key={k}")
-                    elif not isinstance(v, ast.Constant):
-                        log.error(f"unexpected value type {type(v)}, value={v}")
+                for i, key in enumerate(first.keys):
+                    value = first.values[i]
+                    if not isinstance(key, ast.Constant):
+                        log.error("unexpected key type=%s, key=%s", type(key), key)
+                    elif not isinstance(value, ast.Constant):
+                        log.error("unexpected value type %s, value=%s", type(value), value)
                     else:
-                        arguments[k.value] = v.value
+                        arguments[key.value] = value.value
 
                 has_anonymous = not arguments
         anonymous_arguments = [ast.literal_eval(arg) for arg in element_args] if has_anonymous else []
@@ -209,5 +209,6 @@ def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
 
 
 def insert_str(clean_function_block: str | Any, new_closing_bracket: str, offset: int | None) -> Any:
+    """Insert a fragment into the block at the given offset."""
     clean_function_block = clean_function_block[0:offset] + new_closing_bracket + clean_function_block[offset:]
     return clean_function_block

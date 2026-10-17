@@ -1,3 +1,4 @@
+"""Helpers marking tool-call messages as middleware checkpoints."""
 import uuid
 
 from agent.openai.chat_api import ROLE_TOOL
@@ -7,6 +8,7 @@ MIDDLEWARE_CHECKPOINT = "middleware_checkpoint"
 
 
 def is_middleware_checkpoint(message: ChatCompletionMessageParam) -> bool:
+    """Return True when the message is a tool reply produced by a middleware checkpoint."""
     is_tool = message.role == ROLE_TOOL
     if not is_tool:
         return False
@@ -15,4 +17,5 @@ def is_middleware_checkpoint(message: ChatCompletionMessageParam) -> bool:
 
 
 def new_middleware_call_id() -> str:
+    """Return a fresh unique middleware checkpoint tool-call id."""
     return MIDDLEWARE_CHECKPOINT + "_" + str(uuid.uuid4())

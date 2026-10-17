@@ -1,3 +1,4 @@
+"""FastAPI app factory shared by all engines, plus the common serve-and-wait loop."""
 import asyncio
 import logging
 import threading
@@ -5,10 +6,11 @@ from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Any
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
-from agent.openai.engine_rest_common import BaseOVController, BaseController
+from agent.openai.engine_rest_common import BaseController
 from agent.openai.logger_rest import LoggingRoute
 
 log = logging.getLogger(__name__)
@@ -16,7 +18,28 @@ log = logging.getLogger(__name__)
 stop_signal = threading.Event()
 
 
+def serve_until_stop(app: FastAPI, host: str, port: int, stop_event: threading.Event,
+                     logger: logging.Logger) -> None:
+    """Run uvicorn on a daemon thread and block the caller until stop_event is set."""
+    logger.info("listening %s:%s", host, port)
+
+    def server_handle():
+        uvicorn.run(app, host=host, port=port, reload=False, timeout_graceful_shutdown=0)
+
+    server_thread = threading.Thread(target=server_handle, daemon=True)
+    server_thread.start()
+
+    try:
+        stopped = False
+        while not stopped:
+            stopped = stop_event.wait(timeout=1)
+        logger.debug("main thread finish")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # the wait loop must outlive any error
+        logger.debug("main thread finish with error: %s", e)
+
+
 def enum_value[T: Enum](member: T) -> Any:
+    """Return the raw value of an enum member."""
     return member.value
 
 
@@ -36,7 +59,7 @@ def new_app(controller: BaseController) -> FastAPI:
         log.info("controller is shutdown")
         controller.shutdown()
 
-    app = FastAPI(lifespan=(asynccontextmanager(lifespan)))
+    app = FastAPI(lifespan=asynccontextmanager(lifespan))
     app_router = app.router
     app_router.route_class = LoggingRoute
     # OpenAI compatible endpoints
