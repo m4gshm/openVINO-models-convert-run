@@ -36,9 +36,11 @@ _DECODE_BATCH = 4096
 class SpecialTokenSource(Protocol):
     """Part of ``openvino_genai.Tokenizer`` used to discover special tokens."""
 
-    def get_vocab(self) -> dict: ...
+    def get_vocab(self) -> dict:
+        """Return the tokenizer vocabulary of the model."""
 
-    def decode(self, tokens, skip_special_tokens: bool = True): ...
+    def decode(self, tokens, skip_special_tokens: bool = True):
+        """Decode a list of tokens back into text."""
 
 
 def _token_text(token: bytes | str) -> str | None:

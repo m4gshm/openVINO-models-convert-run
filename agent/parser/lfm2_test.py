@@ -1,16 +1,18 @@
+"""Tests of the lfm2 tool call parser."""
 import unittest
-from importlib.resources import files
 
 from agent.client.user_context import UserContext, OS
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure, fix_search_file_by_name, \
     fix_ask_user_with_options
 from agent.parser import ParsedFunctionCall
 from agent.parser.lfm2 import Lfm2Parser, parse_delayed_phrase
+from agent.parser.test_support import parse_first_call, read_tool_call
 
 TEST_RESOURCES = "test_resources"
 
 
 def new_windows_user_context() -> UserContext:
+    """Build a Windows user context for the argument fixers."""
     context = UserContext()
     context.os_type = OS.Windows
     return context
@@ -22,39 +24,40 @@ state = parser.new_state()
 
 
 class Lfm2TestCases(unittest.TestCase):
+    """Checks the tool call expressions of the lfm2 test resources."""
 
     def __init__(self, *args, **kwargs):
+        """Prepare the fixtures of the test case."""
         super().__init__(*args, **kwargs)
 
     def test_list_dir(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/list_dir.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check list dir."""
+        first, partial = parse_first_call(parser, state, __package__, "lfm2/list_dir.txt")
         self.assertEqual("list_dir", first.name)
         self.assertEqual({'depth': 0, 'directory_path': 'C:\\1\\2\\3\\4'},
                          first.arguments)
         self.assertFalse(partial)
 
     def test_edit_file(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check edit file."""
+        first, partial = parse_first_call(parser, state, __package__, "lfm2/edit_file.txt")
         first_fixed = fix_edit_file(first)
         self.assertEqual("edit_file", first_fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': 'dependencies {\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")\n'
+                                                 'implementation("org.springframework.boot:'
+                                                 'spring-boot-starter-data-r2dbc")\n'
                                                  '    '
-                                                 'implementation("io.projectsspecifiers:runtime:org.postgresql:42.7.2")\n'
+                                                 'implementation("io.projectsspecifiers:runtime:'
+                                                 'org.postgresql:42.7.2")\n'
                                                  '    '
                                                  'implementation("org.testcontainers:junit-jupiter:2.19.0")\n'
                                                  '    '
                                                  'testRuntime("org.testcontainers:junit-jupiter:2.19.0")\n'
                                                  '    '
-                                                 'testcontainers-dependency:testcontainers:junit-jupiter:2.19.0\n'
+                                                 'testcontainers-dependency:testcontainers:'
+                                                 'junit-jupiter:2.19.0\n'
                                                  '}',
                                      'old_text': 'dependencies {\n    // Existing dependencies...\n}'}],
                           'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/build.gradle.kts'},
@@ -62,16 +65,15 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     def test_edit_file_2(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file_2.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check edit file 2."""
+        first, partial = parse_first_call(parser, state, __package__, "lfm2/edit_file_2.txt")
         first_fixed = fix_edit_file(first)
         self.assertEqual("edit_file", first_fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
                           'edits': [{'new_text': 'dependencies {\n'
                                                  '    '
-                                                 'testImplementation("org.testcontainers:junit-jupiter:2.2.0")\n'
+                                                 'testImplementation("org.testcontainers:'
+                                                 'junit-jupiter:2.2.0")\n'
                                                  '    '
                                                  'testImplementation("org.testcontainers:postgresql:latest")\n'
                                                  '}',
@@ -81,10 +83,7 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     # def test_edit_file_3(self):
-    #     tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/edit_file_3.txt")
-    #     tool_call_text = tool_call_file.read_text()
-    #     calls, partial = parser.parse_tool_calls(state, tool_call_text)
-    #     first = calls[0]
+    #     first, partial = parse_first_call(parser, state, __package__, "lfm2/edit_file_3.txt")
     #     first_fixed = fix_edit_file(first)
     #     self.assertEqual("edit_file", first_fixed.name)
     #     self.assertEqual({'allow_multiple_matches': False,
@@ -100,27 +99,29 @@ class Lfm2TestCases(unittest.TestCase):
     #     self.assertFalse(partial)
 
     def test_search_file_by_name(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/search_file_by_name.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        user_context = UserContext()
-        user_context.os_type = OS.Windows
-        fixed = [fix_search_file_by_name(c, context=user_context) for c in calls]
+        """Check search file by name."""
+        calls, partial = parser.parse_tool_calls(state, read_tool_call(__package__, "lfm2/search_file_by_name.txt"))
+        windows_context = UserContext()
+        windows_context.os_type = OS.Windows
+        fixed = [fix_search_file_by_name(c, context=windows_context) for c in calls]
         self.assertEqual("search_file_by_name", fixed[0].name)
         self.assertEqual([ParsedFunctionCall(name='search_file_by_name',
                                              arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
-                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\'
+                                                                           'distributed-transactions-practice'},
                                              anonymous_arguments=[]),
                           ParsedFunctionCall(name='search_file_by_name',
                                              arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
-                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\'
+                                                                           'distributed-transactions-practice'},
                                              anonymous_arguments=[]),
                           ParsedFunctionCall(name='search_file_by_name', arguments={
                               'search_directory': 'C:/alex/github/m4gshm/distributed-transactions-practice',
                               'glob_pattern': '**/MessageStorageImpl*Test*.java'}, anonymous_arguments=[]),
                           ParsedFunctionCall(name='search_file_by_name',
                                              arguments={'glob_pattern': '**/MessageStorageImpl*Test*.java',
-                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice'},
+                                                        'search_directory': 'C:\\alex\\github\\m4gshm\\'
+                                                                           'distributed-transactions-practice'},
                                              anonymous_arguments=[]),
                           ParsedFunctionCall(name='search_file_by_name', arguments={
                               'search_directory': 'C:\\alex\\github\\m4gshm\\distributed-transactions-practice',
@@ -129,9 +130,8 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     def test_read_file_tuple(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/read_file_tuple.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
+        """Check read file tuple."""
+        calls, partial = parser.parse_tool_calls(state, read_tool_call(__package__, "lfm2/read_file_tuple.txt"))
         self.assertEqual(len(calls), 2)
         first = calls[0]
         self.assertEqual("read_file", first.name)
@@ -145,18 +145,16 @@ class Lfm2TestCases(unittest.TestCase):
         self.assertFalse(partial)
 
     def test_file_structure(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/file_structure.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check file structure."""
+        first, _partial = parse_first_call(parser, state, __package__, "lfm2/file_structure.txt")
         first_fixed = fix_file_structure(first, user_context)
         self.assertEqual("file_structure", first_fixed.name)
         self.assertEqual({'depth': 4, 'directory_path': 'C:/src'},
                          first.arguments)
 
     def test_ask_user_with_options_call_json(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "lfm2/ask_user_with_options_call.json")
-        tool_call_text = tool_call_file.read_text()
+        """Check ask user with options call json."""
+        tool_call_text = read_tool_call(__package__, "lfm2/ask_user_with_options_call.json")
         delay = parse_delayed_phrase(tool_call_text)
         calls = delay.tool_calls
         first = calls[0]

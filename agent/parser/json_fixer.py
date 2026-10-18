@@ -33,9 +33,10 @@ def try_to_parse_json(raw_json: str) -> Any:
 
 
 # Recursive json repair state machine: one branch per json decoder error message.
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements
 def _try_to_parse_json(raw_json: str, cycle_detect=0, last_inserted_pos: int | None = None,
                        last_inserted_sym: str | None = None, last_replaced_sym: str | None = None
-                       ) -> tuple[Any, bool]:  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+                       ) -> tuple[Any, bool]:
     """Try json.loads and recursively repair the typical LLM json damage."""
     repeat = False
     if cycle_detect >= 1000:

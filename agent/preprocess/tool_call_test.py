@@ -1,3 +1,4 @@
+"""Tests of the tool call loop detection and of its markdown rendering."""
 import unittest
 from importlib.resources import files
 
@@ -11,34 +12,36 @@ TEST_RESOURCES = "test_resources"
 
 
 class PreprocessToolCallCase(unittest.TestCase):
+    """Checks the loop detection over a chat history of tool calls."""
+
     adapter = TypeAdapter(list[ChatCompletionMessageParam])
 
     def test_check_loop_calls(self):
+        """Check check loop calls."""
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls.json")
         tool_call_text = tool_call_file.read_text(encoding="utf-8")
         messages = self.adapter.validate_json(tool_call_text)
         preprocess_tool_call = PreprocessToolCall()
-        loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
+        loop_call, _count = preprocess_tool_call.check_loop_tool_calls(messages)
         self.assertIsNotNone(loop_call)
         self.assertEqual("search_file_by_name", loop_call.name)
         self.assertEqual('{"glob_pattern": "InputMessages.*", "search_directory": "test_dir"}', loop_call.arguments)
         self.assertEqual('{"result":"warning","warning":"Directory does not exist: test_dir"}', loop_call.result)
 
     def test_check_loop_multitools_calls(self):
+        """Check check loop multitools calls."""
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "loop_tool_calls_multiple.json")
         tool_call_text = tool_call_file.read_text(encoding="utf-8")
-        try:
-            messages = self.adapter.validate_json(tool_call_text)
-        except Exception as e:
-            raise e
+        messages = self.adapter.validate_json(tool_call_text)
         preprocess_tool_call = PreprocessToolCall()
-        loop_call, count = preprocess_tool_call.check_loop_tool_calls(messages)
+        loop_call, _count = preprocess_tool_call.check_loop_tool_calls(messages)
         self.assertIsNotNone(loop_call)
         self.assertEqual("search_file_by_name", loop_call.name)
         self.assertEqual('{"glob_pattern": "*.java", "search_directory": "/tmp"}', loop_call.arguments)
         self.assertEqual('{"result":"success with json content","content":{"results":[]}}', loop_call.result)
 
     def test_markdown_render(self):
+        """Check markdown render."""
         tool_call_file_src = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.json")
         tool_call_file_expected = files(__package__).joinpath(TEST_RESOURCES, "tool_call_for_markdown_rendering.md")
         tool_call_json = tool_call_file_src.read_text(encoding="utf-8")
@@ -46,7 +49,7 @@ class PreprocessToolCallCase(unittest.TestCase):
         messages = self.adapter.validate_json(tool_call_json)
 
         tool_call_result = messages[-1]
-        function, i = find_tool_call_function(tool_call_result.tool_call_id, len(messages) - 1, messages)
+        function, _i = find_tool_call_function(tool_call_result.tool_call_id, len(messages) - 1, messages)
         markdown = new_function_call_result(function.name, function.arguments, tool_call_result.content,
                                             5).render_markdown()
         self.assertEqual(tool_call_md, markdown)

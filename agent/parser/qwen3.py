@@ -5,7 +5,7 @@ from typing import Any, Iterable
 
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
-from agent.parser import fill_state_by_prompt_tail, iter_tool_call_blocks, match_name_and_tail
+from agent.parser import fill_state_by_prompt_tail, iter_function_blocks, match_name_and_tail
 from agent.parser.json_fixer import try_to_parse_json_arguments
 from agent.parser.qwen_base import CLOSE_TAG_PREF, OPEN_TAG_SUF, TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
 
@@ -126,11 +126,10 @@ class Qwen3MoeParser(QwenBaseParser):
         """Parse ``<tool_call>`` blocks holding ``<function=name>`` definitions."""
         parsed_calls: list[ParsedFunctionCall] = []
         partial = False
-        for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
-                                                        FUNCTION_START_PREF):
-            for function_block in function_blocks:
-                parsed_function_call, partial = parse_function_call(state, function_block, partial)
+        for function_block in iter_function_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
+                                                    FUNCTION_START_PREF):
+            parsed_function_call, partial = parse_function_call(state, function_block, partial)
 
-                if parsed_function_call:
-                    parsed_calls.append(parsed_function_call)
+            if parsed_function_call:
+                parsed_calls.append(parsed_function_call)
         return parsed_calls, partial

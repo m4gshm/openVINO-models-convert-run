@@ -4,7 +4,7 @@ from typing import Any
 
 import agent
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
-from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall, iter_tool_call_blocks, \
+from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall, iter_function_blocks, \
     match_name_and_tail
 from agent.parser.json_fixer import try_to_parse_json_arguments, OBJECT_START, OBJECT_END, ARRAY_START, ARRAY_END
 
@@ -67,7 +67,10 @@ STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
 
 
 # Character-level state machine over the argument list; splitting it would obscure the grammar.
-def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[  # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
+# The character level scanner below needs one branch per token state, so the
+# pylint structural limits do not apply here.
+# pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
+def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[
         dict[str, Any], list[str], str]:
     """Parse ``name:value`` pairs and bare values into named and anonymous lists."""
     arguments_block = arguments_block.strip()
@@ -158,7 +161,8 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                 # elif object_expect and token == object_end:
                 #     # log
                 #     break
-                elif word or (not word and token != ' '):  # pylint: disable=no-else-break  # also reachable when the branch above missed its conditional break
+                # also reachable when the branch above missed its conditional break
+                elif word or (not word and token != ' '):
                     word += token
             else:
                 # expected value
@@ -212,11 +216,9 @@ def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tupl
                             if is_object_end:
                                 word = word[:len(word) - len(OBJECT_END)]
                                 break
-                            elif is_array_end:
+                            if is_array_end:
                                 word = word[:len(word) - len(ARRAY_END)]
                                 break
-                            else:
-                                pass
         unparsed_tail = on_parse[next_token_i:]
 
         word = word.rstrip() if word and not expect_value_end_delimiter else word
@@ -459,16 +461,15 @@ class Gemma4ChannelParser(Parser[ParserState]):
         """Parse ``<|tool_call>`` blocks holding ``call:name{...}`` definitions."""
         parsed_calls: list[ParsedFunctionCall] = []
         partial = False
-        for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
-                                                        FUNCTION_START_PREF):
-            for function_block in function_blocks:
-                func_name, tail = parse_name(function_block)
-                if func_name is None:
-                    # log
-                    continue
+        for function_block in iter_function_blocks(tool_call_expression, TOOL_CALL_START, TOOL_CALL_END,
+                                                   FUNCTION_START_PREF):
+            func_name, tail = parse_name(function_block)
+            if func_name is None:
+                # log
+                continue
 
-                arguments, anonymous_parameters, _ = parse_object_arguments(tail or "")
+            arguments, anonymous_parameters, _ = parse_object_arguments(tail or "")
 
-                parsed_calls.append(
-                    ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_parameters))
+            parsed_calls.append(
+                ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_parameters))
         return parsed_calls, partial

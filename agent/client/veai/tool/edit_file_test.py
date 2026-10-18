@@ -6,6 +6,10 @@ from pathlib import Path
 from agent.client.user_context import UserContext, UserContextFiles
 from agent.client.veai.tool_call_fixer import fix_edit_file
 from agent.parser import gemma4_test
+from agent.parser.test_support import (
+    GRADLE_BUILD_KTS_NEW_TEXT,
+    GRADLE_BUILD_KTS_OLD_TEXT,
+)
 
 TEST_RESOURCES = "test_resources"
 
@@ -29,58 +33,8 @@ class EditFileTestCase(unittest.TestCase):
         fixed = fix_edit_file(calls[0], context=user_context)
 
         self.assertEqual({'allow_multiple_matches': False,
-                          'edits': [{'new_text': 'plugins {\n'
-                                                 '    `java-library`\n'
-                                                 '}\n'
-                                                 'apply(plugin = "io.spring.dependency-management")\n'
-                                                 '\n'
-                                                 'dependencies {\n'
-                                                 '    api(project(":idempotent-consumer"))\n'
-                                                 '    api(project(":storage-api-reactive"))\n'
-                                                 '    api(project(":postgres-jdbc"))\n'
-                                                 '\n'
-                                                 '    implementation("io.projectreactor:reactor-core")\n'
-                                                 '\n'
-                                                 '    implementation("org.postgresql:postgresql")\n'
-                                                 '\n'
-                                                 '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
-                                                 '    '
-                                                 'implementation("org.springframework.boot:'
-                                                 'spring-boot-autoconfigure")\n'
-                                                 '\n'
-                                                 '    implementation("org.jooq:jooq")\n'
-                                                 '    '
-                                                 'implementation("org.jooq:jooq-postgres-extensions")\n'
-                                                 '    // Testcontainers dependencies for integration '
-                                                 'tests\n'
-                                                 '    '
-                                                 'testImplementation("org.testcontainers:postgresql")\n'
-                                                 '    '
-                                                 'testImplementation("org.testcontainers:junit-jupiter")',
-                                     'old_text': 'plugins {\n'
-                                                 '    `java-library`\n'
-                                                 '}\n'
-                                                 'apply(plugin = "io.spring.dependency-management")\n'
-                                                 '\n'
-                                                 'dependencies {\n'
-                                                 '    api(project(":idempotent-consumer"))\n'
-                                                 '    api(project(":storage-api-reactive"))\n'
-                                                 '    api(project(":postgres-jdbc"))\n'
-                                                 '\n'
-                                                 '    implementation("io.projectreactor:reactor-core")\n'
-                                                 '\n'
-                                                 '    implementation("org.postgresql:postgresql")\n'
-                                                 '\n'
-                                                 '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
-                                                 '    '
-                                                 'implementation("org.springframework.boot:'
-                                                 'spring-boot-autoconfigure")\n'
-                                                 '\n'
-                                                 '    implementation("org.jooq:jooq")\n'
-                                                 '    '
-                                                 'implementation("org.jooq:jooq-postgres-extensions")'}],
+                          'edits': [{'new_text': GRADLE_BUILD_KTS_NEW_TEXT,
+                                     'old_text': GRADLE_BUILD_KTS_OLD_TEXT}],
                           'target_file': 'build.gradle.kts'}, fixed.arguments)
 
 

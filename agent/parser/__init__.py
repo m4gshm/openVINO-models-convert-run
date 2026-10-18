@@ -81,7 +81,6 @@ class ParserState:
 
     def finalize(self, token: str):
         """Handle the very last token of the generation (no-op by default)."""
-        pass
 
 
 def _is_conversation_start(tag: str, token: str) -> tuple[bool, str]:
@@ -125,6 +124,14 @@ def iter_tool_call_blocks(tool_call_expression: str, tool_call_start: str, tool_
     return blocks
 
 
+def iter_function_blocks(tool_call_expression: str, tool_call_start: str, tool_call_end: str,
+                         function_start_pref: str) -> Iterator[str]:
+    """Yield the raw function blocks of a tool call expression, flattened over its call blocks."""
+    for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, tool_call_start, tool_call_end,
+                                                   function_start_pref):
+        yield from function_blocks
+
+
 class ParsedFunctionCall(BaseModel):
     """A single tool call parsed from the model output."""
 
@@ -144,7 +151,11 @@ class DelayedResult(BaseModel):
     tool_calls: list[ParsedFunctionCall] = []
 
 
-class Parser[State: ParserState]():  # pylint: disable=too-many-public-methods,unused-argument
+# pylint: disable=too-many-public-methods
+# Hook arguments are part of the uniform interface: the base implementations
+# below ignore most of them, but subclasses override them by name.
+# pylint: disable=unused-argument
+class Parser[State: ParserState]():
     """Base parser interface: token predicates and tool call parsing hooks.
 
     Default implementations ignore ``state``/``token``; subclasses override the
@@ -227,7 +238,7 @@ class Parser[State: ParserState]():  # pylint: disable=too-many-public-methods,u
 
     def is_prompt_start_thinking(self, prompt: str) -> bool:
         """True when the prompt already ends with a thinking marker."""
-        pass
+        return False
 
     def parse_tool_calls(self, state: State, tool_call_expression: str) -> tuple[list[ParsedFunctionCall], bool]:
         """Parse a tool call expression into calls plus a partially streamed flag."""

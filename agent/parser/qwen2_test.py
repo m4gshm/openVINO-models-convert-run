@@ -1,8 +1,14 @@
+"""Tests for the qwen2 tool call parser."""
 import unittest
 from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import fix_edit_file
 from agent.parser.qwen2 import Qwen2Parser
+from agent.parser.test_support import (
+    GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES,
+    GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES_NO_EOL,
+    GRADLE_TESTCONTAINERS_DEVELOPMENT,
+)
 
 TEST_RESOURCES = "test_resources"
 
@@ -11,11 +17,13 @@ state = parser.new_state()
 
 
 class Qwen2TestCases(unittest.TestCase):
+    """Checks the qwen2 tool call expressions of the test resources."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def test_edit_file(self):
+        """Check the parsed and repaired arguments of the edit_file call."""
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/veai_edit_file.txt")
         tool_call_text = tool_call_file.read_text(encoding="utf-8")
         calls, partial = parser.parse_tool_calls(state, tool_call_text)
@@ -23,38 +31,8 @@ class Qwen2TestCases(unittest.TestCase):
 
         fixed = fix_edit_file(first, None)
 
-        expected_edits = [{'new_text': 'implementation("io.projectreactor:reactor-core")\n'
-                                       '\n'
-                                       '    implementation("org.postgresql:postgresql")\n'
-                                       '\n'
-                                       '    '
-                                       'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
-                                       '    '
-                                       'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
-                                       '\n'
-                                       '    implementation("org.jooq:jooq")\n'
-                                       '    '
-                                       'implementation("org.jooq:jooq-postgres-extensions")\n'
-                                       '    // TestContainers dependencies for integration '
-                                       'tests\n'
-                                       '    '
-                                       'developmentImplementation("org.testcontainers:testcontainers")\n'
-                                       '    '
-                                       'developmentImplementation("org.testcontainers:junit-jupiter")\n'
-                                       '    '
-                                       'developmentImplementation("org.testcontainers:postgresql")',
-                           'old_text': 'implementation("io.projectreactor:reactor-core")\n'
-                                       '\n'
-                                       '    implementation("org.postgresql:postgresql")\n'
-                                       '\n'
-                                       '    '
-                                       'implementation("org.springframework.boot:spring-boot-starter-jooq")\n'
-                                       '    '
-                                       'implementation("org.springframework.boot:spring-boot-autoconfigure")\n'
-                                       '\n'
-                                       '    implementation("org.jooq:jooq")\n'
-                                       '    '
-                                       'implementation("org.jooq:jooq-postgres-extensions")'}]
+        expected_edits = [{'new_text': GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES + GRADLE_TESTCONTAINERS_DEVELOPMENT,
+                           'old_text': GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES_NO_EOL}]
         self.assertEqual("edit_file", first.name)
         self.assertEqual({'edits': expected_edits, 'target_file': 'C:/build.gradle.kts'}, first.arguments)
 
@@ -62,8 +40,10 @@ class Qwen2TestCases(unittest.TestCase):
         self.assertEqual({'allow_multiple_matches': False,
                           'edits': expected_edits, 'target_file': 'C:/build.gradle.kts'},
                          fixed.arguments)
+        self.assertFalse(partial)
 
     def test_parse_multiple_calls(self):
+        """Check a stream with three tool calls, the last one not fully closed."""
         tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen2/mutliple_tool_calls.txt")
         tool_call_text = tool_call_file.read_text(encoding="utf-8")
         calls, partial = parser.parse_tool_calls(state, tool_call_text)

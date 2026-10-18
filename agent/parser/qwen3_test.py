@@ -1,3 +1,4 @@
+"""Tests of the qwen3 tool call parser."""
 import unittest
 from importlib.resources import files
 
@@ -8,9 +9,11 @@ from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletion
     FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
 from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
+from agent.parser.test_support import parse_first_call
 
 
 def new_windows_user_context() -> UserContext:
+    """Build a Windows user context for the argument fixers."""
     context = UserContext()
     context.os_type = OS.Windows
     return context
@@ -25,6 +28,7 @@ state = parser.new_state()
 
 
 def get_required_function_parameters(tool_json_file: str) -> dict[str, FunctionDefinitionParameters]:
+    """Read the function parameters a tool declares in a test resource json."""
     tool_call_desc = files(__package__).joinpath(TEST_RESOURCES, tool_json_file)
     json_data = tool_call_desc.read_text()
     supported_function = FunctionDefinition.model_validate_json(json_data, strict=False, extra='allow')
@@ -34,8 +38,10 @@ def get_required_function_parameters(tool_json_file: str) -> dict[str, FunctionD
 
 
 class Qwen3TestCases(unittest.TestCase):
+    """Checks the tool call expressions of the qwen3 test resources."""
 
     def __init__(self, *args, **kwargs):
+        """Prepare the fixtures of the test case."""
         super().__init__(*args, **kwargs)
         self.first_function_no_close_tag = """<tool_call>
 <function=read_file>
@@ -66,7 +72,8 @@ Target.py
 </tool_call>"""
 
     def test_without_close_tag(self):
-        calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag)
+        """Check without close tag."""
+        calls, _partial = parser.parse_tool_calls(state, self.first_function_no_close_tag)
         self.assertEqual(len(calls), 1)
         function_call = calls[0]
         self.assertEqual("read_file", function_call.name)
@@ -74,6 +81,7 @@ Target.py
                          function_call.arguments)
 
     def test_two_functions(self):
+        """Check two functions."""
         calls, partial = parser.parse_tool_calls(state, self.first_function + self.second_function)
         self.assertFalse(partial)
         self.assertEqual(len(calls), 2)
@@ -88,7 +96,8 @@ Target.py
         self.assertEqual({"directory": "/tmp"}, second.arguments)
 
     def test_two_functions_where_first_without_close_tag(self):
-        calls, partial = parser.parse_tool_calls(state, self.first_function_no_close_tag + self.second_function)
+        """Check two functions where first without close tag."""
+        calls, _partial = parser.parse_tool_calls(state, self.first_function_no_close_tag + self.second_function)
         self.assertEqual(len(calls), 2)
 
         first = calls[0]
@@ -101,12 +110,13 @@ Target.py
         self.assertEqual({"directory": "/tmp"}, second.arguments)
 
     def test_functions_with_invalid_json_parameter(self):
+        """Check functions with invalid json parameter."""
         function_name = "select"
         supported_functions: dict[str, FunctionDefinitionParameters] = {
             function_name: FunctionDefinitionParameters(properties={"options": {EXPECTED_PROPERTY_TYPE: "array"}})
         }
-        state = parser.new_state(supported_functions=supported_functions)
-        calls, partial = parser.parse_tool_calls(state, self.function_with_invalid_json_parameter)
+        typed_state = parser.new_state(supported_functions=supported_functions)
+        calls, partial = parser.parse_tool_calls(typed_state, self.function_with_invalid_json_parameter)
 
         first = calls[0]
         self.assertEqual("select", first.name)
@@ -114,19 +124,15 @@ Target.py
         self.assertFalse(partial)
 
     def test_partial_tool_call(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "partially_generated_tool_call.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check partial tool call."""
+        first, partial = parse_first_call(parser, state, __package__, "partially_generated_tool_call.txt")
         self.assertEqual("write_file", first.name)
         self.assertEqual({"allow_overwrite": "false", "content": "no finished parameter"}, first.arguments)
         self.assertTrue(partial)
 
     def test_search_file_by_name(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_file_by_name.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check search file by name."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/search_file_by_name.txt")
         fixed = fix_search_file_by_name(first, USER_CONTEXT)
         self.assertEqual("search_file_by_name", fixed.name)
         self.assertEqual({'glob_pattern': 'Properties.*',
@@ -135,10 +141,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_list_dir(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/list_dir_1.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check list dir."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/list_dir_1.txt")
         fixed = fix_list_dir(first, USER_CONTEXT)
         self.assertEqual("list_dir", fixed.name)
         self.assertEqual({'depth': '5',
@@ -147,11 +151,9 @@ Target.py
         self.assertFalse(partial)
 
     def test_edit_file(self):
-        state = parser.new_state(supported_functions=get_required_function_parameters("qwen3/edit_file_tool.json"))
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/edit_file_1.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check edit file."""
+        edit_state = parser.new_state(supported_functions=get_required_function_parameters("qwen3/edit_file_tool.json"))
+        first, partial = parse_first_call(parser, edit_state, __package__, "qwen3/edit_file_1.txt")
         fixed = fix_edit_file(first, USER_CONTEXT)
         self.assertEqual("edit_file", fixed.name)
         self.assertEqual({'allow_multiple_matches': False,
@@ -166,9 +168,11 @@ Target.py
                                                  '    implementation("org.postgresql:postgresql")\r\n'
                                                  '\r\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-starte'
+                                                   'r-jooq")\r\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-autoco'
+                                                   'nfigure")\r\n'
                                                  '\r\n'
                                                  '    implementation("org.jooq:jooq")\r\n'
                                                  '    '
@@ -193,23 +197,24 @@ Target.py
                                                  '    implementation("org.postgresql:postgresql")\r\n'
                                                  '\r\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-starter-jooq")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-starte'
+                                                   'r-jooq")\r\n'
                                                  '    '
-                                                 'implementation("org.springframework.boot:spring-boot-autoconfigure")\r\n'
+                                                 'implementation("org.springframework.boot:spring-boot-autoco'
+                                                   'nfigure")\r\n'
                                                  '\r\n'
                                                  '    implementation("org.jooq:jooq")\r\n'
                                                  '    '
                                                  'implementation("org.jooq:jooq-postgres-extensions")\r\n'
                                                  '}'}],
-                          'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/java/idempotent-consumer-jdbc/build.gradle.kts'},
+                          'target_file': 'C:/alex/github/m4gshm/distributed-transactions-practice/'
+                                        'java/idempotent-consumer-jdbc/build.gradle.kts'},
                          fixed.arguments)
         self.assertFalse(partial)
 
     def test_write_file(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/write_file.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check write file."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/write_file.txt")
         fixed = fix_write_file(first, USER_CONTEXT)
         self.assertEqual("write_file", fixed.name)
         self.assertEqual({'allow_overwrite': True,
@@ -225,10 +230,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_run_command(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/run_command.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check run command."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/run_command.txt")
         fixed = fix_run_command(first, USER_CONTEXT)
         self.assertEqual("run_command", fixed.name)
         self.assertEqual({'command': 'powershell -ExecutionPolicy Bypass -File _check_runtime.ps1',
@@ -239,10 +242,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_run_command_2(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/run_command_2.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check run command 2."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/run_command_2.txt")
         fixed = fix_run_command(first, USER_CONTEXT)
         self.assertEqual("run_command", fixed.name)
         self.assertEqual({'command': 'Get-ChildItem -Recurse "C:/tmp" -ErrorAction SilentlyContinue | '
@@ -255,10 +256,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_read_file(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/read_file.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check read file."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/read_file.txt")
         fixed = fix_write_file(first, USER_CONTEXT)
         self.assertEqual("read_file", fixed.name)
         self.assertEqual({'end_line': 500,
@@ -268,10 +267,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_read_file_2(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/read_file_2.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check read file 2."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/read_file_2.txt")
         fixed = fix_read_file(first, USER_CONTEXT)
         self.assertEqual("read_file", fixed.name)
         self.assertEqual({'end_line': 100,
@@ -281,26 +278,24 @@ Target.py
         self.assertFalse(partial)
 
     def test_move(self):
-        state = parser.new_state(supported_functions=(get_required_function_parameters("qwen3/move_tool.json")))
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/move.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check move."""
+        move_state = parser.new_state(supported_functions=get_required_function_parameters("qwen3/move_tool.json"))
+        first, partial = parse_first_call(parser, move_state, __package__, "qwen3/move.txt")
         self.assertEqual("move", first.name)
         self.assertEqual({'dry_run': 'true',
                           'sources': [
-                              'java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/consumer/MessageStorageImplTest.java'],
-                          'target_dir': 'java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/idempotent/consumer'},
+                              'java/idempotent-consumer-jdbc/src/test/java/io/github/m4gshm/idempotent/cons'
+                                'umer/MessageStorageImplTest.java'],
+                          'target_dir': 'java/idempotent-consumer-jdbc/src/integrationTest/java/io/github/m4gshm/'
+                                        'idempotent/consumer'},
                          first.arguments)
         self.assertFalse(partial)
 
     def test_safe_delete(self):
-        function_parameters = get_required_function_parameters("qwen3/safe_delete_tool.json")
-        state = parser.new_state(supported_functions=(function_parameters))
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/safe_delete.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check safe delete."""
+        delete_parameters = get_required_function_parameters("qwen3/safe_delete_tool.json")
+        delete_state = parser.new_state(supported_functions=delete_parameters)
+        first, partial = parse_first_call(parser, delete_state, __package__, "qwen3/safe_delete.txt")
         fixed = fix_safe_delete(first, USER_CONTEXT)
         self.assertEqual("safe_delete", fixed.name)
         self.assertEqual({'dry_run': False,
@@ -312,10 +307,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_search_for_text(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check search for text."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/search_for_text.txt")
         fixed = fix_search_for_text(first, USER_CONTEXT)
         self.assertEqual("search_for_text", fixed.name)
         self.assertEqual({'is_case_sensitive': False,
@@ -325,10 +318,8 @@ Target.py
         self.assertFalse(partial)
 
     def test_search_for_text_2(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text_2.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check search for text 2."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/search_for_text_2.txt")
         fixed = fix_search_for_text(first, USER_CONTEXT)
         self.assertEqual("search_for_text", fixed.name)
         self.assertEqual({'is_case_sensitive': False,
@@ -339,10 +330,8 @@ Target.py
 
 
     def test_search_for_text_3(self):
-        tool_call_file = files(__package__).joinpath(TEST_RESOURCES, "qwen3/search_for_text_3.txt")
-        tool_call_text = tool_call_file.read_text()
-        calls, partial = parser.parse_tool_calls(state, tool_call_text)
-        first = calls[0]
+        """Check search for text 3."""
+        first, partial = parse_first_call(parser, state, __package__, "qwen3/search_for_text_3.txt")
         fixed = fix_search_for_text(first, USER_CONTEXT)
         self.assertEqual("search_for_text", fixed.name)
         self.assertEqual({'is_case_sensitive': False,

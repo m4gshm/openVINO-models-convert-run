@@ -166,6 +166,18 @@ def _repair_tuple_syntax(clean_function_block: str, error: SyntaxError, offset: 
     raise error
 
 
+def merge_dict_argument(first: ast.Dict, arguments: dict[str, Any]) -> None:
+    """Copy the constant keys and values of a positional dict argument into ``arguments``."""
+    for i, key in enumerate(first.keys):
+        value = first.values[i]
+        if not isinstance(key, ast.Constant):
+            log.error("unexpected key type=%s, key=%s", type(key), key)
+        elif not isinstance(value, ast.Constant):
+            log.error("unexpected value type %s, value=%s", type(value), value)
+        else:
+            arguments[key.value] = value.value
+
+
 def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
     """Parse an LFM2 ``func(arg=value, ...)`` tuple into calls, repairing broken syntax."""
     clean_function_block = function_block.strip("[]")
@@ -192,15 +204,7 @@ def parse_function_call(function_block: str) -> list[ParsedFunctionCall]:
         if not arguments and element_args:
             first = element_args[0]
             if isinstance(first, ast.Dict):
-                for i, key in enumerate(first.keys):
-                    value = first.values[i]
-                    if not isinstance(key, ast.Constant):
-                        log.error("unexpected key type=%s, key=%s", type(key), key)
-                    elif not isinstance(value, ast.Constant):
-                        log.error("unexpected value type %s, value=%s", type(value), value)
-                    else:
-                        arguments[key.value] = value.value
-
+                merge_dict_argument(first, arguments)
                 has_anonymous = not arguments
         anonymous_arguments = [ast.literal_eval(arg) for arg in element_args] if has_anonymous else []
         result.append(ParsedFunctionCall(name=func_name, arguments=arguments, anonymous_arguments=anonymous_arguments))

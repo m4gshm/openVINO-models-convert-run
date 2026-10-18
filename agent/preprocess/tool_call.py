@@ -1,3 +1,4 @@
+"""Tool call history inspection: locating the originating call and loop detection."""
 import json
 import logging
 
@@ -9,8 +10,13 @@ from agent.openai.middleware_checkpoint import is_middleware_checkpoint
 
 log = logging.getLogger(__name__)
 
+# name -> arguments -> result -> positions of the repeating calls in the history
+FunctionCallIndex = dict[str, dict[str, dict[str, set[int]]]]
 
-class FunctionCallResult:
+
+class FunctionCallResult:  # pylint: disable=too-few-public-methods
+    """A tool call that was repeated too many times with the same result."""
+
     def __init__(self, name: str, arguments: str, result: str, repeats: int):
         self.name = name
         self.arguments = arguments
@@ -18,6 +24,7 @@ class FunctionCallResult:
         self.repeats = repeats
 
     def render_markdown(self) -> str:
+        """Render the loop warning as markdown."""
         function_name = markdown_back_tick(self.name)
         function_arguments = ""
         try:
@@ -31,7 +38,7 @@ class FunctionCallResult:
                     function_arguments += f"* {arg_name}: " + markdown_back_tick(arg_value)
             function_arguments = "\n" + function_arguments
         except json.decoder.JSONDecodeError as e:
-            log.debug(f"function arguments parsing error: {e}")
+            log.debug("function arguments parsing error: %s", e)
             function_arguments = "\n" + markdown_json(self.arguments)
 
         result = self.result
@@ -50,6 +57,7 @@ class FunctionCallResult:
 
 def find_tool_call_function(tool_call_id: str | None, start_from: int,
                             messages: list[ChatCompletionMessageParam]) -> tuple[Function, int] | tuple[None, int]:
+    """Find the assistant tool call a tool result belongs to, searching backwards."""
     i = start_from
     while i >= 0:
         prev_message = messages[i]
@@ -64,51 +72,74 @@ def find_tool_call_function(tool_call_id: str | None, start_from: int,
 
 def new_function_call_result(function_name: str, last_tool_call_arguments: str, result: str,
                              repeats: int) -> FunctionCallResult:
+    """Build the loop detection report of a repeated tool call."""
     return FunctionCallResult(name=function_name, arguments=last_tool_call_arguments, result=result, repeats=repeats)
 
 
-class PreprocessToolCall:
+class PreprocessToolCall:  # pylint: disable=too-few-public-methods
+    """Detects tool calls the model repeats with an unchanged result."""
+
     max_repeated_tool_calls_with_the_same_result = 5
     max_messages_to_check = 5 * 4
 
     def check_loop_tool_calls(self, messages: list[ChatCompletionMessageParam]) -> tuple[
         FunctionCallResult | None, int]:
+        """Return the first looping tool call of the history, if any."""
         if not messages:
             return None, 0
-        results = dict[str, str | None]()
-        function_call = dict[str, dict[str, dict[str, set[int]]]]()
+        results: dict[str, str | None] = {}
+        function_call = FunctionCallIndex()
         over_all_messages = False
         for i, message in enumerate(reversed(messages)):
             if not over_all_messages and i >= self.max_messages_to_check - 1:
                 break
             if message.role == ROLE_TOOL and not is_middleware_checkpoint(message):
                 result_tool_call_id = message.tool_call_id
-                result = content_text(message.content)
                 if result_tool_call_id:
-                    results[result_tool_call_id] = f"{result}"
+                    results[result_tool_call_id] = f"{content_text(message.content)}"
             elif message.role == ROLE_ASSISTANT:
-                for tool_call in message.tool_calls or []:
-                    function_tool_call_id = tool_call.id
-                    function = tool_call.function
-                    function_arguments = function_call.setdefault(function.name, dict[str, dict[str, set[int]]]())
-                    function_results = function_arguments.setdefault(function.arguments, dict[str, set[int]]())
-                    result = results.get(function_tool_call_id)
-                    if result:
-                        function_call_positions = function_results.setdefault(result, set())
-                        function_call_positions.add(i)
-
-                        repeats = len(function_call_positions)
-                        if not over_all_messages and repeats > 2:
-                            over_all_messages = True
-                        if repeats >= self.max_repeated_tool_calls_with_the_same_result:
-                            return new_function_call_result(function.name,
-                                                            function.arguments, result, repeats), repeats
-                    else:
-                        log.warning(
-                            f"cannot find function call for tool last_tool_call_id={function_tool_call_id},"
-                            f" tool call result={message}")
-
+                loop_result, many_repeats = self._register_tool_calls(
+                    message, i, results, function_call, self.max_repeated_tool_calls_with_the_same_result)
+                repeats = loop_result[3] if loop_result else 0
+                if not over_all_messages and (many_repeats or repeats > 2):
+                    over_all_messages = True
+                if loop_result and repeats >= self.max_repeated_tool_calls_with_the_same_result:
+                    name, arguments, result = loop_result[:3]
+                    return new_function_call_result(name, arguments, result, repeats), repeats
             else:
                 break
 
         return None, 0
+
+    @staticmethod
+    def _register_tool_calls(message: ChatCompletionMessageParam, position: int, results: dict[str, str | None],
+                             function_call: FunctionCallIndex, max_repeats: int) -> tuple[
+        tuple[str, str, str, int] | None, bool]:
+        """Index the calls of one assistant message.
+
+        Returns the most repeated call as ``(name, arguments, result, repeats)``
+        and whether any call of the message already repeats more than twice.
+        """
+        best: tuple[str, str, str, int] | None = None
+        best_repeats = 0
+        many_repeats = False
+        for tool_call in message.tool_calls or []:
+            function = tool_call.function
+            result = results.get(tool_call.id)
+            if not result:
+                log.warning("cannot find function call for tool last_tool_call_id=%s, tool call result=%s",
+                            tool_call.id, message)
+                continue
+            function_arguments = function_call.setdefault(function.name, dict[str, dict[str, set[int]]]())
+            function_call_positions = function_arguments \
+                .setdefault(function.arguments, dict[str, set[int]]()) \
+                .setdefault(result, set())
+            function_call_positions.add(position)
+            repeats = len(function_call_positions)
+            many_repeats = many_repeats or repeats > 2
+            if repeats > best_repeats:
+                best = (function.name, function.arguments, result, repeats)
+                best_repeats = repeats
+            if repeats >= max_repeats:
+                break
+        return best, many_repeats
