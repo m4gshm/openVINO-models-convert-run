@@ -107,14 +107,22 @@ class ContinuousBatchingController(BaseOVController):
         try:
             request_start = time.perf_counter()
             response_timeout = False
+            interrupted = False
             while not self.pipe.has_non_finished_requests():
+                # an interrupted request (a newer one arrived, the client is gone) must not
+                # keep the request scheduled: cancel it to free the device for the new one
+                if token_handler.is_stop():
+                    log.info("request %s is interrupted before the first token", request_id)
+                    generation_handle.cancel()
+                    interrupted = True
+                    break
                 self.step()
                 time.sleep(0.2)
                 response_timeout = is_response_timeout(request_start)
                 if response_timeout:
                     break
 
-            if response_timeout:
+            if interrupted or response_timeout:
                 yield stop_response
             else:
                 def read():  # pylint: disable=too-many-locals,too-many-branches,too-many-statements  # token pump
@@ -123,6 +131,11 @@ class ContinuousBatchingController(BaseOVController):
                     started = False
                     request_start = time.perf_counter()
                     while True:
+                        if token_handler.is_stop():
+                            log.info("request %s is interrupted", request_id)
+                            generation_handle.cancel()
+                            yield stop_response
+                            return
                         has_requests = self.pipe.has_non_finished_requests()
                         if not has_requests:
                             if not started:

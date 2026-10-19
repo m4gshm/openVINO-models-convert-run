@@ -1,16 +1,20 @@
-"""Concurrency tests of the VLM controller request lock."""
+"""Concurrency and logging tests of the VLM controller request lock."""
+import logging
 import threading
 import time
 import unittest
 
 from openvino_genai import GenerationConfig
 
-from agent.inference.token_handler import TokenHandlerConfig
+from agent.inference.token_handler import StopSignal, TokenHandlerConfig
 from agent.multimodal.media_inputs import MediaInputs
-from agent.openai import GenerateOpts
+from agent.openai import GenerateOpts, engine_rest_vlm
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk
 from agent.openai.engine_rest_common import ControllerConfig
 from agent.openai.engine_rest_vlm import VlmController
+
+# Both the engine logs to the module logger and the controller logs to the inference logger.
+LOG_NAMES = ("agent.openai.engine_rest_vlm", "agent.inference")
 
 
 class FakePipe:  # pylint: disable=too-few-public-methods  # duck-typed stub
@@ -24,13 +28,17 @@ class FakePipe:  # pylint: disable=too-few-public-methods  # duck-typed stub
 class FakeTokenHandler:
     """Just enough of TokenHandler for the streamer and the consumer loop."""
 
+    def __init__(self, stop_signal: StopSignal | None = None):
+        self.stop_signal = stop_signal
+        self.is_stop_flag = False
+
     def is_stop(self) -> bool:
-        """Never report stop: the fake keeps streaming."""
-        return False
+        """Report stop only when the test set the flag, like a disconnected client."""
+        return self.is_stop_flag
 
     def handle_tokens(self, _tokens):
-        """Return one fixed assistant chunk for any token batch."""
-        return [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="ok", model="m")], None
+        """Return one fixed assistant chunk for any token batch, with the configured stop signal."""
+        return [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="ok", model="m")], self.stop_signal
 
     def get_stat_info(self):
         """Return a placeholder stat line."""
@@ -65,11 +73,14 @@ class LockedController(VlmController):
         return "fake result"
 
 
-def consume(controller: VlmController, sink: list, ready: threading.Event,
-            close_after: int | None = None, closed: threading.Event | None = None):
+def consume(controller: VlmController, sink: list, ready: threading.Event,  # pylint: disable=too-many-arguments,too-many-positional-arguments  # test helper options bundle
+            close_after: int | None = None, closed: threading.Event | None = None,
+            token_handler: FakeTokenHandler | None = None,
+            stop_flag_after_first: bool = False):
     """Run the chunk generator to the end, optionally closing it early like a disconnected client."""
+    handler = token_handler or FakeTokenHandler()
     gen = controller.chunk_generator(prompt="p", generation_config=GenerationConfig(),
-                                     token_handler=FakeTokenHandler(),  # type: ignore[arg-type]  # duck-typed
+                                     token_handler=handler,  # type: ignore[arg-type]  # duck-typed
                                      media=MediaInputs.empty())
     ready.set()
     for index, chunk in enumerate(gen):
@@ -79,6 +90,55 @@ def consume(controller: VlmController, sink: list, ready: threading.Event,
             if closed:
                 closed.set()
             break
+        if stop_flag_after_first and index == 0:
+            handler.is_stop_flag = True  # the consumer loop abandons the request after one chunk
+
+
+class CaptureHandler(logging.Handler):
+    """Collects log records from any thread so tests can assert on log messages."""
+
+    def __init__(self):
+        super().__init__()
+        self.records: list[tuple[str, str]] = []  # (levelname, message)
+        self.saved_levels: dict[str, int] = {}  # logger levels before the capture forced INFO
+        self._lock = threading.Lock()
+
+    def emit(self, record: logging.LogRecord):
+        with self._lock:
+            self.records.append((record.levelname, record.getMessage()))
+
+    def messages(self) -> list[tuple[str, str]]:
+        """Return a snapshot of the captured records."""
+        with self._lock:
+            return list(self.records)
+
+    def wait_for_message(self, fragment: str, timeout: float = 10) -> bool:
+        """Block until a record containing the fragment appears, or time out."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if any(fragment in message for _, message in self.messages()):
+                return True
+            time.sleep(0.05)
+        return False
+
+
+def attach_capture() -> CaptureHandler:
+    """Attach a capture handler to all engine loggers and force INFO, so INFO messages are emitted."""
+    capture = CaptureHandler()
+    for name in LOG_NAMES:
+        logger = logging.getLogger(name)
+        capture.saved_levels[name] = logger.level
+        logger.setLevel(logging.INFO)
+        logger.addHandler(capture)
+    return capture
+
+
+def detach_capture(capture: CaptureHandler):
+    """Remove the capture handler from all engine loggers and restore their levels."""
+    for name in LOG_NAMES:
+        logger = logging.getLogger(name)
+        logger.removeHandler(capture)
+        logger.setLevel(capture.saved_levels.get(name, logging.NOTSET))
 
 
 class VlmControllerRequestLockCase(unittest.TestCase):
@@ -119,6 +179,61 @@ class VlmControllerRequestLockCase(unittest.TestCase):
         self.assertEqual(1, len(second_chunks))
         self.assertFalse(first.is_alive())
         self.assertFalse(second.is_alive())
+
+
+class VlmFinishReasonLoggingCase(unittest.TestCase):
+    """NONE finish reasons are expected when the streamer stopped the generation, unexpected otherwise."""
+
+    def test_streamer_stopped_generation_is_not_reported_as_unexpected(self):
+        """All the streamer stop paths keep the completion at INFO with an explaining message."""
+        for signal in (StopSignal.STOP, StopSignal.TOOL_CALL, StopSignal.CANCEL):
+            with self.subTest(stop_signal=signal):
+                controller = LockedController()
+                controller.release.set()  # generate returns right after the streamer word
+                capture = attach_capture()
+                try:
+                    chunks: list = []
+                    consume(controller, chunks, threading.Event(),
+                            token_handler=FakeTokenHandler(stop_signal=signal))
+                    self.assertTrue(capture.wait_for_message("inference stopped by the streamer"),
+                                    "streamer-stop completion was not logged")
+                finally:
+                    detach_capture(capture)
+                self.assertNotIn("unexpected status", (message for _, message in capture.messages()))
+
+    def test_abandoned_generate_wait_reports_progress_not_error(self):
+        """A generate abandoned while queued behind another one waits out with INFO progress lines.
+
+        The pipeline cannot honor a stop during prefill and the queued call cannot even start,
+        so the cleanup wait must never log the old 'waiting inference completion error'.
+        """
+        controller = LockedController()
+        original_timeout = engine_rest_vlm.RESULT_WAIT_TIMEOUT_SECONDS
+        engine_rest_vlm.RESULT_WAIT_TIMEOUT_SECONDS = 0.2
+        capture = attach_capture()
+        try:
+            first = threading.Thread(
+                target=consume, args=(controller, [], threading.Event()),
+                kwargs={"stop_flag_after_first": True}, daemon=True)
+            first.start()
+            self.assertTrue(controller.first_generate_started.wait(10), "first generate did not start")
+
+            # the abandoned request is still locked: the wait loop reports progress instead of erroring
+            self.assertTrue(capture.wait_for_message("waiting for inference to complete"),
+                            "the post-abandonment wait was never logged")
+
+            controller.release.set()  # generate-1 finally returns, freeing the pipeline
+            first.join(10)
+            self.assertFalse(first.is_alive())
+
+            messages = capture.messages()
+            self.assertFalse([level for level, _ in messages if level == "ERROR"], messages)
+            self.assertFalse(any("waiting inference completion error" in message for _, message in messages),
+                             messages)
+        finally:
+            engine_rest_vlm.RESULT_WAIT_TIMEOUT_SECONDS = original_timeout
+            detach_capture(capture)
+            controller.release.set()  # unblock a leftover generate if an assertion failed midway
 
 
 if __name__ == '__main__':

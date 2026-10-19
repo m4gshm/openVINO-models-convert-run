@@ -1,0 +1,11 @@
+call agent.bat --model Qwen2.5-Coder-3B-int4-sym-g128-se-awq ^
+ --port 8887 ^
+ --device NPU ^
+ --max_prompt_len 8192 ^
+ --npu_turbo YES ^
+ --npu_compiler_type PLUGIN ^
+ --npuw_llm_enable_block_based_kv_cache NO ^
+ --npuw_llm_enable_continuous_prefill NO ^
+ --npuw_llm_enable_prefix_caching YES ^
+ --npuw_llm_prefill_attention_hint PYRAMID ^
+ --npuw_devices NPU,GPU

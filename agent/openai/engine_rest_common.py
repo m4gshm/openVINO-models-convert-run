@@ -37,6 +37,7 @@ from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
     ChatCompletionFunctionToolParam, FunctionDefinitionParameters
+from agent.openai.interrupt import InterruptRegistry
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
@@ -81,6 +82,7 @@ class ControllerConfig(BaseModel):
     allow_local_media_files: bool = False
     media_http_timeout: float = 30.0
     media_audio_sample_rate: int = 16000
+    interrupt_completions: bool = False
 
     def modalities_of(self) -> Modalities:
         """Accepted input modalities of the configured model."""
@@ -274,6 +276,29 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
         self.log_inference = inference.log
         self.closed = threading.Event()
         self.stop_signal = stop_signal
+        self.interrupt_registry = InterruptRegistry()
+
+    def begin_interruptible_request(self) -> threading.Event | None:
+        """Start an interruptible request.
+
+        Returns the stop event of the new request when the interrupt mode is on: a newer
+        request sets the event of the running one, so the older generation stops and
+        releases the device. Returns None when the mode is off.
+        """
+        if not self.config.interrupt_completions:
+            return None
+        return self.interrupt_registry.start()
+
+    def guard_generation(self, chunk_generator: Iterable[ChatCompletionChunk],
+                         interrupt_event: threading.Event) -> Iterable[ChatCompletionChunk]:
+        """Wrap the chunk generator so the interrupt slot is released when it ends."""
+        def guarded() -> Iterable[ChatCompletionChunk]:
+            try:
+                yield from chunk_generator
+            finally:
+                self.interrupt_registry.finish(interrupt_event)
+
+        return guarded()
 
     async def health(self) -> JSONResponse:
         """Simple health check — always returns 200 OK."""
@@ -527,10 +552,15 @@ class BaseOVController(BaseController):
 
         self.log_inference_prompt.debug(prompt)
 
+        # in the interrupt mode a new request stops the running one, so the device is
+        # freed for the fresh request instead of being shared by two generations
+        interrupt_event = self.begin_interruptible_request()
+
         is_client_gone = disconnect_probe(request)
 
         def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
+            return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
+                    or (interrupt_event is not None and interrupt_event.is_set()))
 
         generation_config = new_generation_config(temperature=body.temperature,
                                                   generate_opts=self.generate_opts,
@@ -553,9 +583,12 @@ class BaseOVController(BaseController):
 
         if over_limit_response:
             return await new_http_response_chat(stream, [over_limit_response])
-        return await new_http_response_completions(
-            stream, self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                         token_handler=token_handler, media=MediaInputs.empty()))
+
+        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                               token_handler=token_handler, media=MediaInputs.empty())
+        if interrupt_event is not None:
+            chunk_generator = self.guard_generation(chunk_generator, interrupt_event)
+        return await new_http_response_completions(stream, chunk_generator)
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         """Return a length-stop chunk when the prompt does not fit, else None."""

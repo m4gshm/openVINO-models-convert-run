@@ -525,6 +525,9 @@ def run_openvino(args):
         log.warning("model has media encoders (%s) but the engine accepts text only, "
                     "media requests will be rejected", media_capabilities.describe())
 
+    interrupt_completions = args.interrupt_completions == enum_value(Turn.on)
+    log.info("interrupt mode of /v1/completions: %s", interrupt_completions)
+
     controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
                                          model_architectures=model_architectures,
                                          is_fix_tool_type=is_fix_tool_type,
@@ -534,7 +537,8 @@ def run_openvino(args):
                                          max_media_bytes=args.max_media_mb * 1024 * 1024,
                                          max_media_items=args.max_media_items,
                                          media_audio_sample_rate=media_capabilities.audio_sample_rate,
-                                         allow_local_media_files=allow_local_media_files)
+                                         allow_local_media_files=allow_local_media_files,
+                                         interrupt_completions=interrupt_completions)
 
     handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
 
@@ -829,6 +833,10 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--dflash_mode", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--interrupt_completions", type=str, required=False,
+                             default=enum_value(Turn.on), choices=enum_values(Turn),
+                             help="interrupt the running /v1/completions request when a new one arrives, "
+                                  "the new request is served first")
 
 
 def enum_values[T: Enum](enum_class: type[T]) -> list[str]:

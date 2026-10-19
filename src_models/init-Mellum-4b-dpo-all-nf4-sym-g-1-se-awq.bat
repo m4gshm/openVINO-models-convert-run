@@ -4,8 +4,8 @@ set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
 set OUTPUT_DIR=../models/%MODEL_NAME_OUT%
 
-set GROUP_SIZE=64
-set WEIGHT_FORMAT=int4
+set GROUP_SIZE=-1
+set WEIGHT_FORMAT=nf4
 
 optimum-cli export openvino ^
   --model %MODEL_PATH% ^
@@ -14,11 +14,10 @@ optimum-cli export openvino ^
   --backup-precision int8_sym ^
   --sym ^
   --group-size %GROUP_SIZE% ^
-  --ratio 1.0 ^
   --trust-remote-code ^
   --dataset gsm8k ^
   --scale-estimation ^
   --awq ^
-  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-r1-se-awq/1
+  %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym-g%GROUP_SIZE%-se-awq
 
 pause

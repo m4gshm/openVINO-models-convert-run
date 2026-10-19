@@ -26,6 +26,9 @@ from agent.parser import Parser
 
 log = logging.getLogger(__name__)
 
+# How long one pass of the post-abandonment wait reports before re-logging a progress line.
+RESULT_WAIT_TIMEOUT_SECONDS: float = 30
+
 
 def generate_vlm(pipe: VLMPipeline, prompt: str, generation_config: GenerationConfig,
                  streamer: "StreamerWrapper", media: MediaInputs) -> VLMDecodedResults:
@@ -176,7 +179,14 @@ class VlmController(BaseOVController):
 
                 inference_finish_reason = inference_finish_reasons[0] if inference_finish_reasons else None
                 if inference_finish_reason is None or inference_finish_reason == GenerationFinishReason.NONE:
-                    log.info("inference finished by unexpected status %s", inference_finish_reason)
+                    if streamer.stopped_by_streamer:
+                        # a tool call, a stop phrase or a cancelled request ends generation via the
+                        # streamer, and then finish_reasons legitimately stays empty/NONE
+                        self.log_inference.info(
+                            "inference stopped by the streamer: token_handler_info='%s'",
+                            token_handler.get_stat_info())
+                    else:
+                        log.warning("inference finished by unexpected status %s", inference_finish_reason)
 
             except Exception as e:  # pylint: disable=broad-exception-caught  # any failure must reach the client as an error stop-response
                 start_stream_handling.put_nowait(True)
@@ -213,12 +223,14 @@ class VlmController(BaseOVController):
             log.error("chunk processing error: %s", e, exc_info=e)
 
         stop_stream_handling.put_nowait(True)
-        if not inference_task.done():
-            log.info("waiting for inference to complete")
+        # the request may be abandoned while its generate is still queued behind another one or
+        # prefilling: such generate cannot be interrupted, so log progress and keep waiting it out
+        while not inference_task.done():
+            self.log_inference.info("waiting for inference to complete after the generator stopped")
             try:
-                inference_task.result(timeout=20)
-            except Exception as e:  # pylint: disable=broad-exception-caught  # a timeout must not crash the endpoint
-                log.error("waiting inference completion error: %s", e, exc_info=e)
+                inference_task.result(timeout=RESULT_WAIT_TIMEOUT_SECONDS)
+            except TimeoutError:
+                pass
         log.info("inference handling is done")
 
 
@@ -231,6 +243,7 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):  # pylint: disable=c-exte
         super().__init__()
         self.streamer = streamer
         self.started = False
+        self.stopped_by_streamer = False
         self.stop_stream_handling = stop_stream_handling
         self.start_stream_handling = start_stream_handling
         self.chunk_queue = chunk_queue
@@ -245,6 +258,7 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):  # pylint: disable=c-exte
             self.started = True
         if not self.stop_stream_handling.empty() and self.stop_stream_handling.get_nowait():
             log.debug("stream finished by stop signal")
+            self.stopped_by_streamer = True
             return StreamingStatus.STOP
 
         responses, stop_signal = self.streamer.handle_tokens(tokens)
@@ -256,9 +270,12 @@ class StreamerWrapper(py_openvino_genai.StreamerBase):  # pylint: disable=c-exte
                 self.chunk_queue.put_nowait(response)
 
         if stop_signal == StopSignal.STOP:
+            self.stopped_by_streamer = True
             return StreamingStatus.STOP
         if stop_signal == StopSignal.TOOL_CALL:
+            self.stopped_by_streamer = True
             return StreamingStatus.TOOL_CALL_STOP
         if stop_signal == StopSignal.CANCEL:
+            self.stopped_by_streamer = True
             return StreamingStatus.CANCEL
         return StreamingStatus.RUNNING

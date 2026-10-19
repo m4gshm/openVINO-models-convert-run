@@ -1,4 +1,4 @@
-set MODEL_NAME=Qwen2.5-Coder-1.5B-Instruct
+set MODEL_NAME=Qwen2.5-Coder-1.5B
 set MODEL_DEVELOPER=Qwen
 set MODEL_NAME_OUT=%MODEL_NAME%
 set MODEL_PATH=./%MODEL_DEVELOPER%/%MODEL_NAME%
@@ -11,7 +11,6 @@ optimum-cli export openvino ^
   --task text-generation-with-past ^
   --weight-format %WEIGHT_FORMAT% ^
   --sym ^
-  --ratio 1.0 ^
   --trust-remote-code ^
   %OUTPUT_DIR%-%WEIGHT_FORMAT%-sym
 

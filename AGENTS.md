@@ -124,6 +124,28 @@ earlier turns is sent and decoded again; each item becomes an OpenVINO tag in th
 (`<ov_genai_image_0>`, `<ov_genai_video_1>`). Media expands the prompt with many tokens, so
 `--max_prompt_len` must leave room for it.
 
+## Interrupt Mode for Autocomplete
+
+`/v1/completions` can run in an **interrupt mode**: every new request stops the one that is
+still running, so the newest request is served first and the device (NPU, GPU, CPU) is freed
+by the abandoned generation. It is meant for IDE autocomplete, where only the last
+keystroke matters.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `--interrupt_completions` | off | interrupt the running `/v1/completions` request when a new one arrives |
+
+How it works:
+
+- `agent/openai/interrupt.py` keeps the stop event of the active request; starting a new one
+  sets the event of the previous one.
+- The stop event is part of the `is_stop()` check of the request, so the generation of the
+  old request ends at the next token: the streamer stops the pipeline, the continuous batching
+  handle is cancelled, and the new request gets the device.
+- The mode applies to `/v1/completions` only; `/v1/chat/completions` is not interrupted.
+- A generation that is already prefilling cannot be stopped by the pipeline, so the new request
+  waits for the prefill of the old one to finish.
+
 ## Code Quality Rules
 
 ### Testing
