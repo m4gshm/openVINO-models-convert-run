@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Callable, Literal, Iterable
 
@@ -25,7 +26,8 @@ from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type, \
     veai_fix_incorrect_arguments
-from agent.inference.token_handler import markdown_bold, markdown_back_tick, StopSignal, get_finish_str, TokenHandler, \
+from agent.common.markdown import markdown_bold, markdown_back_tick
+from agent.inference.token_handler import StopSignal, get_finish_str, TokenHandler, \
     TokenHandlerConfig
 from agent.multimodal.content_parts import content_text
 from agent.multimodal.media_error import MediaError
@@ -70,7 +72,7 @@ class DetokenizeRequest(BaseModel):
 class ControllerConfig(BaseModel):
     """Static per-model configuration shared by all endpoints."""
     model_name: str | None = None
-    max_prompt_len: int
+    max_prompt_len: int | None = None
     model_architectures: set[str]
     response_timeout: timedelta = timedelta(minutes=20)
     is_fix_tool_type: bool = True
@@ -157,100 +159,109 @@ def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) ->
                                reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
 
 
-# Flat option mapping; grouping the parameters into a config object is a separate refactor.
-# pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
-# pylint: disable=too-many-branches,too-many-statements
-def new_generation_config(generate_opts: GenerateOpts,
-                          temperature: float | None,
-                          max_completion_tokens: int | None,
-                          max_prompt_tokens: int | None = None,
-                          top_p: float | None = None,
-                          frequency_penalty: float | None = None,
-                          apply_chat_template: bool = False,
-                          logprobs: bool | None = None,
-                          stop: list[str] | str | None = None,
-                          ) -> GenerationConfig:
-    """Translate request parameters and default options into an openvino_genai.GenerationConfig."""
+@dataclass
+class GenerationRequest:  # pylint: disable=too-many-instance-attributes  # flat DTO of the request fields
+    """Generation parameters of a single request, as sent by the client.
+
+    A request overrides the server defaults only for the fields it actually sets;
+    every unset field falls back to the matching field of :class:`GenerateOpts`.
+    """
+
+    temperature: float | None = None
+    max_completion_tokens: int | None = None
+    max_prompt_tokens: int | None = None
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    apply_chat_template: bool = False
+    logprobs: bool | None = None
+    stop: list[str] | str | None = None
+
+    @staticmethod
+    def of_chat_request(body: ChatCompletionRequest) -> "GenerationRequest":
+        """Generation parameters of a chat completion request."""
+        return GenerationRequest(temperature=body.temperature,
+                                 max_completion_tokens=body.max_tokens or body.max_completion_tokens,
+                                 top_p=body.top_p,
+                                 frequency_penalty=body.frequency_penalty,
+                                 logprobs=body.logprobs,
+                                 stop=body.stop)
+
+    @staticmethod
+    def of_completion_request(body: completions_api.CompletionRequest) -> "GenerationRequest":
+        """Generation parameters of a legacy text completion request."""
+        return GenerationRequest(temperature=body.temperature, max_completion_tokens=body.max_tokens)
+
+    def stop_strings(self) -> set[str]:
+        """Stop phrases of the request, normalized to a set."""
+        stop = self.stop
+        if isinstance(stop, list):
+            return set(stop)
+        if isinstance(stop, str):
+            return {stop}
+        return set()
+
+
+def new_generation_config(generate_opts: GenerateOpts, request: GenerationRequest) -> GenerationConfig:
+    """Translate the request parameters and the server defaults into a GenerationConfig.
+
+    The request wins over the server defaults; the defaults fill in what the request left unset.
+    """
     generation_config = GenerationConfig()
-    num_assistant_tokens = generate_opts.num_assistant_tokens
-    if not num_assistant_tokens is None:
-        generation_config.num_assistant_tokens = num_assistant_tokens
-    tree_depth = generate_opts.tree_depth
-    if not tree_depth is None:
-        generation_config.tree_depth = tree_depth
-    branching_factor = generate_opts.branching_factor
-    if not branching_factor is None:
-        generation_config.branching_factor = branching_factor
-
-    ngram_size = generate_opts.max_ngram_size
-    if not ngram_size is None:
-        generation_config.max_ngram_size = ngram_size
-
-    max_new_tokens = max_completion_tokens or generate_opts.max_new_tokens
-    if not max_new_tokens is None:
-        generation_config.max_new_tokens = max_new_tokens
-    max_length = max_prompt_tokens or generate_opts.max_prompt_tokens
-    if not max_length is None:
-        generation_config.max_length = max_length
-    generation_config.apply_chat_template = apply_chat_template
-
-    temp = temperature or generate_opts.temperature
-
-    generation_config.do_sample = generate_opts.do_sample
-    if not temp is None:
-        generation_config.temperature = temp
-
-    _top_p = top_p or generate_opts.top_p
-    if not _top_p is None:
-        generation_config.top_p = _top_p
-
-    top_k = generate_opts.top_k
-    if not top_k is None:
-        generation_config.top_k = top_k
-    min_p = generate_opts.min_p
-    if not min_p is None:
-        generation_config.min_p = min_p
-
-    if not frequency_penalty is None:
-        generation_config.frequency_penalty = frequency_penalty
-    else:
-        frequency_penalty = generate_opts.frequency_penalty
-        if not frequency_penalty is None:
-            generation_config.frequency_penalty = frequency_penalty
-
-    if logprobs:
-        generation_config.logprobs = 1
-
-    repetition_penalty = generate_opts.repetition_penalty
-    if not repetition_penalty is None:
-        generation_config.repetition_penalty = repetition_penalty
-
-    presence_penalty = generate_opts.presence_penalty
-    if not presence_penalty is None:
-        generation_config.presence_penalty = presence_penalty
-
-    stop_set: set[str] = set(stop) if isinstance(stop, list) else {stop} if isinstance(stop, str) else set()
-    generation_config.stop_strings = stop_set
-
-    if not generate_opts.num_return_sequences is None:
-        generation_config.num_return_sequences = generate_opts.num_return_sequences
-
-    if not generate_opts.num_beams is None:
-        generation_config.num_beams = generate_opts.num_beams
-    if not generate_opts.num_beam_groups is None:
-        generation_config.num_beam_groups = generate_opts.num_beam_groups
-    if not generate_opts.diversity_penalty is None:
-        generation_config.diversity_penalty = generate_opts.diversity_penalty
-    if not generate_opts.length_penalty is None:
-        generation_config.length_penalty = generate_opts.length_penalty
-    if not generate_opts.no_repeat_ngram_size is None:
-        generation_config.no_repeat_ngram_size = generate_opts.no_repeat_ngram_size
-
+    _apply_generate_opts(generation_config, generate_opts)
+    _apply_request(generation_config, request)
     return generation_config
 
 
-# pylint: enable=too-many-arguments,too-many-positional-arguments,too-many-locals
-# pylint: enable=too-many-branches,too-many-statements
+def _apply_generate_opts(generation_config: GenerationConfig, generate_opts: GenerateOpts) -> None:
+    """Copy the server defaults into the generation config.
+
+    Only the options that are actually set are copied, so that the defaults of
+    the GenerationConfig itself stay in place for the rest.
+    """
+    generation_config.do_sample = generate_opts.do_sample
+    _set_if_set(generation_config, "max_new_tokens", generate_opts.max_new_tokens)
+    _set_if_set(generation_config, "max_length", generate_opts.max_prompt_tokens)
+    _set_if_set(generation_config, "temperature", generate_opts.temperature)
+    _set_if_set(generation_config, "top_p", generate_opts.top_p)
+    _set_if_set(generation_config, "top_k", generate_opts.top_k)
+    _set_if_set(generation_config, "min_p", generate_opts.min_p)
+    _set_if_set(generation_config, "repetition_penalty", generate_opts.repetition_penalty)
+    _set_if_set(generation_config, "frequency_penalty", generate_opts.frequency_penalty)
+    _set_if_set(generation_config, "presence_penalty", generate_opts.presence_penalty)
+    _set_if_set(generation_config, "num_assistant_tokens", generate_opts.num_assistant_tokens)
+    _set_if_set(generation_config, "tree_depth", generate_opts.tree_depth)
+    _set_if_set(generation_config, "branching_factor", generate_opts.branching_factor)
+    _set_if_set(generation_config, "max_ngram_size", generate_opts.max_ngram_size)
+    _set_if_set(generation_config, "num_return_sequences", generate_opts.num_return_sequences)
+    _set_if_set(generation_config, "num_beams", generate_opts.num_beams)
+    _set_if_set(generation_config, "num_beam_groups", generate_opts.num_beam_groups)
+    _set_if_set(generation_config, "diversity_penalty", generate_opts.diversity_penalty)
+    _set_if_set(generation_config, "length_penalty", generate_opts.length_penalty)
+    _set_if_set(generation_config, "no_repeat_ngram_size", generate_opts.no_repeat_ngram_size)
+
+
+def _set_if_set(generation_config: GenerationConfig, name: str, value) -> None:
+    """Copy the value into the generation config unless it is unset."""
+    if not value is None:
+        setattr(generation_config, name, value)
+
+
+def _apply_request(generation_config: GenerationConfig, request: GenerationRequest) -> None:
+    """Override the generation config with the parameters of the request."""
+    if request.max_completion_tokens:
+        generation_config.max_new_tokens = request.max_completion_tokens
+    if request.max_prompt_tokens:
+        generation_config.max_length = request.max_prompt_tokens
+    if request.temperature:
+        generation_config.temperature = request.temperature
+    if request.top_p:
+        generation_config.top_p = request.top_p
+    if not request.frequency_penalty is None:
+        generation_config.frequency_penalty = request.frequency_penalty
+    if request.logprobs:
+        generation_config.logprobs = 1
+    generation_config.apply_chat_template = request.apply_chat_template
+    generation_config.stop_strings = request.stop_strings()
 
 
 def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
@@ -436,24 +447,10 @@ class BaseOVController(BaseController):
     async def handle_chat_completion(self, body: ChatCompletionRequest,
                                      request: Request) -> StreamingResponse | ChatCompletion:
         """Run the full local pipeline: prepare messages, build prompt, generate chunks."""
-        # Long orchestration; extracting stages is a separate refactor.
-        # pylint: disable=too-many-locals
-        is_client_gone = disconnect_probe(request)
-
-        def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
-
         stream = is_stream_request(body)
-        tools = body.tools
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
-        tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai, self.config.is_fix_tool_type)
-        tools_raw = self.prompt_escaper.escape_in(tools_raw)
-
-        extra_context = {}
-        model_parameters = self.generate_opts.model_parameters
-        if model_parameters:
-            extra_context = model_parameters
+        tools_raw, function_parameters = self.prepare_tools(body.tools, is_veai)
 
         try:
             prepared = await asyncio.to_thread(
@@ -465,35 +462,54 @@ class BaseOVController(BaseController):
                 response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name or "",
                 content=str(e), finish_reason=STOP)])
 
-        chat_history = new_chat_history(prepared.messages, tools_raw)
-        media = prepared.media
-        history_get_messages = chat_history.get_messages()
-        log.debug("chat history: messages=%s, tools=%s, extra_context=%s, media='%s'",
-                  len(history_get_messages), len(chat_history.get_tools()), extra_context, media.summary())
+        prompt = self.build_prompt(prepared.messages, tools_raw)
+        generation_config = new_generation_config(self.generate_opts,
+                                                  GenerationRequest.of_chat_request(body))
+        over_limit_response = self.check_prompt_of(prompt, generation_config, prepared.media)
+        if over_limit_response:
+            return await new_http_response_chat(stream, [over_limit_response])
 
+        token_handler = self.new_token_handler(prompt, messages, is_veai, function_parameters, request)
+        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                               token_handler=token_handler, media=prepared.media)
+        return await new_http_response_chat(stream, chunk_generator)
+
+    def check_prompt_of(self, prompt: str, generation_config: GenerationConfig,
+                        media: MediaInputs) -> ChatCompletionChunk | None:
+        """Check the size of the prompt and log the parameters of the generation."""
+        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
+        over_limit_response = self.check_prompt_limit(max_length=generation_config.max_length,
+                                                      encode_size=prompt_tokens_amount,
+                                                      response_id=str(uuid.uuid4()))
+        if over_limit_response:
+            return over_limit_response
+        self.log_inference_start(prompt_tokens_amount, generation_config, media)
+        return None
+
+    def prepare_tools(self, tools, is_veai: bool) -> tuple[list[dict[str, Any]],
+                                                           dict[str, FunctionDefinitionParameters]]:
+        """Split the tools of the request into their raw form and their function parameters."""
+        tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai,
+                                                                        self.config.is_fix_tool_type)
+        return self.prompt_escaper.escape_in(tools_raw), function_parameters
+
+    def build_prompt(self, messages: list[dict], tools_raw: list[dict[str, Any]]) -> str:
+        """Render the prompt of the request out of its messages and tools."""
+        extra_context = self.generate_opts.model_parameters or {}
+        chat_history = new_chat_history(messages, tools_raw)
+        log.debug("chat history: messages=%s, tools=%s, extra_context=%s",
+                  len(chat_history.get_messages()), len(chat_history.get_tools()), extra_context)
         prompt = self.tokenizer.apply_chat_template(history=chat_history,
                                                     tools=tools_raw,
                                                     add_generation_prompt=True,
                                                     extra_context=extra_context,
                                                     chat_template=self.config.chat_template)
-
         self.log_inference_prompt.debug(prompt)
+        return prompt
 
-        generation_config = new_generation_config(temperature=body.temperature,
-                                                  generate_opts=self.generate_opts,
-                                                  max_completion_tokens=body.max_tokens or body.max_completion_tokens,
-                                                  top_p=body.top_p, frequency_penalty=body.frequency_penalty,
-                                                  logprobs=body.logprobs, stop=body.stop)
-
-        response_id = str(uuid.uuid4())
-        prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
-        max_length = generation_config.max_length
-
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
-                                                      response_id=response_id)
-        if over_limit_response:
-            return await new_http_response_chat(stream, [over_limit_response])
-
+    def log_inference_start(self, prompt_tokens_amount: int, generation_config: GenerationConfig,
+                            media: MediaInputs) -> None:
+        """Report the parameters of the generation before it starts."""
         if self.log_inference.isEnabledFor(logging.DEBUG):
             self.log_inference.debug(
                 "inference start: "
@@ -505,31 +521,37 @@ class BaseOVController(BaseController):
                 "top_p=%.2f, top_k=%s, "
                 "min_p=%.2f, repetition_penalty=%.2f, "
                 "presence_penalty=%.2f, "
-                "frequency_penalty=%.2f",
+                "frequency_penalty=%.2f, "
+                "media='%s'",
                 prompt_tokens_amount, generation_config.do_sample, generation_config.max_length,
                 generation_config.max_new_tokens, generation_config.temperature, generation_config.top_p,
                 generation_config.top_k, generation_config.min_p, generation_config.repetition_penalty,
-                generation_config.presence_penalty, generation_config.frequency_penalty)
+                generation_config.presence_penalty, generation_config.frequency_penalty, media.summary())
         else:
             self.log_inference.info("inference start, media='%s'", media.summary())
+
+    def new_token_handler(self, prompt: str, messages: list[ChatCompletionMessageParam], is_veai: bool,
+                          function_parameters: dict[str, FunctionDefinitionParameters],
+                          request: Request) -> TokenHandler:
+        """Build the token handler of the request, wired to the stop conditions."""
+        is_client_gone = disconnect_probe(request)
+
+        def is_stop():
+            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
 
         user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
         user_context.messages = messages
         user_context.model_architectures = self.config.model_architectures
-        token_handler = TokenHandler(tokenizer=self.tokenizer,
-                                     prompt=prompt,
-                                     parser=self.parser,
-                                     init_chat_events=True,
-                                     is_stop=is_stop,
-                                     config=self.handler_config,
-                                     tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
-                                     user_context=user_context,
-                                     supported_functions=function_parameters,
-                                     )
-
-        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               token_handler=token_handler, media=media)
-        return await new_http_response_chat(stream, chunk_generator)
+        return TokenHandler(tokenizer=self.tokenizer,
+                            prompt=prompt,
+                            parser=self.parser,
+                            init_chat_events=True,
+                            is_stop=is_stop,
+                            config=self.handler_config,
+                            tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
+                            user_context=user_context,
+                            supported_functions=function_parameters,
+                            )
 
     @abstractmethod
     def chunk_generator(self, prompt: str, generation_config: GenerationConfig, token_handler: TokenHandler,
@@ -549,38 +571,22 @@ class BaseOVController(BaseController):
         # but no media is attached to it and a media tag would only fail generation
         prompt = MEDIA_TAGS_ONLY.escape(body.prompt or "")
 
-
         self.log_inference_prompt.debug(prompt)
 
         # in the interrupt mode a new request stops the running one, so the device is
         # freed for the fresh request instead of being shared by two generations
         interrupt_event = self.begin_interruptible_request()
 
-        is_client_gone = disconnect_probe(request)
+        generation_config = new_generation_config(self.generate_opts,
+                                                  GenerationRequest.of_completion_request(body))
 
-        def is_stop():
-            return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
-                    or (interrupt_event is not None and interrupt_event.is_set()))
-
-        generation_config = new_generation_config(temperature=body.temperature,
-                                                  generate_opts=self.generate_opts,
-                                                  max_completion_tokens=body.max_tokens)
-
-        token_handler = TokenHandler(tokenizer=self.tokenizer,
-                                     prompt=prompt,
-                                     parser=self.parser,
-                                     init_chat_events=True,
-                                     is_stop=is_stop,
-                                     config=self.handler_config,
-                                     )
+        token_handler = self.new_completion_token_handler(prompt, request, interrupt_event)
 
         stream = is_stream_request(body)
-        response_id = str(uuid.uuid4())
         prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
-        max_length = generation_config.max_length
-        over_limit_response = self.check_prompt_limit(max_length=max_length, encode_size=prompt_tokens_amount,
-                                                      response_id=response_id)
-
+        over_limit_response = self.check_prompt_limit(max_length=generation_config.max_length,
+                                                      encode_size=prompt_tokens_amount,
+                                                      response_id=str(uuid.uuid4()))
         if over_limit_response:
             return await new_http_response_chat(stream, [over_limit_response])
 
@@ -589,6 +595,23 @@ class BaseOVController(BaseController):
         if interrupt_event is not None:
             chunk_generator = self.guard_generation(chunk_generator, interrupt_event)
         return await new_http_response_completions(stream, chunk_generator)
+
+    def new_completion_token_handler(self, prompt: str, request: Request,
+                                     interrupt_event: threading.Event | None) -> TokenHandler:
+        """Build the token handler of a completion request, wired to the stop conditions."""
+        is_client_gone = disconnect_probe(request)
+
+        def is_stop():
+            return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
+                    or (interrupt_event is not None and interrupt_event.is_set()))
+
+        return TokenHandler(tokenizer=self.tokenizer,
+                            prompt=prompt,
+                            parser=self.parser,
+                            init_chat_events=True,
+                            is_stop=is_stop,
+                            config=self.handler_config,
+                            )
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         """Return a length-stop chunk when the prompt does not fit, else None."""

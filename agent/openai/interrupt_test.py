@@ -169,12 +169,20 @@ class InterruptCompletionsCase(unittest.TestCase):
 class InterruptCliCase(unittest.TestCase):
     """Tests of the command line switch of the interrupt mode."""
 
-    def test_mode_is_off_by_default(self):
-        """The interrupt mode is disabled unless it is requested."""
+    def test_mode_is_on_by_default(self):
+        """The interrupt mode is enabled unless it is switched off."""
         parser = ArgumentParser()
         from agent.server_openvino import add_openvino_args  # pylint: disable=import-outside-toplevel
         add_openvino_args(parser)
         args = parser.parse_args(["--model", "m"])
+        self.assertEqual("on", args.interrupt_completions)
+
+    def test_mode_can_be_switched_off(self):
+        """The interrupt mode is switched off from the command line."""
+        parser = ArgumentParser()
+        from agent.server_openvino import add_openvino_args  # pylint: disable=import-outside-toplevel
+        add_openvino_args(parser)
+        args = parser.parse_args(["--model", "m", "--interrupt_completions", "off"])
         self.assertEqual("off", args.interrupt_completions)
 
     def test_mode_can_be_switched_on(self):

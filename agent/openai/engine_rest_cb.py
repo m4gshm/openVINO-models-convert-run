@@ -14,9 +14,10 @@ from openvino_genai.py_openvino_genai import (  # pylint: disable=no-name-in-mod
     ContinuousBatchingPipeline, GenerationHandle, GenerationFinishReason,
     GenerationConfig, GenerationStatus)
 
+from agent.common.markdown import markdown_bold
 from agent.common.metric_mem import get_current_memory
 from agent.inference.token_handler import TokenHandler, TokenHandlerConfig, get_stop_signal_by_finish_reason, \
-    markdown_bold, StopSignal
+    StopSignal
 from agent.multimodal.media_inputs import MediaInputs
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT
@@ -74,7 +75,7 @@ class ContinuousBatchingController(BaseOVController):
     def chunk_generator(self, prompt: str,  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
                         generation_config: GenerationConfig, token_handler: TokenHandler,
                         media: MediaInputs) -> Iterable[ChatCompletionChunk]:
-        model_name = self.config.model_name
+        model_name = self.config.model_name or ""
 
         before_generate_mem = get_current_memory()
         request_id = next(request_counter)

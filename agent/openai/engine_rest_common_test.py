@@ -12,11 +12,13 @@ from starlette.responses import StreamingResponse
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
+from agent.openai import GenerateOpts
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
-from agent.openai.engine_rest_common import (ControllerConfig, disconnect_probe, is_stream_request,
-                                             make_union, new_chat_history, new_http_response_chat,
+from agent.openai.engine_rest_common import (ControllerConfig, GenerationRequest, disconnect_probe,
+                                             is_stream_request, make_union, new_chat_history,
+                                             new_generation_config, new_http_response_chat,
                                              new_http_response_completions)
 
 
@@ -123,8 +125,61 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual([tool_call], tool_calls)
 
 
+class GenerationConfigCase(unittest.TestCase):
+    """Tests of the translation of the request and the server options into a GenerationConfig."""
+
+    def test_server_defaults_are_applied(self):
+        """A request without options inherits the defaults of the server."""
+        config = new_generation_config(GenerateOpts(temperature=0.3, top_p=0.9, max_new_tokens=128),
+                                       GenerationRequest())
+        self.assertAlmostEqual(0.3, config.temperature)
+        self.assertAlmostEqual(0.9, config.top_p)
+        self.assertEqual(128, config.max_new_tokens)
+
+    def test_request_overrides_the_server_defaults(self):
+        """A request option wins over the matching default of the server."""
+        config = new_generation_config(GenerateOpts(temperature=0.3),
+                                       GenerationRequest(temperature=0.9))
+        self.assertAlmostEqual(0.9, config.temperature)
+
+    def test_unset_request_option_keeps_the_server_default(self):
+        """A request option left unset does not override the server default."""
+        config = new_generation_config(GenerateOpts(temperature=0.3),
+                                       GenerationRequest(top_p=0.5))
+        self.assertAlmostEqual(0.3, config.temperature)
+        self.assertAlmostEqual(0.5, config.top_p)
+
+    def test_max_completion_tokens_override_the_default(self):
+        """The token limit of the request wins over the default one."""
+        config = new_generation_config(GenerateOpts(max_new_tokens=128),
+                                       GenerationRequest(max_completion_tokens=64))
+        self.assertEqual(64, config.max_new_tokens)
+
+    def test_stop_phrases_are_normalized_to_a_set(self):
+        """The stop phrases of the request reach the config as a set."""
+        config = new_generation_config(GenerateOpts(), GenerationRequest(stop=["a", "b"]))
+        self.assertEqual({"a", "b"}, set(config.stop_strings))
+
+    def test_a_single_stop_phrase_becomes_a_set(self):
+        """A single stop phrase of the request reaches the config as a set."""
+        config = new_generation_config(GenerateOpts(), GenerationRequest(stop="a"))
+        self.assertEqual({"a"}, set(config.stop_strings))
+
+    def test_frequency_penalty_of_zero_is_applied(self):
+        """A frequency penalty of zero is a value, not a missing one."""
+        config = new_generation_config(GenerateOpts(frequency_penalty=0.5),
+                                       GenerationRequest(frequency_penalty=0.0))
+        self.assertAlmostEqual(0.0, config.frequency_penalty)
+
+    def test_logprobs_enable_the_logprobs_of_the_config(self):
+        """A request asking for the logprobs enables them."""
+        config = new_generation_config(GenerateOpts(), GenerationRequest(logprobs=True))
+        self.assertEqual(1, config.logprobs)
+
+
 class DisconnectProbeCase(unittest.TestCase):
     """Tests of the throttled disconnect probe."""
+
     def test_throttles_underlying_probe_within_interval(self):
         """The underlying probe runs at most once per interval window."""
         calls = []

@@ -28,35 +28,14 @@ def is_veai_agent(messages: list[ChatCompletionMessageParam]) -> bool:
 
 def get_veai_context(messages: list[ChatCompletionMessageParam]) -> UserContext | None:
     """Extract the user context carried by the first (system) message."""
-    # class ContextField(Enum):
-    #     OS_INFO = 'OS info', lambda uc: uc.os
-    #     PROJECT_ABSOLUTE_PATH = 'Project absolute path', lambda uc: uc.workdir
+    # The system message of the IDE looks like this:
     #
-    #     def __new__(cls, *args, **kwds):
-    #         obj = object.__new__(cls)
-    #         obj._value_ = args[0]
-    #         return obj
-    #
-    #     def __init__(self, _: str, context_field: Callable[[str, UserContext], None]):
-    #         self.context_field: Callable[[str, UserContext], None] = context_field
-    #
-    #     def __str__(self):
-    #         return self.value
-    #
-    #     @property
-    #     def value(self) -> str:
-    #         return self._value_
-    #
-    #     def set_context_value(self, value: str, uc: UserContext):
-    #         self.context_field(value, uc)
-    #
-    # expected_fields: dict[str, ContextField] = {member.name: member for member in ContextField}
-
-    # OS info: Windows 11, version: 10.0, arch: amd64
-    # IDE: OpenIDE 2025.3
-    # Project name: java
-    # Project absolute path: C:\project
-
+    #   <project_information>
+    #   OS info: Windows 11, version: 10.0, arch: amd64
+    #   IDE: OpenIDE 2025.3
+    #   Project name: java
+    #   Project absolute path: C:\project
+    #   </project_information>
     first_message = messages[0] if messages else None
     if not first_message:
         return None

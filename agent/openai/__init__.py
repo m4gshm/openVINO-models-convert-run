@@ -18,7 +18,7 @@ class GenerateOpts(BaseModel):
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
     preprocess_prompt_by_parser: bool = True
-    model_parameters: dict[str, Any] = None
+    model_parameters: dict[str, Any] | None = None
 
     num_beams: int | None = None
     num_beam_groups: int | None = None

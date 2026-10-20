@@ -1,17 +1,15 @@
 """OpenVINO mode entry point: model discovery, engine selection and CLI wiring."""
-import json
 import logging.config
-import multiprocessing
 import sys
 import threading
 from argparse import ArgumentParser
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from openvino_genai import SchedulerConfig, SparseAttentionConfig, SparseAttentionMode, py_openvino_genai
+from openvino_genai import SchedulerConfig, py_openvino_genai
 
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
@@ -21,12 +19,20 @@ from agent.openai import get_default_generate_opts, GenerateOpts, get_default_sc
 from agent.openai.engine_rest_cb import ContinuousBatchingController
 from agent.openai.engine_rest_common import ControllerConfig
 from agent.openai.engine_rest_vlm import VlmController
+from agent.openvino.model_config import default_pipe_of, detect_parser_type, or_default_pipe, \
+    parser_type_of, read_model_config
+from agent.common.cli import enum_value, enum_values
+from agent.openvino.options import AttentionBackend, AttentionHint, DeviceType, KvCachePrecision, Level, MoEHint, \
+    NpuCompilerType, NpuGenerateHint, ParserType, PerformanceHint, Pipe, PrefillHint, Turn, YesNo
+from agent.openvino.pipeline_properties import apply_common_properties, build_cpu_properties, \
+    build_gpu_properties, build_npu_properties, device_value, select_pipeline_properties
+from agent.openvino.scheduler import build_scheduler_config
 from agent.parser import Parser
 from agent.parser.gemma4 import Gemma4ChannelParser
 from agent.parser.lfm2 import Lfm2Parser
 from agent.parser.qwen2 import Qwen2Parser
 from agent.parser.qwen3 import Qwen3MoeParser
-from agent.server import enum_value, new_app, serve_until_stop, stop_signal as app_stop_signal
+from agent.server import new_app, serve_until_stop, stop_signal as app_stop_signal
 
 log = logging.getLogger(__name__)
 
@@ -34,106 +40,38 @@ DEFAULT_MODELS_DIR = "./models"
 DEFAULT_MODELS_CACHE_DIR = "./models_cache"
 
 
-class Turn(Enum):
-    """Generic on/off switch values accepted on the command line."""
-    # pylint: disable=invalid-name  # members mirror CLI values
-    on = 'on'
-    off = 'off'
+@dataclass
+class ModelContext:
+    """The model itself: where it lives and what it declares about itself."""
+
+    model_path: Path
+    model_name: str
+    model_cache_dir: str
+    model_architectures: set[str]
+    media_capabilities: Any
+    generate_opts: GenerateOpts
+    max_prompt_len: int | None
 
 
-class DeviceType(Enum):
-    """Inference devices the pipeline can be compiled for."""
-    GPU = 'GPU'
-    NPU = 'NPU'
-    CPU = 'CPU'
-    AUTO = 'AUTO'
+@dataclass
+class EngineSetup:  # pylint: disable=too-many-instance-attributes  # config bundle of the engine factories
+    """Everything the engine factories of the OpenVINO mode need."""
+
+    context: ModelContext
+    device: DeviceType
+    pipe: Pipe
+    parser: Parser
+    scheduler_config: SchedulerConfig
+    pipeline_properties: dict[str, Any]
+    controller_config: ControllerConfig
+    handler_config: TokenHandlerConfig
+
+    @property
+    def is_device_npu(self) -> bool:
+        """Whether the pipeline is compiled for the NPU."""
+        return self.device == DeviceType.NPU
 
 
-class Pipe(Enum):
-    """Serving pipeline kinds exposed via --pipe."""
-    CB = 'CB'
-    VLM = 'VLM'
-    LLM = 'LLM'
-
-
-class ParserType(Enum):
-    """Prompt parser families selectable via --parser."""
-    # pylint: disable=invalid-name  # members mirror model family names
-    qwen2 = 'qwen2'
-    qwen3moe = 'qwen3moe'
-    gemma4 = 'gemma4'
-    lfm2 = 'lfm2'
-
-
-class AttentionBackend(Enum):
-    """Attention kernels selectable via --attention_backend."""
-    PA = 'PA'
-    SDPA = 'SDPA'
-
-
-class KvCachePrecision(Enum):
-    """KV cache data types accepted via --kv_cache_precision."""
-    # pylint: disable=invalid-name  # members mirror KV cache dtypes
-    u8 = 'u8'
-    u4 = 'u4'
-    f16 = 'f16'
-
-
-class NpuCompilerType(Enum):
-    """NPU compiler selection strategy."""
-    DRIVER = 'DRIVER'
-    PLUGIN = 'PLUGIN'
-    PREFER_PLUGIN = 'PREFER_PLUGIN'
-
-
-class YesNo(Enum):
-    """Generic yes/no values accepted on the command line."""
-    YES = 'YES'
-    NO = 'NO'
-
-
-class Level(Enum):
-    """Priority levels for queue/model priorities."""
-    HIGH = 'HIGH'
-    MEDIUM = 'MEDIUM'
-
-
-class NpuGenerateHint(Enum):
-    """NPUW generate hint values."""
-    BEST_PERF = 'BEST_PERF'
-    FAST_COMPILE = 'FAST_COMPILE'
-
-
-class PrefillHint(Enum):
-    """NPUW prefill scheduling hint values."""
-    DYNAMIC = 'DYNAMIC'
-    STATIC = 'STATIC'
-
-
-class AttentionHint(Enum):
-    """Attention shape hints for NPUW LLM prefill/generate."""
-    DYNAMIC = 'DYNAMIC'
-    STATIC = 'STATIC'
-    PYRAMID = 'PYRAMID'
-    HFA = 'HFA'
-
-
-class PerformanceHint(Enum):
-    """OpenVINO performance hint values."""
-    LATENCY = 'LATENCY'
-    THROUGHPUT = 'THROUGHPUT'
-    CUMULATIVE_THROUGHPUT = 'CUMULATIVE_THROUGHPUT'
-
-
-class MoEHint(Enum):
-    """Mixture-of-experts routing hint values."""
-    DENSE = 'DENSE'
-    HOST_ROUTED = 'HOST_ROUTED'
-    DEVICE_ROUTED = 'DEVICE_ROUTED'
-
-
-# Single CLI entry point: maps arguments onto pipeline/scheduler/parser configuration.
-# pylint: disable=too-many-locals,too-many-branches,too-many-statements
 def run_openvino(args):
     """Run application in OpenVINO mode with local model loading.
 
@@ -141,384 +79,115 @@ def run_openvino(args):
     from disk (GGUF or directory), configures the pipeline, scheduler, and
     parser based on detected architecture, then starts a uvicorn server.
     """
-    model = args.model
+    setup = build_engine_setup(args)
+    app = init_sequential_engine(
+        controller_config=setup.controller_config,
+        model_path=str(setup.context.model_path),
+        device=device_value(setup.device),
+        vlm=setup.pipe == Pipe.VLM,
+        parser=setup.parser,
+        scheduler_config=None if setup.is_device_npu else setup.scheduler_config,
+        generate_opts=setup.context.generate_opts,
+        handler_config=setup.handler_config,
+        pipeline_properties=setup.pipeline_properties,
+        stop_signal=app_stop_signal,
+    ) if setup.pipe != Pipe.CB else init_continuous_batching_engine(
+        controller_config=setup.controller_config,
+        model_path=str(setup.context.model_path),
+        device=device_value(setup.device),
+        parser=setup.parser,
+        generate_opts=setup.context.generate_opts,
+        handler_config=setup.handler_config,
+        scheduler_config=setup.scheduler_config,
+        pipeline_properties=setup.pipeline_properties,
+        tokenizer_properties={},
+        stop_signal=app_stop_signal,
+    )
 
-    # --- Resolve model path and name ---
-    model_path = Path(model)
-    if model_path.is_absolute():
-        if model_path.is_file():
-            # remove gguf ext
-            model_name = model_path.with_suffix("").name
-        else:
-            model_name = model_path.name
-    else:
-        model_name = model
-        model_path = Path(f"{args.models_dir}/{model}")
+    # --- Start uvicorn server in a daemon thread ---
+    serve_until_stop(app, args.host, args.port, app_stop_signal, log)
 
+
+def build_engine_setup(args) -> EngineSetup:
+    """Resolve the model, the engine options and the properties of the pipeline."""
+    context = load_model_context(args)
+    device = DeviceType[args.device]
+
+    scheduler_opts = load_scheduler_opts(args.scheduler_config_file)
+    scheduler_config = build_scheduler_config(scheduler_opts, context.max_prompt_len)
+
+    pipe, parser_type = resolve_pipe_and_parser(args, context.model_architectures,
+                                                context.media_capabilities)
+    parser = new_model_parser(parser_type)
+    log.info("model: path='%s', architectures=%s, pipe=%s, parser='%s', parser_type='%s'",
+             context.model_path, context.model_architectures, pipe, parser_type, type(parser))
+    log.debug("cache dir %s", context.model_cache_dir)
+
+    pipeline_properties = resolve_pipeline_properties(args, context, device, pipe, parser_type)
+    controller_config = resolve_controller_config(args, context, pipe,
+                                                   load_chat_template(args.chat_template_file))
+    handler_config = TokenHandlerConfig(is_detect_looped_inference=args.detect_looped_inference != Turn.off.value)
+
+    log.info("model=%s, device=%s, properties=%s, generate_opts=%s, scheduler_config=%s",
+             context.model_path, device, pipeline_properties,
+             context.generate_opts.model_dump(exclude_unset=True, exclude_none=True), scheduler_config)
+
+    return EngineSetup(context=context, device=device, pipe=pipe, parser=parser,
+                       scheduler_config=scheduler_config, pipeline_properties=pipeline_properties,
+                       controller_config=controller_config, handler_config=handler_config)
+
+
+def load_model_context(args) -> ModelContext:
+    """Resolve the model folder and read what it declares about itself."""
+    model_path, model_name = resolve_model_path(args.model, args.models_dir)
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
-    logs_dir = f"./logs/{model_name}/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
-    base_log_config = logging_config(logs_dir)
-    log.info("logs dir %s", logs_dir)
+    setup_logging(args, model_name)
 
-    logging.config.dictConfig(base_log_config)
-
-    log.info("server starting with arguments application arguments: %s", args)
-
-    # --- Detect model architecture from config.json ---
-    model_architectures: set[str] = set()
-    max_position_embeddings: int | None = None
-
-    if model_path.is_dir():
-        openvino_model_config_json = model_path / "config.json"
-        if openvino_model_config_json.is_file():
-            try:
-                config = json.loads(openvino_model_config_json.read_text(encoding="utf-8"))
-                arch = config.get("architectures")
-                if isinstance(arch, list):
-                    model_architectures = set(arch)
-
-                text_config = config.get("text_config")
-                if isinstance(text_config, dict):
-                    max_position_embeddings = text_config.get("max_position_embeddings")
-                else:
-                    # old models like Qwen2.5
-                    max_position_embeddings = config.get("max_position_embeddings")
-            except Exception as e:  # pylint: disable=broad-exception-caught  # malformed config.json must not abort startup
-                log.error("error on read %s: %s", openvino_model_config_json, e)
-    elif not model_path.exists():
-        log.error("file or directory doesn't exists: '%s'", model_path)
-        sys.exit(1)
-
-    # --- Detect media capabilities of the model itself (vision / audio encoders) ---
+    model_config = read_model_config(model_path)
     media_capabilities = read_media_capabilities(model_path)
     log.info("model media capabilities: %s", media_capabilities.describe())
 
-    default_generate_opts = get_default_generate_opts()
-    # --- Load generate options from file or use defaults ---
-    generate_opts_file = args.generate_config_file
-    generate_opts: GenerateOpts
-    if generate_opts_file:
-        log.info("load %s", generate_opts_file)
-        try:
-            with open(generate_opts_file, "r", encoding="utf-8") as file:
-                generate_opts: GenerateOpts = GenerateOpts.model_validate_json(file.read())
-        except FileNotFoundError as e:
-            log.error("%s", e)
-            raise e
-    else:
-        generate_opts = default_generate_opts
-
-    default_scheduler_opts = get_default_scheduler_opts()
-    # --- Load scheduler options from file or use defaults ---
-    scheduler_opts_file = args.scheduler_config_file
-    scheduler_opts: SchedulerOpts
-    if scheduler_opts_file:
-        log.info("load %s", scheduler_opts_file)
-        try:
-            with open(scheduler_opts_file, "r", encoding="utf-8") as file:
-                scheduler_opts = SchedulerOpts.model_validate_json(file.read())
-        except FileNotFoundError as e:
-            log.error("%s", e)
-            raise e
-    else:
-        scheduler_opts = default_scheduler_opts
-
-    # --- Load chat template from file ---
-    chat_template = ''
-    chat_template_file = args.chat_template_file
-    if chat_template_file:
-        log.info("load %s", chat_template_file)
-        try:
-            with open(chat_template_file, "r", encoding="utf-8") as file:
-                chat_template = file.read()
-        except FileNotFoundError as e:
-            log.error("%s", e)
-            raise e
-
-    # --- Configure prompt length and device ---
-    max_prompt_len = args.max_prompt_len
-    if not max_prompt_len:
-        max_prompt_len = generate_opts.max_prompt_tokens or default_generate_opts.max_prompt_tokens
-    device: DeviceType = DeviceType[args.device]
-    is_device_npu = device == DeviceType.NPU
-    if not max_prompt_len:
-        max_prompt_len = max_position_embeddings
-
+    generate_opts = load_generate_opts(args.generate_config_file)
+    max_prompt_len = resolve_max_prompt_len(args.max_prompt_len, generate_opts,
+                                             model_config.max_position_embeddings)
     generate_opts.max_prompt_tokens = max_prompt_len
 
-    # --- Build scheduler configuration ---
-    scheduler_config = SchedulerConfig()
-    dynamic_split_fuse = scheduler_opts.dynamic_split_fuse or default_scheduler_opts.dynamic_split_fuse
-    if not dynamic_split_fuse is None:
-        scheduler_config.dynamic_split_fuse = dynamic_split_fuse
-        if dynamic_split_fuse:
-            num_batched_tokens = (scheduler_opts.max_num_batched_tokens
-                                  or default_scheduler_opts.max_num_batched_tokens or 8192)
-            scheduler_config.max_num_batched_tokens = num_batched_tokens
-        else:
-            scheduler_config.max_num_batched_tokens = max_prompt_len
-    opts_cache_size = scheduler_opts.cache_size or default_scheduler_opts.cache_size
-    if opts_cache_size:
-        scheduler_config.cache_size = opts_cache_size
-    cache_interval_multiplier = (scheduler_opts.cache_interval_multiplier
-                                 or default_scheduler_opts.cache_interval_multiplier)
-    if cache_interval_multiplier:
-        scheduler_config.cache_interval_multiplier = cache_interval_multiplier
-    opts_max_num_seqs = scheduler_opts.max_num_seqs or default_scheduler_opts.max_num_seqs
-    if opts_max_num_seqs:
-        scheduler_config.max_num_seqs = opts_max_num_seqs
+    return ModelContext(model_path=model_path, model_name=model_name, model_cache_dir=model_cache_dir,
+                         model_architectures=model_config.architectures,
+                         media_capabilities=media_capabilities,
+                         generate_opts=generate_opts, max_prompt_len=max_prompt_len)
 
-    # scheduler_config.num_kv_blocks = 2048
-    num_linear_attention_blocks = (scheduler_opts.num_linear_attention_blocks
-                                   or default_scheduler_opts.num_linear_attention_blocks)
-    if num_linear_attention_blocks:
-        scheduler_config.num_linear_attention_blocks = num_linear_attention_blocks
-    use_sparse_attention = scheduler_opts.use_sparse_attention or default_scheduler_opts.use_sparse_attention
-    scheduler_config.use_sparse_attention = use_sparse_attention
-    attention_opts = scheduler_opts.sparse_attention_config
-    if use_sparse_attention and attention_opts:
-        sparse_attention_config = SparseAttentionConfig()
-        sparse_attention_config.mode = (SparseAttentionMode.TRISHAPE
-                                        if attention_opts.sparse_attention_mode == "TRISHAPE"
-                                        else SparseAttentionMode.XATTENTION)
-        sparse_attention_config.num_last_dense_tokens_in_prefill = attention_opts.num_last_dense_tokens_in_prefill
-        sparse_attention_config.num_retained_start_tokens_in_cache = attention_opts.num_retained_start_tokens_in_cache
-        sparse_attention_config.num_retained_recent_tokens_in_cache = attention_opts.num_retained_recent_tokens_in_cache
-        sparse_attention_config.xattention_threshold = attention_opts.xattention_threshold
-        sparse_attention_config.xattention_block_size = attention_opts.xattention_block_size
-        sparse_attention_config.xattention_stride = attention_opts.xattention_stride
-        scheduler_config.sparse_attention_config = sparse_attention_config
 
-    prefix_caching = get_or_default(scheduler_opts.enable_prefix_caching, default_scheduler_opts.enable_prefix_caching)
-    if prefix_caching:
-        scheduler_config.enable_prefix_caching = prefix_caching
-    scheduler_config.use_cache_eviction = False
-    # max_cache_size = 4096 * 4
-    # kv_crush_config = KVCrushConfig(budget=max_cache_size, anchor_point_mode=KVCrushAnchorPointMode.MEAN)
-    # eviction_config = CacheEvictionConfig(start_size=1024 * 4, recent_size=512, max_cache_size=max_cache_size,
-    #                                       aggregation_mode=AggregationMode.NORM_SUM,
-    #                                       apply_rotation=False, snapkv_window_size=8,
-    #                                       kvcrush_config=kv_crush_config)
-    # eviction_config.adaptive_rkv_config = AdaptiveRKVConfig()
-    # scheduler_config.cache_eviction_config = eviction_config
+def setup_logging(args, model_name: str) -> None:
+    """Configure the logging of the server into the log directory of the model."""
+    logs_dir = f"./logs/{model_name}/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}"
+    log.info("logs dir %s", logs_dir)
+    logging.config.dictConfig(logging_config(logs_dir))
+    log.info("server starting with arguments application arguments: %s", args)
 
-    # --- Auto-detect parser type from model architecture ---
-    tokenizer_properties = {
-    }
 
-    pipe: Pipe = Pipe[args.pipe] if args.pipe else None
-    parser_type = args.parser
-    if not parser_type:
-        is_qwen3_5 = any("qwen3_5" in model_arch.lower() for model_arch in model_architectures)
-        is_qwen3moe = any("qwen3moe" in model_arch.lower() for model_arch in model_architectures)
-        is_qwen3 = any("qwen3" in model_arch.lower() for model_arch in model_architectures)
-        is_qwen2 = any("qwen2" in model_arch.lower() for model_arch in model_architectures)
-        is_gemma4 = any("gemma4" in model_arch.lower() for model_arch in model_architectures)
-        is_lfm = any("lfm2" in model_arch.lower() for model_arch in model_architectures)
-        if is_gemma4:
-            pipe = or_default_pipe(pipe, Pipe.VLM)
-            parser_type = ParserType.gemma4
-        elif is_qwen3_5:
-            parser_type = ParserType.qwen3moe
-            pipe = or_default_pipe(pipe, Pipe.VLM)
-        elif is_qwen3moe:
-            parser_type = ParserType.qwen3moe
-            pipe = or_default_pipe(pipe, Pipe.LLM)
-        elif is_qwen3 or is_qwen2:
-            parser_type = ParserType.qwen2
-            pipe = or_default_pipe(pipe, Pipe.LLM)
-        elif is_lfm or is_qwen2:
-            parser_type = ParserType.lfm2
-            pipe = or_default_pipe(pipe, Pipe.LLM)
+def resolve_pipeline_properties(args, context: ModelContext, device: DeviceType, pipe: Pipe,
+                                parser_type: ParserType | None) -> dict[str, Any]:
+    """Build the pipeline properties of the device, including the optional draft model."""
+    attention_backend = resolve_attention_backend(args.attention_backend, pipe,
+                                                   device == DeviceType.NPU, parser_type)
+    pipeline_properties = build_pipeline_properties(args, device, context.model_cache_dir,
+                                                    context.max_prompt_len, attention_backend)
+    if args.draft_model:
+        draft_model_path = str(Path(f"{args.models_dir}/{args.draft_model}"))
+        pipeline_properties["draft_model"] = new_draft_model(args, draft_model_path,
+                                                             context.model_cache_dir,
+                                                             device_value(device))
+    if args.prompt_lookup == Turn.on.value:
+        pipeline_properties["prompt_lookup"] = True
+    return pipeline_properties
 
-    if not pipe and media_capabilities.has_media:
-        pipe = or_default_pipe(pipe, Pipe.VLM)
-        log.info("pipe selected by model media capabilities: %s", enum_value(pipe))
 
-    if not pipe:
-        log.error("need define --pipe for model architectures=%s", model_architectures)
-        sys.exit(1)
-
-    # --- Tool handling and inference detection flags ---
-    is_fix_tool_type = args.fix_tool_type != Turn.off.value
-    is_detect_cycled_tool_call = args.detect_cycled_tool_call != Turn.off.value
-    is_detect_looped_inference = args.detect_looped_inference != Turn.off.value
-
-    # --- Instantiate model-specific parser ---
-    model_parser = Qwen3MoeParser() if parser_type == ParserType.qwen3moe else \
-        Gemma4ChannelParser() if parser_type == ParserType.gemma4 else \
-            Qwen2Parser() if parser_type == ParserType.qwen2 else \
-                Lfm2Parser() if parser_type == ParserType.lfm2 else \
-                    Parser()
-
-    log.info("model: path='%s', architectures=%s, pipe=%s, parser='%s', parser_type='%s'",
-             model_path, model_architectures, pipe, parser_type, type(model_parser))
-    log.debug("cache dir %s", model_cache_dir)
-
-    npu_generate_hint = args.npu_generate_hint
-    performance_hint = args.performance_hint
-
-    # --- Configure attention backend ---
-    attention_backend = args.attention_backend
-    is_cb = pipe == Pipe.CB
-    if is_cb and attention_backend == enum_value(AttentionBackend.PA):
-        log.info("erase attention_backend=%s for unsupported pipe=%s", attention_backend, enum_value(pipe))
-    elif attention_backend is None and not (is_cb or is_device_npu or is_gemma4):
-        attention_backend = enum_value(AttentionBackend.PA)
-        log.info("force attention_backend=%s", attention_backend)
-
-    cores_available = multiprocessing.cpu_count()
-    cpu_pipeline_properties = {
-        "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": performance_hint,
-        "ENABLE_MMAP": "YES",
-        "INFERENCE_NUM_THREADS": cores_available,
-    }
-
-    gpu_enable_large_allocations = args.gpu_enable_large_allocations
-    gpu_priorities = args.gpu_priorities
-    gpu_pipeline_properties = {
-        "CACHE_DIR": model_cache_dir,
-        "PERFORMANCE_HINT": performance_hint,
-        "ENABLE_MMAP": "YES",
-
-        # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
-        # "PERFORMANCE_HINT_NUM_REQUESTS": 1,
-
-        "GPU_ENABLE_LARGE_ALLOCATIONS": gpu_enable_large_allocations,
-        "GPU_QUEUE_THROTTLE": gpu_priorities,
-        "MODEL_PRIORITY": gpu_priorities,
-        "GPU_HOST_TASK_PRIORITY": gpu_priorities,
-        "GPU_QUEUE_PRIORITY": gpu_priorities,
-
-        "COMPILATION_NUM_THREADS": cores_available,
-        # "INFERENCE_PRECISION_HINT": 'dynamic'
-    }
-
-    npuw_devices = args.npuw_devices
-    npu_prefill_hint = args.npu_prefill_hint
-    npuw_llm_prefill_attention_hint = args.npuw_llm_prefill_attention_hint
-    npuw_llm_generate_attention_hint = args.npuw_llm_generate_attention_hint
-    npuw_llm_generate_pyramid = args.npuw_llm_generate_pyramid
-    npuw_llm_propagate_slice_up = args.npuw_llm_propagate_slice_up
-    npuw_llm_enable_prefix_caching = args.npuw_llm_enable_prefix_caching
-    npuw_llm_enable_continuous_prefill = args.npuw_llm_enable_continuous_prefill
-    npuw_llm_enable_block_based_kv_cache = args.npuw_llm_enable_block_based_kv_cache
-    npuw_llm_prefill_moe_hint = args.npuw_llm_prefill_moe_hint
-    npu_compilation_mode_params = args.npu_compilation_mode_params
-    npuw_llm_generate_moe_hint = args.npuw_llm_generate_moe_hint
-    npuw_llm_prefill_chunk_size = args.npuw_llm_prefill_chunk_size
-    npuw_llm = args.npuw_llm
-    npuw_pa = args.npuw_pa
-    npu_turbo = args.npu_turbo
-    npu_compiler_type = args.npu_compiler_type
-
-    npu_pipeline_properties: dict[str, str | int] = {
-        "CACHE_DIR": model_cache_dir,
-        "CACHE_MODE": "OPTIMIZE_SPEED",
-        "PERFORMANCE_HINT": performance_hint,
-        "ENABLE_MMAP": "YES",
-        # "PERF_COUNT": "YES",
-
-        # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "128",
-
-        "NPU_COMPILER_TYPE": npu_compiler_type,
-        "NPU_USE_NPUW": "YES",
-        "NPU_TURBO": npu_turbo,
-
-        "NPUW_LLM_GENERATE_HINT": npu_generate_hint,
-        "NPUW_LLM_PREFILL_HINT": npu_prefill_hint,
-        "NPUW_LLM_PREFILL_CHUNK_SIZE": npuw_llm_prefill_chunk_size,
-
-        "NPUW_LLM_GENERATE_PYRAMID": npuw_llm_generate_pyramid,
-        "NPUW_LLM_SHARED_HEAD": "YES",
-        "NPUW_PARALLEL_COMPILE": "YES",
-        "LOG_LEVEL": "LOG_INFO",
-    }
-
-    if npuw_llm:
-        npu_pipeline_properties["NPUW_LLM"] = npuw_llm
-    if npuw_pa:
-        npu_pipeline_properties["NPUW_PA"] = npuw_pa
-
-    if npuw_devices:
-        npu_pipeline_properties["NPUW_DEVICES"] = npuw_devices
-    if npu_compilation_mode_params:
-        # optimization-level=2 performance-hint-override=latency
-        npu_pipeline_properties["NPU_COMPILATION_MODE_PARAMS"] = npu_compilation_mode_params
-    if npuw_llm_prefill_moe_hint:
-        npu_pipeline_properties["NPUW_LLM_PREFILL_MOE_HINT"] = npuw_llm_prefill_moe_hint
-    if npuw_llm_generate_moe_hint:
-        npu_pipeline_properties["NPUW_LLM_GENERATE_MOE_HINT"] = npuw_llm_generate_moe_hint
-    if npuw_llm_prefill_attention_hint:
-        npu_pipeline_properties["NPUW_LLM_PREFILL_ATTENTION_HINT"] = npuw_llm_prefill_attention_hint
-    if npuw_llm_generate_attention_hint:
-        npu_pipeline_properties["NPUW_LLM_GENERATE_ATTENTION_HINT"] = npuw_llm_generate_attention_hint
-    if npuw_llm_propagate_slice_up:
-        npu_pipeline_properties["NPUW_LLM_PROPAGATE_SLICE_UP"] = npuw_llm_propagate_slice_up
-    if npuw_llm_enable_prefix_caching:
-        npu_pipeline_properties["NPUW_LLM_ENABLE_PREFIX_CACHING"] = npuw_llm_enable_prefix_caching
-    if npuw_llm_enable_continuous_prefill:
-        npu_pipeline_properties["NPUW_LLM_ENABLE_CONTINUOUS_PREFILL"] = npuw_llm_enable_continuous_prefill
-    if npuw_llm_enable_block_based_kv_cache:
-        npu_pipeline_properties["NPUW_LLM_ENABLE_BLOCK_BASED_KV_CACHE"] = npuw_llm_enable_block_based_kv_cache
-
-    if max_prompt_len:
-        npu_pipeline_properties["MAX_PROMPT_LEN"] = max_prompt_len
-    # decide: llm or pa backend (see commented block below)
-    # if attention_backend == enum_value(AttentionBackend.PA):
-    #     npu_pipeline_properties["NPUW_PA"] = "YES"
-
-    # max_generation_token_len = args.max_generation_token_len
-    # if not max_generation_token_len:
-    #     max_generation_token_len = generate_opts.max_new_tokens or default_generate_opts.max_new_tokens
-
-    # if max_generation_token_len:
-    #     npu_pipeline_properties["NPUW_LLM_MAX_GENERATION_TOKEN_LEN"] = max_generation_token_len
-
-    # --- Select pipeline properties based on device ---
-    if not model_path.exists():
-        log.error("model path is not existed: %s", model_path)
-
-    pipeline_properties = npu_pipeline_properties if is_device_npu \
-        else cpu_pipeline_properties if device == DeviceType.CPU \
-        else cpu_pipeline_properties | gpu_pipeline_properties if device == DeviceType.AUTO \
-        else gpu_pipeline_properties
-
-    kv_cache_precision = args.kv_cache_precision
-    if kv_cache_precision:
-        pipeline_properties["KV_CACHE_PRECISION"] = kv_cache_precision
-
-    if attention_backend:
-        pipeline_properties["ATTENTION_BACKEND"] = attention_backend
-
-    device_value: str = enum_value(device)
-
-    # --- Configure draft model (optional) ---
-    draft_model = args.draft_model
-    draft_model_path = str(Path(f"{args.models_dir}/{draft_model}")) if draft_model else None
-    if draft_model_path:
-        draft_properties: dict[str, Any] = {
-            "CACHE_DIR": model_cache_dir
-        }
-        eagle3_mode = args.eagle3_mode == Turn.on.value
-        if eagle3_mode:
-            draft_properties["eagle3_mode"] = True
-        mtp_mode = args.mtp_mode == Turn.on.value
-        if mtp_mode:
-            draft_properties["mtp_mode"] = True
-        dflash_mode = args.dflash_mode == Turn.on.value
-        if dflash_mode:
-            draft_properties["dflash_mode"] = True
-        draft_scheduler_config = SchedulerConfig()
-        # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
-        draft_model = py_openvino_genai.draft_model(models_path=draft_model_path, device=device_value,
-                                                    scheduler_config=draft_scheduler_config, **draft_properties)
-        pipeline_properties["draft_model"] = draft_model
-
-    # --- Build controller and handler configs ---
-    modalities = resolve_modalities(media_capabilities, model_architectures, enum_value(pipe))
-    allow_local_media_files = args.allow_local_media_files == enum_value(Turn.on)
+def resolve_controller_config(args, context: ModelContext, pipe: Pipe,
+                              chat_template: str) -> ControllerConfig:
+    """Build the configuration shared by all endpoints of the engine."""
+    media_capabilities = context.media_capabilities
+    modalities = resolve_modalities(media_capabilities, context.model_architectures, enum_value(pipe))
     log.info("input modalities: %s, pipe=%s, model media: %s",
              modalities.names(), enum_value(pipe), media_capabilities.describe())
     if media_capabilities.has_media and not modalities.media_names():
@@ -528,64 +197,171 @@ def run_openvino(args):
     interrupt_completions = args.interrupt_completions == enum_value(Turn.on)
     log.info("interrupt mode of /v1/completions: %s", interrupt_completions)
 
-    controller_config = ControllerConfig(model_name=model, max_prompt_len=max_prompt_len,
-                                         model_architectures=model_architectures,
-                                         is_fix_tool_type=is_fix_tool_type,
-                                         chat_template=chat_template,
-                                         is_detect_cycled_tool_call=is_detect_cycled_tool_call,
-                                         modalities=set(modalities.names()),
-                                         max_media_bytes=args.max_media_mb * 1024 * 1024,
-                                         max_media_items=args.max_media_items,
-                                         media_audio_sample_rate=media_capabilities.audio_sample_rate,
-                                         allow_local_media_files=allow_local_media_files,
-                                         interrupt_completions=interrupt_completions)
-
-    handler_config = TokenHandlerConfig(is_detect_looped_inference=is_detect_looped_inference)
-
-    # --- Choose engine: sequential or continuous batching ---
-    log.info("model=%s, device=%s, properties=%s, generate_opts=%s, scheduler_config=%s",
-             model_path, device, pipeline_properties,
-             generate_opts.model_dump(exclude_unset=True, exclude_none=True), scheduler_config)
-    prompt_lookup = args.prompt_lookup == Turn.on.value
-    if prompt_lookup:
-        pipeline_properties["prompt_lookup"] = True
-
-    app = init_sequential_engine(
-        controller_config=controller_config,
-        model_path=str(model_path),
-        device=device_value,
-        vlm=pipe == Pipe.VLM,
-        parser=model_parser,
-        scheduler_config=scheduler_config if not is_device_npu else None,
-        generate_opts=generate_opts,
-        handler_config=handler_config,
-        pipeline_properties=pipeline_properties,
-        stop_signal=app_stop_signal,
-    ) if not is_cb else init_continuous_batching_engine(
-        controller_config=controller_config,
-        model_path=str(model_path),
-        device=device_value,
-        parser=model_parser,
-        generate_opts=generate_opts,
-        handler_config=handler_config,
-        scheduler_config=scheduler_config,
-        pipeline_properties=pipeline_properties,
-        tokenizer_properties=tokenizer_properties,
-        stop_signal=app_stop_signal,
-    )
-
-    # --- Start uvicorn server in a daemon thread ---
-    serve_until_stop(app, args.host, args.port, app_stop_signal, log)
+    return ControllerConfig(model_name=args.model, max_prompt_len=context.max_prompt_len,
+                            model_architectures=context.model_architectures,
+                            is_fix_tool_type=args.fix_tool_type != Turn.off.value,
+                            chat_template=chat_template,
+                            is_detect_cycled_tool_call=args.detect_cycled_tool_call != Turn.off.value,
+                            modalities=set(modalities.names()),
+                            max_media_bytes=args.max_media_mb * 1024 * 1024,
+                            max_media_items=args.max_media_items,
+                            media_audio_sample_rate=media_capabilities.audio_sample_rate,
+                            allow_local_media_files=args.allow_local_media_files == enum_value(Turn.on),
+                            interrupt_completions=interrupt_completions)
 
 
-def get_or_default[T](val: T | None, default: T | None) -> T | None:
-    """Return val if not None, otherwise return default."""
-    return val if not val is None else default
+def resolve_model_path(model: str, models_dir: str) -> tuple[Path, str]:
+    """Resolve the model path and the display name of the model.
+
+    An absolute path is taken as it is; a relative one is looked up in the
+    models directory.
+    """
+    model_path = Path(model)
+    if model_path.is_absolute():
+        if model_path.is_file():
+            # remove gguf ext
+            model_name = model_path.with_suffix("").name
+        else:
+            model_name = model_path.name
+    else:
+        model_name = model
+        model_path = Path(f"{models_dir}/{model}")
+    if not model_path.exists():
+        log.error("file or directory doesn't exists: '%s'", model_path)
+        sys.exit(1)
+    return model_path, model_name
 
 
-def or_default_pipe(pipe: Pipe, default: Pipe) -> Pipe:
-    """Return pipe if truth, otherwise return default."""
-    return pipe or default
+def load_generate_opts(generate_opts_file: str | None) -> GenerateOpts:
+    """Load the generation options of the server, or take the built-in defaults."""
+    if not generate_opts_file:
+        return get_default_generate_opts()
+    log.info("load %s", generate_opts_file)
+    try:
+        with open(generate_opts_file, "r", encoding="utf-8") as file:
+            return GenerateOpts.model_validate_json(file.read())
+    except FileNotFoundError as e:
+        log.error("%s", e)
+        raise e
+
+
+def load_scheduler_opts(scheduler_opts_file: str | None) -> SchedulerOpts:
+    """Load the scheduler options of the server, or take the built-in defaults."""
+    if not scheduler_opts_file:
+        return get_default_scheduler_opts()
+    log.info("load %s", scheduler_opts_file)
+    try:
+        with open(scheduler_opts_file, "r", encoding="utf-8") as file:
+            return SchedulerOpts.model_validate_json(file.read())
+    except FileNotFoundError as e:
+        log.error("%s", e)
+        raise e
+
+
+def load_chat_template(chat_template_file: str | None) -> str:
+    """Load the chat template of the model, empty when there is none."""
+    if not chat_template_file:
+        return ''
+    log.info("load %s", chat_template_file)
+    try:
+        with open(chat_template_file, "r", encoding="utf-8") as file:
+            return file.read()
+    except FileNotFoundError as e:
+        log.error("%s", e)
+        raise e
+
+
+def resolve_max_prompt_len(arg_max_prompt_len: int | None, generate_opts: GenerateOpts,
+                            max_position_embeddings: int | None) -> int | None:
+    """Context length of the server: the CLI switch, the options file or the model itself."""
+    if arg_max_prompt_len:
+        return arg_max_prompt_len
+    default_max_prompt_tokens = get_default_generate_opts().max_prompt_tokens
+    max_prompt_len = generate_opts.max_prompt_tokens or default_max_prompt_tokens
+    return max_prompt_len if max_prompt_len else max_position_embeddings
+
+
+def resolve_pipe_and_parser(args, model_architectures: set[str], media_capabilities) -> tuple[Pipe, ParserType | None]:
+    """Select the pipeline and the parser of the model.
+
+    The ``--pipe`` and ``--parser`` switches win; otherwise the architecture of
+    the model decides, and a model with media encoders is served as a VLM.
+    """
+    pipe: Pipe | None = Pipe[args.pipe] if args.pipe else None
+    parser_type = parser_type_of(args.parser) or detect_parser_type(model_architectures)
+    if parser_type:
+        pipe = or_default_pipe(pipe, default_pipe_of(parser_type, model_architectures))
+
+    if not pipe and media_capabilities.has_media:
+        pipe = or_default_pipe(pipe, Pipe.VLM)
+        log.info("pipe selected by model media capabilities: %s", enum_value(pipe))
+
+    if not pipe:
+        log.error("need define --pipe for model architectures=%s", model_architectures)
+        sys.exit(1)
+
+    return pipe, parser_type
+
+
+def new_model_parser(parser_type: ParserType | None) -> Parser:
+    """Instantiate the parser of the detected model family."""
+    if parser_type == ParserType.qwen3moe:
+        return Qwen3MoeParser()
+    if parser_type == ParserType.gemma4:
+        return Gemma4ChannelParser()
+    if parser_type == ParserType.qwen2:
+        return Qwen2Parser()
+    if parser_type == ParserType.lfm2:
+        return Lfm2Parser()
+    return Parser()
+
+
+def resolve_attention_backend(attention_backend: str | None, pipe: Pipe, is_device_npu: bool,
+                               parser_type: ParserType | None) -> str | None:
+    """Select the attention kernel of the pipeline.
+
+    The continuous batching pipeline does not support the PA kernel, and the NPU
+    and the gemma4 models use their own default, so the kernel is only forced
+    for the plain CPU and GPU pipelines.
+    """
+    is_cb = pipe == Pipe.CB
+    is_gemma4 = parser_type == ParserType.gemma4
+    if is_cb and attention_backend == enum_value(AttentionBackend.PA):
+        log.info("erase attention_backend=%s for unsupported pipe=%s", attention_backend, enum_value(pipe))
+        return attention_backend
+    if attention_backend is None and not (is_cb or is_device_npu or is_gemma4):
+        attention_backend = enum_value(AttentionBackend.PA)
+        log.info("force attention_backend=%s", attention_backend)
+    return attention_backend
+
+
+def build_pipeline_properties(args, device: DeviceType, model_cache_dir: str,
+                              max_prompt_len: int | None,
+                              attention_backend: str | None) -> dict[str, Any]:
+    """Build the pipeline properties of the target device."""
+    cpu_properties = build_cpu_properties(model_cache_dir, args)
+    gpu_properties = build_gpu_properties(model_cache_dir, args)
+    npu_properties = build_npu_properties(model_cache_dir, args, max_prompt_len)
+
+    pipeline_properties = select_pipeline_properties(device, cpu_properties, gpu_properties, npu_properties)
+    return apply_common_properties(pipeline_properties, args.kv_cache_precision, attention_backend)
+
+
+def new_draft_model(args, draft_model_path: str, model_cache_dir: str, device: str):
+    """Build the optional draft model of the speculative decoding."""
+    draft_properties: dict[str, Any] = {
+        "CACHE_DIR": model_cache_dir
+    }
+    if args.eagle3_mode == Turn.on.value:
+        draft_properties["eagle3_mode"] = True
+    if args.mtp_mode == Turn.on.value:
+        draft_properties["mtp_mode"] = True
+    if args.dflash_mode == Turn.on.value:
+        draft_properties["dflash_mode"] = True
+    draft_scheduler_config = SchedulerConfig()
+    # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
+    return py_openvino_genai.draft_model(models_path=draft_model_path, device=device,
+                                          scheduler_config=draft_scheduler_config, **draft_properties)
 
 
 # Pipeline factory over the pybind11 openvino_genai API; kwargs mirror its constructors.
@@ -633,7 +409,6 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
     if not vision_encoder_properties:
         vision_encoder_properties = {}
 
-    # --- Instantiate the ContinuousBatchingPipeline ---
     # --- Instantiate the ContinuousBatchingPipeline ---
     try:
         # pylint: disable-next=c-extension-no-member  # pybind11 module: attribute exists at runtime
@@ -837,8 +612,3 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=enum_value(Turn.on), choices=enum_values(Turn),
                              help="interrupt the running /v1/completions request when a new one arrives, "
                                   "the new request is served first")
-
-
-def enum_values[T: Enum](enum_class: type[T]) -> list[str]:
-    """Return the CLI-choice values of an enum class."""
-    return [member.value for member in enum_class]

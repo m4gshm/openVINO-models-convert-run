@@ -1,14 +1,12 @@
 """Repair of model-generated tool calls: per-tool argument sanitizing for Veai IDE tools."""
 import json
 import logging
-import re
-from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import json_repair
 
-from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH, OS
+from agent.client.user_context import UserContext, ROOT, DEFAULT_DEPTH
 from agent.client.veai.tool import edit_file, read_file, write_file, search_for_text, ask_user_with_options, list_dir, \
     search_file_by_name, file_structure, run_command, run_configuration, safe_delete
 from agent.client.veai.tool.ask_user_with_options import AskUserWithOptions
@@ -22,7 +20,8 @@ from agent.client.veai.tool.safe_delete import SafeDelete
 from agent.client.veai.tool.search_file_by_name import SearchFileByName
 from agent.client.veai.tool.search_for_text import SearchForText
 from agent.client.veai.tool.write_file import WriteFile
-from agent.openai.chat_api import ROLE_ASSISTANT
+from agent.client.veai.tool_call_args import as_bool_or_none, as_int_or_none, clean_file_path, \
+    find_target_file_from_prev_tool_call, fix_windows_path, get_args, get_one_of, get_target_file
 from agent.openai.chat_completions_api import ChatCompletionFunctionToolParam, FunctionDefinitionParameters
 from agent.parser import ParsedFunctionCall
 from agent.parser.json_fixer import try_to_parse_json_arguments
@@ -32,9 +31,10 @@ NEW_LINE_WINDOWS = "\r\n"
 
 GEMMA_4 = "Gemma4ForConditionalGeneration"
 
-TARGET_FILE = "target_file"
-
 log = logging.getLogger(__name__)
+
+
+ToolFixer = Callable[[ParsedFunctionCall, UserContext | None], list[ParsedFunctionCall] | ParsedFunctionCall]
 
 
 def veai_fix_incorrect_arguments(function: ParsedFunctionCall, user_context: UserContext | None = None) -> \
@@ -102,32 +102,14 @@ def fix_file_structure(function: ParsedFunctionCall, context: UserContext | None
     return function
 
 
-def clean_file_path(target_file):
-    """Drop stray braces and unescaped quotes that leaked into a file path."""
-    if not target_file:
-        return target_file
-
-    cleaned_target_file = ""
-    for i, s in enumerate(target_file):
-        ignore = s in ("}", "]")
-        if not ignore and s in ("\"", "'"):
-            prev = target_file[i - 1] if i > 0 else None
-            if prev != "\\":
-                ignore = True
-
-        if not ignore:
-            cleaned_target_file += s
-    log.debug("clean_file_path: path=%s, cleaned=%s", target_file, cleaned_target_file)
-    return cleaned_target_file
-
-
 def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None = None) -> \
         list[ParsedFunctionCall] | ParsedFunctionCall:
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks  # model-output repair for the richest IDE tool; splitting is a separate refactor
     """Repair edit_file arguments: normalize edits, resolve target file, rebuild old_text."""
     args = get_args(function)
+    target_file: Any = None
     target_file, _invalid = get_target_file(args, context)
-    edits = args.get("edits")
+    edits: Any = args.get("edits")
 
     if isinstance(edits, str):
         edits = try_to_parse_json_arguments(edits)
@@ -211,25 +193,24 @@ def fix_edit_file(function: ParsedFunctionCall, context: UserContext | None = No
                 # try to merge
                 _set_prev = False
                 _merged = False
-                prev_old_text = None
-                prev_new_text = None
+                prev_old_text: str | None = None
+                prev_new_text: str | None = None
                 for edit in edits:
                     if isinstance(edit, dict):
                         old_text_lies = edit.get("old_text")
                         new_text_lines = edit.get("new_text")
                         if prev_old_text is None and prev_new_text is None:
                             _set_prev = True
-                            prev_old_text = old_text_lies
-                            prev_new_text = new_text_lines
+                            prev_old_text = old_text_lies if isinstance(old_text_lies, str) else None
+                            prev_new_text = new_text_lines if isinstance(new_text_lines, str) else None
                         else:
-                            if prev_old_text and old_text_lies and isinstance(old_text_lies, str) and isinstance(
-                                    prev_old_text,
-                                    str):
+                            if prev_old_text and isinstance(old_text_lies, str) and isinstance(
+                                    prev_new_text, str):
                                 in_prev = old_text_lies.startswith(prev_old_text)
                                 if in_prev:
                                     log.debug("merge in pre, new_text '%s' with '%s' for old_text '%s' and '%s'",
                                               prev_new_text, new_text_lines, prev_old_text, old_text_lies)
-                                    prev_new_text = prev_new_text + new_text_lines
+                                    prev_new_text = prev_new_text + (new_text_lines or "")
                                     prev_old_text = old_text_lies
                                     _merged = True
                     elif isinstance(edit, list):
@@ -275,8 +256,9 @@ def rebuild_edit_texts_using_file_content(new_text: str, target_file: str, conte
     file_content_lines: list[str] = split_lines(file_content_str) if file_content_str else []
 
     if not file_content_lines:
+        context_files = context.files.get_files() if context else []
         log.debug("no target_file content in context, target_file=%s, context_files=%s",
-                  target_file, context.files.get_files())
+                  target_file, context_files)
         return None, ""
 
     stop = False
@@ -338,167 +320,219 @@ def split_lines(file_content_str: str) -> list[str]:
     return file_content_str.split(NEW_LINE_WINDOWS if NEW_LINE_WINDOWS in file_content_str else NEW_LINE_UNIX)
 
 
-def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], context: UserContext,
+def try_find_target_file_from_prev_tool_call_if_need(args: dict[str, Any], context: UserContext | None,
                                                      function: ParsedFunctionCall,
-                                                     target_file: str | Any) -> Any | None:
-    """For Gemma4 recover a missing target_file from the previous tool call."""
+                                                     target_file: str | Any) -> tuple[Any, bool]:
+    """For Gemma4 recover a missing target_file from the previous tool call.
+
+    Returns the resolved target file and whether it was recovered.
+    """
     if not target_file and (context and GEMMA_4 in context.model_architectures):
         prev_target_file = find_target_file_from_prev_tool_call(args, context, function.name, target_file)
         return prev_target_file, not prev_target_file is None
-    return target_file, None
+    return target_file, False
 
 
-def handle_edits(edits: dict[str, Any] | Iterable) -> tuple[list[dict[str, Any]], list]:
-    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks  # malformed-edits normalization; splitting is a separate refactor
-    """Normalize a malformed edits payload into a list of edit dicts."""
-    new_text = None
-    new_text_i = None
-    old_text = None
-    old_text_i = None
-    on_delete_i = []
-    anonymous_edits = []
-    if isinstance(edits, dict):
-        edits = [edits]
-    elif not isinstance(edits, Iterable):
-        log.warning("unexpected edits type='%s', edits='%s'", type(edits), edits)
-    i = 0
-    while i < len(edits):
-        edit = edits[i]
-        if isinstance(edit, dict):
-            if len(edit) == 0:
-                on_delete_i.append(i)
-            else:
-                edit_new_text = replace_by_possibles("new_text", ["new_config", "new_text="], edit)
-                edit_old_text = replace_by_possibles("old_text", ["old_config", "old_text="], edit)
+class _EditNormalizer:  # pylint: disable=too-many-instance-attributes,too-few-public-methods  # state of the edits normalization
+    """Normalizes the malformed edits payloads of the model.
 
-                if not new_text_i:
-                    if edit_new_text:
-                        new_text = edit_new_text
-                        new_text_i = i
-                if not old_text_i:
-                    if edit_old_text:
-                        old_text = edit_old_text
-                        old_text_i = i
+    The model may send the edits as a single dict, as a list of dicts or as a
+    flat list of values; the normalizer turns them into a list of edit dicts and
+    collects the values that could not be attributed to any edit.
+    """
 
-                if old_text_i == new_text_i:
-                    # expected
-                    old_text_i = None
-                    new_text_i = None
-                elif old_text_i is not None and new_text_i is not None:
-                    # merge
-                    edits[new_text_i]["old_text"] = old_text
-                    del edits[old_text_i]["old_text"]
-                    if len(edits[old_text_i]) == 0:
-                        on_delete_i.append(old_text_i)
-                    old_text_i = None
-                    new_text_i = None
-        elif isinstance(edit, (list, set)):
-            first = next(iter(edit)) if len(edit) > 0 else None
-            _second = next(iter(edit)) if len(edit) > 1 else None
-            if new_text is None and old_text:
-                new_text = first
-                edits[old_text_i]["new_text"] = new_text
-                del edit[0]
-            elif old_text is None and new_text:
-                old_text = first
-                edits[new_text_i]["old_text"] = old_text
-                del edit[0]
-                # if len(edit) == 0:
-                #     on_delete_i.append(i)
-            else:
-                anonymous_edits.extend(edit)
-            on_delete_i.append(i)
-        elif edit in ("old_text", "new_text"):
-            next_i = i + 1
-            next_e = edits[next_i] if i < len(edits) + 1 else None
-            if not next_e is None:
-                edits[i] = {edit: next_e}
-                on_delete_i.append(next_i)
-                i = next_i
-            else:
-                anonymous_edits.append(edit)
-                on_delete_i.append(i)
-        else:
-            anonymous_edits.append(edit)
-            on_delete_i.append(i)
-        i += 1
+    def __init__(self, edits: Any):
+        self.items = _as_edit_list(edits)
+        self.new_text: Any = None
+        self.new_text_i: int | None = None
+        self.old_text: Any = None
+        self.old_text_i: int | None = None
+        self.on_delete_i: list[int] = []
+        self.anonymous_edits: list[Any] = []
 
-    for i in reversed(on_delete_i):
-        try:
-            del edits[i]
-        except Exception as e:
-            log.error("error on del edits[%s]: %s, edits=%s", i, e, edits)
-            raise e
-
-    unused_anonymous_edits = []
-    if anonymous_edits:
-        expect_next_next = False
-        expect_old_text = False
-        dirty_edits = []
-        edit = {}
-        for v in anonymous_edits:
-            if expect_next_next:
-                edit["new_text"] = v
-                expect_next_next = False
-            elif expect_old_text:
-                edit["old_text"] = v
-                expect_old_text = False
-            elif v == "new_text":
-                if "new_text" in edit:
-                    dirty_edits.append(edit)
-                    edit = {}
-                expect_next_next = True
-            elif v == "old_text":
-                if "old_text" in edit:
-                    dirty_edits.append(edit)
-                    edit = {}
-                expect_old_text = True
-            else:
-                unused_anonymous_edits.append(v)
-
-        if edit:
-            dirty_edits.append(edit)
-
-        if isinstance(edits, list):
-            edits.extend(dirty_edits)
-            unused_anonymous_edits.extend(handle_edits(edits))
-
-    if isinstance(edits, list):
-        # merge with next if its need
-        on_delete_i = []
+    def normalize(self) -> tuple[list[Any], list[Any]]:
+        """Normalize the edits into a list of edit dicts plus the unattributed values."""
         i = 0
-        while i < len(edits):
-            edit = edits[i]
+        while i < len(self.items):
+            edit = self.items[i]
             if isinstance(edit, dict):
-                has_next_text = "new_text" in edit
-                has_old_text = "old_text" in edit
-                if has_next_text and has_old_text:
-                    pass
-                else:
-                    ii = i + 1
-                    if ii < len(edits):
-                        next_edit = edits[ii]
-                        if "new_text" in next_edit and "old_text" in next_edit:
-                            pass
-                        else:
-                            if has_next_text and "old_text" in next_edit:
-                                edit["old_text"] = next_edit["old_text"]
-                                on_delete_i.append(ii)
-                                i = ii
-                            elif has_old_text and "new_text" in next_edit:
-                                edit["new_text"] = next_edit["new_text"]
-                                on_delete_i.append(ii)
-                                i = ii
+                self._handle_dict_edit(edit, i)
+            elif isinstance(edit, (list, set)):
+                self._handle_group_edit(edit, i)
+            elif edit in ("old_text", "new_text"):
+                i = self._handle_keyword_edit(edit, i)
+            else:
+                self.anonymous_edits.append(edit)
+                self.on_delete_i.append(i)
             i += 1
 
-        for i in reversed(on_delete_i):
-            try:
-                del edits[i]
-            except Exception as e:
-                log.error("error on del edits[%s]: %s, edits=%s", i, e, edits)
-                raise e
+        _delete_indices(self.items, self.on_delete_i)
 
-    return edits, unused_anonymous_edits
+        unused_anonymous_edits: list[Any] = []
+        if self.anonymous_edits:
+            dirty_edits, unused_anonymous_edits = _group_anonymous_edits(self.anonymous_edits)
+            self.items.extend(dirty_edits)
+            unused_anonymous_edits.extend(handle_edits(self.items)[1])
+
+        _merge_incomplete_edits(self.items)
+
+        return self.items, unused_anonymous_edits
+
+    def _handle_dict_edit(self, edit: dict[str, Any], i: int) -> None:
+        """Take the texts of a well formed edit, or merge it with its neighbour."""
+        if len(edit) == 0:
+            self.on_delete_i.append(i)
+            return
+        edit_new_text = replace_by_possibles("new_text", ["new_config", "new_text="], edit)
+        edit_old_text = replace_by_possibles("old_text", ["old_config", "old_text="], edit)
+
+        if not self.new_text_i and edit_new_text:
+            self.new_text = edit_new_text
+            self.new_text_i = i
+        if not self.old_text_i and edit_old_text:
+            self.old_text = edit_old_text
+            self.old_text_i = i
+
+        if self.old_text_i == self.new_text_i:
+            # the edit carries both texts, as expected
+            self.old_text_i = None
+            self.new_text_i = None
+        elif self.old_text_i is not None and self.new_text_i is not None:
+            # the texts landed in two different edits: merge them back
+            self.items[self.new_text_i]["old_text"] = self.old_text
+            del self.items[self.old_text_i]["old_text"]
+            if len(self.items[self.old_text_i]) == 0:
+                self.on_delete_i.append(self.old_text_i)
+            self.old_text_i = None
+            self.new_text_i = None
+
+    def _handle_group_edit(self, edit: list[Any] | set[Any], i: int) -> None:
+        """Take a group of loose values as the text the pending edit is missing."""
+        first = next(iter(edit)) if len(edit) > 0 else None
+        if self.new_text is None and self.old_text and self.old_text_i is not None:
+            self.new_text = first
+            self.items[self.old_text_i]["new_text"] = first
+            _drop_first(edit)
+        elif self.old_text is None and self.new_text and self.new_text_i is not None:
+            self.old_text = first
+            self.items[self.new_text_i]["old_text"] = first
+            _drop_first(edit)
+        else:
+            self.anonymous_edits.extend(edit)
+        self.on_delete_i.append(i)
+
+    def _handle_keyword_edit(self, edit: Any, i: int) -> int:
+        """Pair a text keyword with the value that follows it."""
+        next_i = i + 1
+        next_e = self.items[next_i] if next_i < len(self.items) else None
+        if not next_e is None:
+            self.items[i] = {edit: next_e}
+            self.on_delete_i.append(next_i)
+            return next_i
+        self.anonymous_edits.append(edit)
+        self.on_delete_i.append(i)
+        return i
+
+
+def handle_edits(edits: Any) -> tuple[list[Any], list[Any]]:
+    """Normalize a malformed edits payload into a list of edit dicts."""
+    return _EditNormalizer(edits).normalize()
+
+
+def _as_edit_list(edits: Any) -> list[Any]:
+    """Normalize the edits payload into a mutable list of edit items."""
+    if isinstance(edits, dict):
+        return [edits]
+    if isinstance(edits, Iterable) and not isinstance(edits, (str, bytes)):
+        return list(edits)
+    log.warning("unexpected edits type='%s', edits='%s'", type(edits), edits)
+    return []
+
+
+def _drop_first(edit: list[Any] | set[Any]) -> None:
+    """Drop the first value of the edit item; a set has no order, so it is left as it is."""
+    if isinstance(edit, list) and edit:
+        del edit[0]
+
+
+def _delete_indices(items: list[Any], indices: list[int]) -> None:
+    """Remove the items at the given positions, the last one first."""
+    for i in reversed(indices):
+        try:
+            del items[i]
+        except IndexError as e:
+            log.error("error on del edits[%s]: %s, edits=%s", i, e, items)
+            raise e
+
+
+def _group_anonymous_edits(anonymous_edits: list[Any]) -> tuple[list[dict[str, Any]], list[Any]]:
+    """Group the loose values into edit dicts, keeping the values that fit none."""
+    expect_next_next = False
+    expect_old_text = False
+    dirty_edits: list[dict[str, Any]] = []
+    unused: list[Any] = []
+    edit: dict[str, Any] = {}
+    for v in anonymous_edits:
+        if expect_next_next:
+            edit["new_text"] = v
+            expect_next_next = False
+        elif expect_old_text:
+            edit["old_text"] = v
+            expect_old_text = False
+        elif v == "new_text":
+            if "new_text" in edit:
+                dirty_edits.append(edit)
+                edit = {}
+            expect_next_next = True
+        elif v == "old_text":
+            if "old_text" in edit:
+                dirty_edits.append(edit)
+                edit = {}
+            expect_old_text = True
+        else:
+            unused.append(v)
+
+    if edit:
+        dirty_edits.append(edit)
+    return dirty_edits, unused
+
+
+def _merge_incomplete_edits(items: list[Any]) -> None:
+    """Merge an edit that carries only one text with the edit next to it."""
+    on_delete_i: list[int] = []
+    i = 0
+    while i < len(items):
+        edit = items[i]
+        if isinstance(edit, dict):
+            merged_i = _merge_with_next_edit(items, edit, i)
+            if merged_i is not None:
+                on_delete_i.append(merged_i)
+                i = merged_i
+        i += 1
+
+    _delete_indices(items, on_delete_i)
+
+
+def _merge_with_next_edit(items: list[Any], edit: dict[str, Any], i: int) -> int | None:
+    """Complete an edit that carries only one text from the edit next to it.
+
+    Returns the position of the edit that was merged in and must be dropped.
+    """
+    if "new_text" in edit and "old_text" in edit:
+        return None
+    next_i = i + 1
+    next_edit = items[next_i] if next_i < len(items) else None
+    if not isinstance(next_edit, dict):
+        return None
+    if "new_text" in next_edit and "old_text" in next_edit:
+        return None
+    if "new_text" in edit and "old_text" in next_edit:
+        edit["old_text"] = next_edit["old_text"]
+        return next_i
+    if "old_text" in edit and "new_text" in next_edit:
+        edit["new_text"] = next_edit["new_text"]
+        return next_i
+    return None
 
 
 def replace_by_possibles(expected_key: str, possible_keys: list[str], params: dict[str, Any]) -> Any:
@@ -551,9 +585,9 @@ def fix_write_file(function: ParsedFunctionCall, context: UserContext | None = N
 def fix_safe_delete(function: ParsedFunctionCall, _context: UserContext | None) -> ParsedFunctionCall:
     """Repair safe_delete arguments: rename file_path keys to path."""
     args = get_args(function)
-    targets = args.get("targets")
+    targets: list[dict[str, Any]] = args.get("targets") or []
     invalid = False
-    if targets and isinstance(targets, list):
+    if isinstance(targets, list):
         for target in targets:
             if isinstance(target, dict) and not "path" in target:
                 path = target.get("file_path", None)
@@ -678,62 +712,6 @@ def fix_read_file(function: ParsedFunctionCall, context: UserContext | None = No
     return function
 
 
-def get_target_file(args, context: UserContext | None, additional_fields: list[str] | None = None) -> tuple[str, bool]:
-    """Resolve the target file from the primary or alternative argument fields."""
-    target_file = args.get(TARGET_FILE)
-
-    invalid = not target_file
-    if invalid:
-        possible_fields = ["file_path", "file", "path", "edit_scope", "directory_path"]
-        if additional_fields:
-            possible_fields.extend(additional_fields)
-        target_file = get_one_of(args, possible_fields)
-
-    target_file, fixed = fix_windows_path(target_file, context)
-    if fixed:
-        invalid = True
-
-    return target_file, invalid
-
-
-def get_one_of(args: dict[str, Any], one_of_field: list[str]) -> str | None:
-    """Return the first non-None value among the candidate argument fields."""
-    for field in one_of_field:
-        target_file = args.get(field)
-        if not target_file is None:
-            return target_file
-    return None
-
-
-def find_target_file_from_prev_tool_call(args, context: UserContext | None, function_name: str,
-                                         target_file: Any | None) -> Any | None:
-    """Scan previous assistant tool calls of the same tool for a target_file."""
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("no required target_file, trying to get from previous cool call of '%s', args='%s'",
-                  function_name, args)
-    else:
-        log.info("no required target_file, trying to get from previous cool call of '%s'", function_name)
-
-    messages = context.messages if context else []
-    for message in reversed(messages):
-        if message.role == ROLE_ASSISTANT:
-            for tool_call in message.tool_calls or []:
-                function = tool_call.function
-                if function.name == function_name:
-                    try:
-                        arguments = json.loads(function.arguments)
-                    except JSONDecodeError:
-                        log.debug("error on function arguments parsing: tool_call.id=%s, function.name=%s, "
-                                  "arguments='%s'", tool_call.id, function.name, function.argumentsl)
-                        arguments = {}
-
-                    target_file = arguments.get(TARGET_FILE)
-                    if target_file:
-                        log.info("gets target file from previous tool call: tool_call.id=%s, "
-                                 "function.name=%s, target_file='%s'", tool_call.id, function.name, target_file)
-    return target_file
-
-
 def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> ParsedFunctionCall:
     """Repair list_dir arguments: default directory to root and clamp the depth."""
     args = get_args(function)
@@ -751,7 +729,8 @@ def fix_list_dir(function: ParsedFunctionCall, context: UserContext | None) -> P
     depth = args.get("depth")
     if not depth:
         invalid = True
-        depth = context.max_list_dir_depth(depth) if context else None
+        # the depth limit depends on the directory the listing starts from
+        depth = context.max_list_dir_depth(directory_path) if context else None
         if depth is None:
             depth = DEFAULT_DEPTH
 
@@ -798,77 +777,6 @@ def fix_run_command(function: ParsedFunctionCall, context: UserContext | None) -
                                              is_background=is_background, safe_to_run=safe_to_run)
         return new_function
     return function
-
-
-def fix_windows_path(path: Any | None, context: UserContext | None) -> tuple[Any, bool]:
-    """Normalize POSIX-style paths into Windows drive paths for Windows sessions."""
-    fixed = False
-    if path and isinstance(path, str) and context and context.os_type == OS.Windows:
-        # SERA case
-        if path.startswith("/"):
-            fixed = True
-            path = path[1:]
-
-        p = Path(path)
-        parts = p.parts
-        if len(parts) > 0:
-            first = parts[0]
-            stripped = False
-            while first == "\\" and len(parts) > 1:
-                stripped = True
-                first = parts[1]
-                parts = parts[1:]
-
-            win_disk_letter_size = 1
-            if not (first.endswith(":/") or first.endswith(":\\")) and len(first) == win_disk_letter_size:
-                new_first = first + (":/" if "/" in path else ":\\")
-                new_parts = (new_first,) + parts[1:]
-                path = str(Path().joinpath(*new_parts))
-                fixed = True
-            elif stripped:
-                path = str(Path().joinpath(*parts))
-                fixed = True
-    return path, fixed
-
-
-def get_args(function: ParsedFunctionCall) -> dict[str, Any]:
-    """Return the parsed function arguments as a dict, empty when missing."""
-    return function.arguments or {}
-
-
-def as_int_or_none(val, name: str) -> tuple[int | None, bool]:
-    """Return (int, False) on success or (recovered int or None, True) when repaired."""
-    result = as_type_or_none(int, val, name)
-    if result is not None:
-        return result, False
-    if isinstance(val, str):
-        match = re.search(r'-\d+|\d+', val)
-        return int(match.group()) if match else None, True
-    return None, False
-
-
-def as_bool_or_none(val, name: str) -> bool | None:
-    """Return the value as bool: bools pass, strings are mapped, anything else None."""
-    if isinstance(val, bool):
-        return val
-    if isinstance(val, str):
-        return val.lower() == "true"
-    return as_type_or_none(bool, val, name)
-
-
-def as_type_or_none[T](t: type[T], val, name: str) -> T | None:
-    """Cast val to t, logging and returning None when the cast fails."""
-    if not val is None and not isinstance(val, t):
-        try:
-            return t(val)
-        except ValueError:
-            log.warning("%s is not an %s: '%s'", name, t, val)
-    return None
-
-
-def read_args_as_json(args: dict[str, Any]) -> Any:
-    """Pass arguments through unchanged (JSON shaping hook)."""
-    return args
 
 
 def veai_fix_tool_definition_optional_property_as_null_type(
@@ -950,7 +858,7 @@ def fix_run_configuration(function: ParsedFunctionCall, context: UserContext | N
     return function
 
 
-_TOOL_FIXERS = {
+_TOOL_FIXERS: dict[str, ToolFixer] = {
     run_command.FUNCTION_NAME: fix_run_command,
     list_dir.FUNCTION_NAME: fix_list_dir,
     file_structure.FUNCTION_NAME: fix_file_structure,

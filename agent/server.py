@@ -3,8 +3,6 @@ import asyncio
 import logging
 import threading
 from contextlib import asynccontextmanager
-from enum import Enum
-from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -36,11 +34,6 @@ def serve_until_stop(app: FastAPI, host: str, port: int, stop_event: threading.E
         logger.debug("main thread finish")
     except Exception as e:  # pylint: disable=broad-exception-caught  # the wait loop must outlive any error
         logger.debug("main thread finish with error: %s", e)
-
-
-def enum_value[T: Enum](member: T) -> Any:
-    """Return the raw value of an enum member."""
-    return member.value
 
 
 def new_app(controller: BaseController) -> FastAPI:

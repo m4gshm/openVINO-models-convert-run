@@ -3,7 +3,7 @@ import json
 import logging
 
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT
-from agent.inference.token_handler import markdown_bold, markdown_json, markdown_back_tick, markdown_file_content
+from agent.common.markdown import markdown_bold, markdown_json, markdown_back_tick, markdown_file_content
 from agent.multimodal.content_parts import content_text
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, Function
 from agent.openai.middleware_checkpoint import is_middleware_checkpoint

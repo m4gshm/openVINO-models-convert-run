@@ -43,11 +43,26 @@ uvicorn agent.server:app --host 0.0.0.0 --port 8000
 
 - **REST API** (`agent/openai/`) — OpenAI-compatible endpoints (chat completions, models list)
 - **Server** (`agent/server.py`) — FastAPI wrapping the agent engine
-- **Inference** (`agent/inference/token_handler.py`) — token streaming, markdown formatting, tool call fixing
+- **OpenVINO mode** (`agent/openvino/`) — CLI option enums, model detection (`config.json`),
+  scheduler config and the pipeline properties per device
+- **Inference** (`agent/inference/token_handler.py`) — token streaming and tool call fixing
+- **Common** (`agent/common/`) — logging, memory metrics, markdown formatting helpers
 - **Parsers** (`agent/parser/`) — model-specific prompt parsers (Gemma, Qwen, LFM2)
 - **Multimodal** (`agent/multimodal/`) — input modality detection, content parts parsing, PNG/WAV
   decoding into `ov.Tensor`, media tags for the prompt
 - **Tools** (`agent/tool/`) — IDE tool implementations (read_file, edit_file, list_dir, etc.)
+
+### Layering
+
+The layers depend downwards only:
+
+```
+server_openvino / server_openai  ->  openai/  ->  inference/  ->  parser/
+                                  ->  multimodal/  ->  common/
+```
+
+Helpers used by more than one layer live in `agent/common/` (for example the
+`markdown_*` helpers); they must not be pulled out of a higher layer.
 
 ## Multimodal Input
 
@@ -133,7 +148,7 @@ keystroke matters.
 
 | Argument | Default | Meaning |
 | --- | --- | --- |
-| `--interrupt_completions` | off | interrupt the running `/v1/completions` request when a new one arrives |
+| `--interrupt_completions` | on | interrupt the running `/v1/completions` request when a new one arrives |
 
 How it works:
 
