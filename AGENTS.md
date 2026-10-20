@@ -42,6 +42,8 @@ uvicorn agent.server:app --host 0.0.0.0 --port 8000
 ### Core Components
 
 - **REST API** (`agent/openai/`) — OpenAI-compatible endpoints (chat completions, models list)
+- **Ollama API** (`agent/ollama/`) — Ollama-compatible endpoints (`/api/tags`, `/api/show`,
+  `/api/chat`, `/api/generate`), a translation layer on top of the OpenAI requests
 - **Server** (`agent/server.py`) — FastAPI wrapping the agent engine
 - **OpenVINO mode** (`agent/openvino/`) — CLI option enums, model detection (`config.json`),
   scheduler config and the pipeline properties per device
@@ -59,6 +61,7 @@ The layers depend downwards only:
 ```
 server_openvino / server_openai  ->  openai/  ->  inference/  ->  parser/
                                   ->  multimodal/  ->  common/
+                         ollama/  ->  openai/
 ```
 
 Helpers used by more than one layer live in `agent/common/` (for example the
@@ -138,6 +141,31 @@ Every request repeats the whole conversation (the OpenAI protocol is stateless),
 earlier turns is sent and decoded again; each item becomes an OpenVINO tag in the prompt
 (`<ov_genai_image_0>`, `<ov_genai_video_1>`). Media expands the prompt with many tokens, so
 `--max_prompt_len` must leave room for it.
+
+## Ollama-Compatible API
+
+Clients that speak the Ollama protocol (some IDE plugins, `ollama` SDKs) probe the server with
+`GET /api/tags` before anything else. The server answers that protocol on the same port:
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/tags` | GET | list of the served models |
+| `/api/show` | POST | details of one model |
+| `/api/version` | GET | version of the API |
+| `/api/chat` | POST | chat completion, Ollama message shape |
+| `/api/generate` | POST | completion of a raw prompt |
+
+The endpoints are a translation layer (`agent/ollama/`) on top of the OpenAI-compatible
+requests: an Ollama request is converted into an OpenAI chat request, run by the engine, and
+the resulting chunks are converted back into the Ollama shape.
+
+- `options` of the request are mapped onto the OpenAI parameters: `temperature`, `top_p`,
+  `num_predict` → `max_tokens`, `stop`.
+- The images of a message (`images`, base64) become OpenAI image content parts, so the
+  multimodal path is the same as for the OpenAI clients.
+- The streaming responses are **JSON lines** (NDJSON, `application/x-ndjson`), not SSE: one
+  JSON object per line, the last one carrying `done: true` and `done_reason`.
+- A non-streaming request answers with a single JSON object.
 
 ## Interrupt Mode for Autocomplete
 

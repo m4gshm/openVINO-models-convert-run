@@ -389,9 +389,19 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             else await self.handle_chat_completion(body, request)
 
     @abstractmethod
+    async def chat_chunks(self, body: ChatCompletionRequest,
+                           request: Request) -> Iterable[ChatCompletionChunk]:
+        """Produce the chunks of a chat completion request; implemented per engine.
+
+        The chunks are the engine-neutral intermediate form: the OpenAI endpoint wraps
+        them into SSE or a aggregated response, the Ollama endpoint into JSON lines.
+        """
+
     async def handle_chat_completion(self, body: ChatCompletionRequest,
                                      request: Request) -> StreamingResponse | ChatCompletion:
-        """Produce chunks for a chat completion request; implemented per engine."""
+        """Run a chat completion request and wrap its chunks into an HTTP response."""
+        chunks = await self.chat_chunks(body, request)
+        return await new_http_response_chat(is_stream_request(body), chunks)
 
     @abstractmethod
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
@@ -444,10 +454,9 @@ class BaseOVController(BaseController):
         text = self.tokenizer.decode(request.tokens).strip()
         return JSONResponse(content={"text": text})
 
-    async def handle_chat_completion(self, body: ChatCompletionRequest,
-                                     request: Request) -> StreamingResponse | ChatCompletion:
+    async def chat_chunks(self, body: ChatCompletionRequest,
+                           request: Request) -> Iterable[ChatCompletionChunk]:
         """Run the full local pipeline: prepare messages, build prompt, generate chunks."""
-        stream = is_stream_request(body)
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
         tools_raw, function_parameters = self.prepare_tools(body.tools, is_veai)
@@ -458,21 +467,20 @@ class BaseOVController(BaseController):
                 self.prompt_escaper)
         except MediaError as e:
             log.info("multimodal request rejected: %s", e)
-            return await new_http_response_chat(stream, [new_chat_completion_chunk(
+            return [new_chat_completion_chunk(
                 response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name or "",
-                content=str(e), finish_reason=STOP)])
+                content=str(e), finish_reason=STOP)]
 
         prompt = self.build_prompt(prepared.messages, tools_raw)
         generation_config = new_generation_config(self.generate_opts,
                                                   GenerationRequest.of_chat_request(body))
         over_limit_response = self.check_prompt_of(prompt, generation_config, prepared.media)
         if over_limit_response:
-            return await new_http_response_chat(stream, [over_limit_response])
+            return [over_limit_response]
 
         token_handler = self.new_token_handler(prompt, messages, is_veai, function_parameters, request)
-        chunk_generator = self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                               token_handler=token_handler, media=prepared.media)
-        return await new_http_response_chat(stream, chunk_generator)
+        return self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                    token_handler=token_handler, media=prepared.media)
 
     def check_prompt_of(self, prompt: str, generation_config: GenerationConfig,
                         media: MediaInputs) -> ChatCompletionChunk | None:

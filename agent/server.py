@@ -8,6 +8,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from agent.ollama.ollama_handlers import OllamaApi
 from agent.openai.engine_rest_common import BaseController
 from agent.openai.logger_rest import LoggingRoute
 
@@ -65,6 +66,14 @@ def new_app(controller: BaseController) -> FastAPI:
     app_router.post("/chat/completion")(controller.chat)
     app_router.get("/health")(controller.health)
     app_router.get("/models")(controller.models)
+
+    # Ollama compatible endpoints
+    ollama = OllamaApi(controller)
+    app_router.get("/api/tags", response_model_exclude_none=True)(ollama.tags)
+    app_router.get("/api/version", response_model_exclude_none=True)(ollama.version)
+    app_router.post("/api/show", response_model_exclude_none=True)(ollama.show)
+    app_router.post("/api/chat", response_model_exclude_none=True)(ollama.chat)
+    app_router.post("/api/generate", response_model_exclude_none=True)(ollama.generate)
     # app_router.post("/tokenize")(controller.tokenize)
     # app_router.post("/detokenize")(controller.detokenize)
 

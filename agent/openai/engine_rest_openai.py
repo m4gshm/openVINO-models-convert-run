@@ -5,7 +5,7 @@ import threading
 import uuid
 from typing import Iterable
 
-from openai.types.chat import ChatCompletionChunk, ChatCompletion
+from openai.types.chat import ChatCompletionChunk
 
 from agent.openai.chat_completions_api import ChatCompletionRequest
 from agent.openai.models_api import ModelsListResponse, ModelObject
@@ -17,12 +17,11 @@ _openai_types_chat = importlib.import_module('openai.types.chat')
 # The imports below must run after the openai importlib workaround above.
 # pylint: disable=wrong-import-position,wrong-import-order,ungrouped-imports
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
 
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT, new_chat_completion_chunk
-from agent.openai.engine_rest_common import ControllerConfig, BaseController, is_stream_request, new_http_response_chat
+from agent.openai.engine_rest_common import ControllerConfig, BaseController
 
 log = logging.getLogger(__name__)
 
@@ -87,8 +86,8 @@ class OpenAiController(BaseController):
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
         pass
 
-    async def handle_chat_completion(self, body: ChatCompletionRequest,
-                                     request: Request) -> StreamingResponse | ChatCompletion:
+    async def chat_chunks(self, body: ChatCompletionRequest,
+                           request: Request) -> Iterable[ChatCompletionChunk]:
 
         response_id = str(uuid.uuid4())
 
@@ -138,7 +137,7 @@ class OpenAiController(BaseController):
                     response_id=response_id
                 )
 
-        return await new_http_response_chat(is_stream_request(body), chunk_generator())
+        return chunk_generator()
 
     def shutdown(self):
         """Clean up OpenAI client."""

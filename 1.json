@@ -1,0 +1,16 @@
+{
+  "model": "qwen2.5-coder",
+  "prompt": "<|fim_prefix|>// slice/test/api_test.go\ned := slice.Reverse(src)\r\n\tassert.Equal(t, slice.Of(-1, 0, 1, 2, 3), reversed)\r\n\r\n\tassert.Equal(t, unsafe.SliceData(src), unsafe.SliceData(reversed))\r\n}\r\n\r\nfunc Test_ReverseCloned(t *testing.T) {\r\n\tsrc := range_.Closed(3, -1)\r\n\treversed := reverse.Of(src)\r\n\tassert.Equal(t, slice.Of(-1, 0, 1, 2, 3), reversed)\r\n\tassert.NotEqual(t, unsafe.SliceData(src), unsafe.SliceData(reversed))\r\n}\r\n\r\nfunc Test_Clone(t *testing.T) {\r\n\ttype entity struct{ val string }\r\n\tvar (\r\n\t\tfirst  = entity{\"first\"}\r\n\t\tsecond = entity{\"second\"}\r\n\t\tthird  = entity{\"third\"}\r\n\r\n\t\tentities = []*entity{&first, &second, &third})\r\n\t\tc        = clone.Of(entities)\r\n\t)\r\n\r\n\tassert.Equal(t, entities, c)\r\n\tassert.NotSame(t, &entities, &c)\r\n\r\n\tfor i := range entities {\r\n\t\tassert.Same(t, entities[i], c[i])\r\n\t}\r\n}\r\n\r\nfunc Test_DeepClone(t *testing.T) {\r\n\ttype entity struct{ val string }\r\n\tvar (\r\n\t\tfirst  = entity{\"first\"}\r\n\t\tsecond = entity{\"second\"}\r\n\t\tthird  = entity{\"third\"}\r\n\t\tfourth = entity{\"fourth\"}<|fim_suffix|>\r\n\r\n\r\n\r\n\t\tentities = []*entity{&first, &second, &third}\r\n\t\tc        = clone.Deep(entities, clone.Ptr[entity])\r\n\t)\r\n\r\n\tassert.Equal(t, entities, c)\r\n\tassert.NotSame(t, &entities, &c)\r\n\r\n\tfor i := range entities {\r\n\t\tassert.Equal(t, entities[i], c[i])\r\n\t\tassert.NotSame(t, entities[i], c[i])\r\n\t}\r\n}\r\n\r\nfunc Test_PointerClone(t *testing.T) {\r\n\ts1 := \"test\"\r\n\tp1 := &s1\r\n\r\n\tp2 := clone.Ptr(p1)\r\n\r\n\tassert.Equal(t, s1, *p2)\r\n\tassert.NotSame(t, p1, p2)\r\n}\r\n\r\nfunc Test_ReduceSum(t *testing.T) {\r\n\ts := slice.Of(1, 3, 5, 7, 9, 11)\r\n\tr := slice.Reduce(s, op.Sum[int])\r\n\tassert.Equal(t, 1+3+5+7+9+11, r)\r\n}\r\n\r\nfunc Test_ReduceeSum(t *testing.T) {\r\n\ts := slice.Of(1, 3, 5, 7, 9, 11)\r\n\tr, _ := slice.Reducee(s, func(i1, i2 int) (int, error) { return i1 + i2, nil })\r\n\tassert.Equal(t, 1+3+5+7+9+11, r)\r\n\r\n\tr2, err := slice.Reducee(s, func(i1, i2 int) (int, error) { return i1 + i2, op.IfElse(i2 == 7, errors.New(\"abort\"), nil) })\r\n\tassert.Error(t, err)\r\n\tassert.Equal(t, 1+3+5+7, r2)\r\n}\r\n\r\nfunc Test_AccumSum(t *<|fim_middle|>",
+  "max_tokens": 256,
+  "stop": [
+    "<|fim_prefix|>",
+    "<|fim_suffix|>",
+    "<|fim_middle|>",
+    "<|end_of_text|>",
+    "<|fim_pad|>",
+    "<|endoftext|>",
+    "<|file_sep|>",
+    "<|file_separator|>"
+  ],
+  "stream": true
+}
