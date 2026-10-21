@@ -9,6 +9,7 @@ from agent.openai.chat_completions_api import FunctionDefinition, ChatCompletion
     FunctionDefinitionParameters
 from agent.openai.engine_rest_common import get_function_parameters_by_name
 from agent.parser.qwen3 import EXPECTED_PROPERTY_TYPE, Qwen3MoeParser
+from agent.parser import test_support
 from agent.parser.test_support import parse_first_call
 
 
@@ -23,7 +24,7 @@ USER_CONTEXT = new_windows_user_context()
 
 TEST_RESOURCES = "test_resources"
 
-parser = Qwen3MoeParser()
+parser = Qwen3MoeParser(test_support.FakeTokenizer())
 state = parser.new_state()
 
 

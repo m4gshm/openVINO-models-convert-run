@@ -7,6 +7,7 @@ from pathlib import Path
 from agent.client.user_context import UserContext, OS, UserContextFiles
 from agent.client.veai.tool_call_fixer import fix_edit_file, fix_write_file, GEMMA_4, fix_search_file_by_name
 from agent.parser.gemma4 import Gemma4ChannelParser
+from agent.parser import test_support
 from agent.parser.test_support import (
     GRADLE_BUILD_KTS_CONTENT,
     GRADLE_BUILD_KTS_CONTENT_INTEGRATION,
@@ -46,7 +47,7 @@ def read_bytes(file_name: str):
 
 USER_CONTEXT = new_windows_user_context()
 
-parser = Gemma4ChannelParser()
+parser = Gemma4ChannelParser(test_support.FakeTokenizer())
 
 
 class TestAddFunction(unittest.TestCase):

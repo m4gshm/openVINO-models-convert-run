@@ -35,6 +35,9 @@ class TokenHandlerConfig(BaseModel):
     no_conversation_counter_max: int = 20
     empty_conversation_counter_max: int = 20
     is_detect_looped_inference: bool = True
+    # stop phrases of the request: a generated token equal to one of them ends the generation;
+    # matched on the raw token stream, single-token form (like the Qwen FIM special tags)
+    stop_strings: tuple[str, ...] = ()
 
 
 class StopSignal(Enum):
@@ -488,18 +491,24 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                     result.extend(delayed_result)
                 else:
                     if not self.is_chat_mode:
-                        result.append(new_chat_completion_chunk(role=state.role, content=token))
+                        if token in self.config.stop_strings:
+                            # stop words are matched on the raw token stream: the generated
+                            # token equal to a stop phrase ends the generation and is not emitted
+                            log.debug("stop string '%s' reached, cut the generation", token)
+                            stop_signal = StopSignal.STOP
+                        else:
+                            result.append(new_chat_completion_chunk(role=state.role, content=token))
 
                     erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
                     is_assistant = ROLE_ASSISTANT == state.role
                     if not is_assistant:
                         log.warning("unexpected role %s", state.role)
                     if is_assistant or not self.config.prevent_no_assistant_inference_output:
-                        if not erase:
+                        if erase:
+                            log.debug("erase token: %s", token)
+                        else:
                             result.append(new_chat_completion_chunk(role=state.role, content=token,
                                                                     thinking=thinking))
-                        else:
-                            log.debug("erase token: %s", token)
                     else:
                         log.warning("prevent generating by unexpected role %s, token '%s'", state.role, token)
         state.finalize(token)

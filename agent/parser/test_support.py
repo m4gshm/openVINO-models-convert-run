@@ -3,6 +3,15 @@ from importlib.resources import files
 
 TEST_RESOURCES = "test_resources"
 
+
+class FakeTokenizer:  # pylint: disable=too-few-public-methods  # duck-typed stub
+    """Tokenizer stub for parser tests: only what Parser.__init__ reads."""
+
+    def get_eos_token(self) -> str:
+        """The parser compares end tokens against this string."""
+        return "<eos>"
+
+
 GRADLE_PLUGINS_BLOCK = (
     'plugins {\n'
     '    `java-library`\n'

@@ -6,6 +6,7 @@ from agent.client.veai.tool_call_fixer import fix_edit_file, fix_file_structure,
     fix_ask_user_with_options
 from agent.parser import ParsedFunctionCall
 from agent.parser.lfm2 import Lfm2Parser, parse_delayed_phrase
+from agent.parser import test_support
 from agent.parser.test_support import parse_first_call, read_tool_call
 
 TEST_RESOURCES = "test_resources"
@@ -19,7 +20,7 @@ def new_windows_user_context() -> UserContext:
 
 
 user_context = new_windows_user_context()
-parser = Lfm2Parser()
+parser = Lfm2Parser(test_support.FakeTokenizer())
 state = parser.new_state()
 
 

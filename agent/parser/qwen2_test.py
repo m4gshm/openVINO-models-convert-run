@@ -4,6 +4,7 @@ from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import fix_edit_file
 from agent.parser.qwen2 import Qwen2Parser
+from agent.parser import test_support
 from agent.parser.test_support import (
     GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES,
     GRADLE_REACTOR_AND_SPRING_BOOT_DEPENDENCIES_NO_EOL,
@@ -12,7 +13,7 @@ from agent.parser.test_support import (
 
 TEST_RESOURCES = "test_resources"
 
-parser = Qwen2Parser()
+parser = Qwen2Parser(test_support.FakeTokenizer())
 state = parser.new_state()
 
 

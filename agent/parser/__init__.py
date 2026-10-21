@@ -167,7 +167,7 @@ class Parser[State: ParserState]:
     def __init__(self, tokenizer: Tokenizer | None = None):
         """Store the tokenizer of the model and read the end token from it."""
         self.tokenizer = tokenizer
-        self.eos_token = tokenizer.get_eos_token()
+        self.eos_token = tokenizer.get_eos_token() if tokenizer is not None else ""
 
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> State:

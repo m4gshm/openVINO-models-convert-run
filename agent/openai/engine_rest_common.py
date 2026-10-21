@@ -204,6 +204,12 @@ class GenerationRequest:  # pylint: disable=too-many-instance-attributes  # flat
         return set()
 
 
+def body_stop_strings(body: completions_api.CompletionRequest | ChatCompletionRequest) -> tuple[str, ...]:
+    """Stop phrases of the request body in the token handler filter form."""
+    return tuple(body.stop) if isinstance(body.stop, list) \
+        else ((body.stop,) if body.stop else ())
+
+
 def new_generation_config(generate_opts: GenerateOpts, request: GenerationRequest) -> GenerationConfig:
     """Translate the request parameters and the server defaults into a GenerationConfig.
 
@@ -264,7 +270,6 @@ def _apply_request(generation_config: GenerationConfig, request: GenerationReque
     if request.logprobs:
         generation_config.logprobs = 1
     generation_config.apply_chat_template = request.apply_chat_template
-    generation_config.stop_strings = request.stop_strings()
 
 
 def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
@@ -584,7 +589,8 @@ class BaseOVController(BaseController):
         generation_config = new_generation_config(self.generate_opts,
                                                   GenerationRequest.of_completion_request(body))
 
-        token_handler = self.new_completion_token_handler(prompt, request, interrupt_event)
+        token_handler = self.new_completion_token_handler(prompt, request, interrupt_event,
+                                                         stop_strings=body_stop_strings(body))
 
         stream = is_stream_request(body)
         prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
@@ -601,7 +607,8 @@ class BaseOVController(BaseController):
         return await new_http_response_completions(stream, chunk_generator)
 
     def new_completion_token_handler(self, prompt: str, request: Request,
-                                     interrupt_event: threading.Event | None) -> TokenHandler:
+                                     interrupt_event: threading.Event | None,
+                                     stop_strings: tuple[str, ...] = ()) -> TokenHandler:
         """Build the token handler of a completion request, wired to the stop conditions."""
         is_client_gone = disconnect_probe(request)
 
@@ -609,12 +616,14 @@ class BaseOVController(BaseController):
             return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
                     or (interrupt_event is not None and interrupt_event.is_set()))
 
+        handler_config = (self.handler_config.model_copy(update={"stop_strings": stop_strings})
+                          if stop_strings else self.handler_config)
         return TokenHandler(tokenizer=self.tokenizer,
                             prompt=prompt,
                             parser=self.parser,
                             init_chat_events=True,
                             is_stop=is_stop,
-                            config=self.handler_config,
+                            config=handler_config,
                             )
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:

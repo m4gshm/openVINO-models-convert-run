@@ -17,7 +17,8 @@ from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai import completions_api
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
-from agent.openai.engine_rest_common import (ControllerConfig, GenerationRequest, disconnect_probe,
+from agent.openai.engine_rest_common import (ControllerConfig, GenerationRequest, body_stop_strings,
+                                             disconnect_probe,
                                              is_stream_request, make_union, new_chat_history,
                                              new_generation_config, new_http_response_chat,
                                              new_http_response_completions)
@@ -156,29 +157,26 @@ class GenerationConfigCase(unittest.TestCase):
                                        GenerationRequest(max_completion_tokens=64))
         self.assertEqual(64, config.max_new_tokens)
 
-    def test_stop_phrases_are_normalized_to_a_set(self):
-        """The stop phrases of the request reach the config as a set."""
+    def test_stop_phrases_never_reach_the_generation_config(self):
+        """Stop phrases are applied by the token handler filter, not by the pipeline config.
+
+        generation_config.stop_strings misbehaves in OpenVINO GenAI: it cuts the
+        generation instantly (empty result) for prompts that mention template
+        special tokens like <|fim_middle|>, even when the stop never appears
+        in the generated text.
+        """
         config = new_generation_config(GenerateOpts(), GenerationRequest(stop=["a", "b"]))
-        self.assertEqual({"a", "b"}, set(config.stop_strings))
-
-    def test_a_single_stop_phrase_becomes_a_set(self):
-        """A single stop phrase of the request reaches the config as a set."""
-        config = new_generation_config(GenerateOpts(), GenerationRequest(stop="a"))
-        self.assertEqual({"a"}, set(config.stop_strings))
-
-    def test_completion_request_carries_stop_phrases(self):
-        """The stop of a /v1/completions body reaches the generation config."""
-        body = completions_api.CompletionRequest(prompt="p", stop=["|end|"])
-
-        config = new_generation_config(GenerateOpts(), GenerationRequest.of_completion_request(body))
-        self.assertEqual({"|end|"}, set(config.stop_strings))
-
-    def test_completion_request_without_stop_keeps_no_stop_strings(self):
-        """A completions body without stop yields an empty stop-strings set."""
-        body = completions_api.CompletionRequest(prompt="p")
-
-        config = new_generation_config(GenerateOpts(), GenerationRequest.of_completion_request(body))
         self.assertFalse(config.stop_strings)
+
+    def test_completion_stop_reaches_the_body_helper(self):
+        """The stop of a /v1/completions body reaches the token handler filter."""
+        body = completions_api.CompletionRequest(prompt="p", stop=["|end|", "<|fim_pad|>"])
+        self.assertEqual(("|end|", "<|fim_pad|>"), body_stop_strings(body))
+
+    def test_body_without_stop_gives_no_stop_strings(self):
+        """A request body without stop phrases yields no filter entries."""
+        self.assertEqual((), body_stop_strings(completions_api.CompletionRequest(prompt="p")))
+        self.assertEqual((), body_stop_strings(completions_api.CompletionRequest(prompt="p", stop=[])))
 
     def test_frequency_penalty_of_zero_is_applied(self):
         """A frequency penalty of zero is a value, not a missing one."""
