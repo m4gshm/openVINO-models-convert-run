@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from openvino_genai import SchedulerConfig, py_openvino_genai
+from openvino_genai import SchedulerConfig, Tokenizer, py_openvino_genai
 
 from agent.common.log import logging_config
 from agent.common.metric_mem import get_current_memory
@@ -60,7 +60,7 @@ class EngineSetup:  # pylint: disable=too-many-instance-attributes  # config bun
     context: ModelContext
     device: DeviceType
     pipe: Pipe
-    parser: Parser
+    parser_type: ParserType | None
     scheduler_config: SchedulerConfig
     pipeline_properties: dict[str, Any]
     controller_config: ControllerConfig
@@ -85,7 +85,7 @@ def run_openvino(args):
         model_path=str(setup.context.model_path),
         device=device_value(setup.device),
         vlm=setup.pipe == Pipe.VLM,
-        parser=setup.parser,
+        parser_type=setup.parser_type,
         scheduler_config=None if setup.is_device_npu else setup.scheduler_config,
         generate_opts=setup.context.generate_opts,
         handler_config=setup.handler_config,
@@ -95,7 +95,7 @@ def run_openvino(args):
         controller_config=setup.controller_config,
         model_path=str(setup.context.model_path),
         device=device_value(setup.device),
-        parser=setup.parser,
+        parser_type=setup.parser_type,
         generate_opts=setup.context.generate_opts,
         handler_config=setup.handler_config,
         scheduler_config=setup.scheduler_config,
@@ -118,9 +118,8 @@ def build_engine_setup(args) -> EngineSetup:
 
     pipe, parser_type = resolve_pipe_and_parser(args, context.model_architectures,
                                                 context.media_capabilities)
-    parser = new_model_parser(parser_type)
-    log.info("model: path='%s', architectures=%s, pipe=%s, parser='%s', parser_type='%s'",
-             context.model_path, context.model_architectures, pipe, parser_type, type(parser))
+    log.info("model: path='%s', architectures=%s, pipe=%s, parser_type='%s'",
+             context.model_path, context.model_architectures, pipe, parser_type)
     log.debug("cache dir %s", context.model_cache_dir)
 
     pipeline_properties = resolve_pipeline_properties(args, context, device, pipe, parser_type)
@@ -132,7 +131,7 @@ def build_engine_setup(args) -> EngineSetup:
              context.model_path, device, pipeline_properties,
              context.generate_opts.model_dump(exclude_unset=True, exclude_none=True), scheduler_config)
 
-    return EngineSetup(context=context, device=device, pipe=pipe, parser=parser,
+    return EngineSetup(context=context, device=device, pipe=pipe, parser_type=parser_type,
                        scheduler_config=scheduler_config, pipeline_properties=pipeline_properties,
                        controller_config=controller_config, handler_config=handler_config)
 
@@ -303,17 +302,17 @@ def resolve_pipe_and_parser(args, model_architectures: set[str], media_capabilit
     return pipe, parser_type
 
 
-def new_model_parser(parser_type: ParserType | None) -> Parser:
+def new_model_parser(parser_type: ParserType | None, tokenizer: Tokenizer | None = None) -> Parser:
     """Instantiate the parser of the detected model family."""
     if parser_type == ParserType.qwen3moe:
-        return Qwen3MoeParser()
+        return Qwen3MoeParser(tokenizer)
     if parser_type == ParserType.gemma4:
-        return Gemma4ChannelParser()
+        return Gemma4ChannelParser(tokenizer)
     if parser_type == ParserType.qwen2:
-        return Qwen2Parser()
+        return Qwen2Parser(tokenizer)
     if parser_type == ParserType.lfm2:
-        return Lfm2Parser()
-    return Parser()
+        return Lfm2Parser(tokenizer)
+    return Parser(tokenizer)
 
 
 def resolve_attention_backend(attention_backend: str | None, pipe: Pipe, is_device_npu: bool,
@@ -368,7 +367,7 @@ def new_draft_model(args, draft_model_path: str, model_cache_dir: str, device: s
 # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
 def init_continuous_batching_engine(controller_config: ControllerConfig,
                                     handler_config: TokenHandlerConfig,
-                                    model_path: str, device: str, parser: Parser,
+                                    model_path: str, device: str, parser_type: ParserType | None,
                                     stop_signal: threading.Event,
                                     # pylint: disable-next=c-extension-no-member  # pybind11 module
                                     scheduler_config=py_openvino_genai.SchedulerConfig(),
@@ -386,7 +385,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
         handler_config: Token handler configuration for streaming and tool handling
         model_path: Path to the model directory or GGUF file
         device: Target device string (e.g., 'CPU', 'GPU', 'NPU')
-        parser: Model-specific parser for token/stream handling
+        parser_type: Model family of the parser to instantiate
         stop_signal: Event to signal shutdown
         scheduler_config: Scheduler configuration (optional, defaults provided)
         generate_opts: Generation options (temperature, max tokens, etc.)
@@ -430,6 +429,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
         sys.exit(1)
 
     # --- Wire controller to FastAPI app ---
+    parser = new_model_parser(parser_type, pipe.get_tokenizer())
     return new_app(ContinuousBatchingController(config=controller_config,
                                                 parser=parser, pipe=pipe,
                                                 generate_opts=generate_opts,
@@ -442,7 +442,7 @@ def init_continuous_batching_engine(controller_config: ControllerConfig,
 def init_sequential_engine(controller_config: ControllerConfig,
                            handler_config: TokenHandlerConfig,
                            model_path: str,
-                           device: str, vlm: bool, parser: Parser,
+                           device: str, vlm: bool, parser_type: ParserType | None,
                            stop_signal: threading.Event,
                            scheduler_config: py_openvino_genai.SchedulerConfig | None = None,
                            generate_opts=GenerateOpts(),
@@ -458,7 +458,7 @@ def init_sequential_engine(controller_config: ControllerConfig,
         model_path: Path to the model directory or GGUF file
         device: Target device string (e.g., 'CPU', 'GPU', 'NPU')
         vlm: If True, use VLMPipeline; otherwise use LLMPipeline
-        parser: Model-specific parser for token/stream handling
+        parser_type: Model family of the parser to instantiate
         stop_signal: Event to signal shutdown
         scheduler_config: Optional scheduler configuration
         generate_opts: Generation options (temperature, max tokens, etc.)
@@ -494,6 +494,7 @@ def init_sequential_engine(controller_config: ControllerConfig,
     log.debug("consumed memory: %.2f MB, delta: %.2f MB", loaded_pipe_mem, delta)
 
     # --- Wire VlmController to FastAPI app ---
+    parser = new_model_parser(parser_type, pipe.get_tokenizer())
     return new_app(VlmController(config=controller_config,
                                  parser=parser, pipe=pipe,
                                  generate_opts=generate_opts,

@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, Iterator, Literal, Callable
 
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
+from openvino_genai import Tokenizer
 from pydantic import BaseModel
 
 from agent.inference.phrase import Phrase
@@ -128,7 +129,7 @@ def iter_function_blocks(tool_call_expression: str, tool_call_start: str, tool_c
                          function_start_pref: str) -> Iterator[str]:
     """Yield the raw function blocks of a tool call expression, flattened over its call blocks."""
     for function_blocks, _ in iter_tool_call_blocks(tool_call_expression, tool_call_start, tool_call_end,
-                                                   function_start_pref):
+                                                    function_start_pref):
         yield from function_blocks
 
 
@@ -155,13 +156,18 @@ class DelayedResult(BaseModel):
 # Hook arguments are part of the uniform interface: the base implementations
 # below ignore most of them, but subclasses override them by name.
 # pylint: disable=unused-argument
-class Parser[State: ParserState]():
+class Parser[State: ParserState]:
     """Base parser interface: token predicates and tool call parsing hooks.
 
     Default implementations ignore ``state``/``token``; subclasses override the
     hooks their model syntax needs while keeping the uniform signature used by
     the token handler.
     """
+
+    def __init__(self, tokenizer: Tokenizer | None = None):
+        """Store the tokenizer of the model and read the end token from it."""
+        self.tokenizer = tokenizer
+        self.eos_token = tokenizer.get_eos_token()
 
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> State:
@@ -182,7 +188,7 @@ class Parser[State: ParserState]():
 
     def is_end(self, state: State, token: str) -> bool:
         """True when the token ends the generation."""
-        return False
+        return token == self.eos_token
 
     def is_fim_middle(self, state: State, token: str) -> bool:
         """True when the token switches the parser into fill-in-the-middle mode."""

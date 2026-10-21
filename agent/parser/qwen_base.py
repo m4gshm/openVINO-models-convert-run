@@ -1,4 +1,6 @@
 """Common syntax constants and the base parser of the Qwen model family."""
+from openvino_genai import Tokenizer
+
 from agent.openai.chat_api import ROLE_ASSISTANT
 from agent.parser import ParserState, Parser, _is_conversation_start
 
@@ -21,6 +23,9 @@ END_OF_TEXT = "<|endoftext|>"
 
 class QwenBaseParser(Parser):
     """Token predicates shared by the Qwen parser generations."""
+
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer)
 
     def is_erase(self, state: ParserState, token: str) -> bool:
         return super().is_erase(state, token) or self.is_fim_middle(state, token)

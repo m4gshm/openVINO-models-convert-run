@@ -32,6 +32,11 @@ tasks:
       - uv sync --all-extras
       - uv run python -m pytest agent -v
 
+  e2e:
+    desc: Run the real-model end-to-end suite (downloads OpenVINO/Qwen3.5-2B-int4-ov into models/ on first run)
+    cmds:
+      - uv run python -m pytest agent/e2e_test.py -m e2e -v
+
   lint:
     desc: Run linters
     cmds:

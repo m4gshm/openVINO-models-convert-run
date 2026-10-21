@@ -199,6 +199,19 @@ How it works:
 - Before submitting changes: run full test suite (`task test`) — all tests must pass
 - Coverage: new code should achieve at least 80% line coverage
 
+### End-to-End Testing
+
+- Real-model smoke e2e suite: `task e2e` (`uv run python -m pytest agent/e2e_test.py -m e2e -v`)
+- Excluded from `task test` by default (pytest `addopts = "-m 'not e2e'"`); the SSE-parser unit
+  tests in the same module still run in the plain pass
+- The suite fetches `OpenVINO/Qwen3.5-2B-int4-ov` HuggingFace snapshot into `models/` (idempotent,
+  skipped when already present), starts the agent server on a free port and checks chat completions
+  (`stream=false`/`stream=true`) and a FIM completion on `/v1/completions`
+- Environment variables: `OPENVINO_E2E_DEVICE` (default `GPU`), `OPENVINO_E2E_SKIP_FETCH=1`
+  (never download; skip if the model is not locally complete), `OPENVINO_E2E_READY_TIMEOUT_S`
+  (server startup budget, default 300)
+- Server stdout/stderr go to `logs/e2e-<port>.log`; failures print the log tail
+
 ### Static Analysis
 
 - **Pylint** — run via `task lint` or `uv run pylint agent`

@@ -2,6 +2,8 @@
 import logging
 from typing import Any
 
+from openvino_genai import Tokenizer
+
 import agent
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import Parser, _is_conversation_start, ParsedFunctionCall, iter_function_blocks, \
@@ -71,7 +73,7 @@ STR_WRAPPERS = [VALUE_TAG_WRAPPER, "\"", "'"]
 # pylint structural limits do not apply here.
 # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
 def parse_object_arguments(arguments_block: str, array_end_expect=False) -> tuple[
-        dict[str, Any], list[str], str]:
+    dict[str, Any], list[str], str]:
     """Parse ``name:value`` pairs and bare values into named and anonymous lists."""
     arguments_block = arguments_block.strip()
     if not arguments_block:
@@ -362,6 +364,7 @@ def cast_value(val: str | Any):
             return True
     return val
 
+
 def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
     """Parse a ``[{...}, {...}]`` array tail into objects and the remaining tail."""
     log.debug("parse array from '%s'", array_str)
@@ -400,6 +403,9 @@ def parse_array(array_str: str) -> tuple[list[dict[str, Any]], int, str]:
 
 class Gemma4ChannelParser(Parser[ParserState]):
     """Parser for the Gemma channel/turn markup and ``call:`` tool calls."""
+
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer)
 
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:

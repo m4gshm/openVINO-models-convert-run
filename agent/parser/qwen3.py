@@ -3,6 +3,8 @@ import logging
 import re
 from typing import Any, Iterable
 
+from openvino_genai import Tokenizer
+
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, StateEvent, ParsedFunctionCall
 from agent.parser import fill_state_by_prompt_tail, iter_function_blocks, match_name_and_tail
@@ -110,6 +112,9 @@ def parse_function_call(state: ParserState, function_block: str, partial: bool) 
 
 class Qwen3MoeParser(QwenBaseParser):
     """Parser for Qwen3 thinking models with the parameter-block tool call syntax."""
+
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer)
 
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:

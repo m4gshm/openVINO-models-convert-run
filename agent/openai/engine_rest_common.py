@@ -14,7 +14,8 @@ from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
 from openvino_genai import ChatHistory
 from openvino_genai import Tokenizer
-from openvino_genai.py_openvino_genai import GenerationConfig  # pylint: disable=no-name-in-module  # compiled extension module
+from openvino_genai.py_openvino_genai import \
+    GenerationConfig  # pylint: disable=no-name-in-module  # compiled extension module
 from pydantic import BaseModel
 from starlette import status
 from starlette.requests import Request
@@ -45,7 +46,6 @@ from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.prompt_escape import PromptEscaper, MEDIA_TAGS_ONLY
 from agent.preprocess.tool_call import PreprocessToolCall
-
 
 STOP: Literal["stop"] = "stop"
 LENGTH: Literal["length"] = "length"
@@ -117,9 +117,11 @@ async def new_http_response_completions(stream: bool,
                                         chunk_generator: Iterable[ChatCompletionChunk]) -> (
         StreamingResponse | ChatCompletion | completions_api.CompletionResponse):
     """Wrap chunks into an SSE streaming or aggregated text-completions response."""
+
     def chunk_converter(chunk_generator: Iterable[ChatCompletionChunk]) -> Iterable[
         completions_api.CompletionResponse]:
         """Convert chat chunks into text-completion responses."""
+
         def convert_response(r: ChatCompletionChunk) -> completions_api.CompletionResponse:
             """Map one chat chunk to a completions response."""
             return completions_api.CompletionResponse(model=r.model, id=r.id, choices=[
@@ -272,6 +274,7 @@ def get_tokens_size(tokenizer: Tokenizer, prompt: str) -> int:
 
 class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # dependency bundle of shared state
     """Endpoint-independent plumbing shared by all engines."""
+
     def __init__(self, config: ControllerConfig,
                  handler_config: TokenHandlerConfig,
                  generate_opts: GenerateOpts,
@@ -303,6 +306,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
     def guard_generation(self, chunk_generator: Iterable[ChatCompletionChunk],
                          interrupt_event: threading.Event) -> Iterable[ChatCompletionChunk]:
         """Wrap the chunk generator so the interrupt slot is released when it ends."""
+
         def guarded() -> Iterable[ChatCompletionChunk]:
             try:
                 yield from chunk_generator
@@ -390,7 +394,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
 
     @abstractmethod
     async def chat_chunks(self, body: ChatCompletionRequest,
-                           request: Request) -> Iterable[ChatCompletionChunk]:
+                          request: Request) -> Iterable[ChatCompletionChunk]:
         """Produce the chunks of a chat completion request; implemented per engine.
 
         The chunks are the engine-neutral intermediate form: the OpenAI endpoint wraps
@@ -422,17 +426,8 @@ class BaseOVController(BaseController):
         """Wire parser, tokenizer and the shared controller state."""
         super().__init__(config, handler_config, generate_opts, stop_signal)
         self.parser = parser
-        # self.generate_opts = generate_opts
-        # self.handler_config = handler_config
-        # self.config = config
         self.tokenizer = tokenizer
         self.prompt_escaper = PromptEscaper.of_tokenizer(tokenizer)
-
-        # self.log_inference_prompt = logging.getLogger(inference.log.name + ".prompt")
-        # self.log_inference_token_metrics = logging.getLogger(inference.log.name + ".token_metrics")
-        # self.log_inference = inference.log
-        # self.closed = threading.Event()
-        # self.stop_signal = stop_signal
 
     async def models(self) -> ModelsListResponse:
         """Report the single configured model with its modalities."""
@@ -455,7 +450,7 @@ class BaseOVController(BaseController):
         return JSONResponse(content={"text": text})
 
     async def chat_chunks(self, body: ChatCompletionRequest,
-                           request: Request) -> Iterable[ChatCompletionChunk]:
+                          request: Request) -> Iterable[ChatCompletionChunk]:
         """Run the full local pipeline: prepare messages, build prompt, generate chunks."""
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
@@ -495,10 +490,10 @@ class BaseOVController(BaseController):
         return None
 
     def prepare_tools(self, tools, is_veai: bool) -> tuple[list[dict[str, Any]],
-                                                           dict[str, FunctionDefinitionParameters]]:
+    dict[str, FunctionDefinitionParameters]]:
         """Split the tools of the request into their raw form and their function parameters."""
         tools_raw, function_parameters = get_function_parameters_by_name(tools, is_veai,
-                                                                        self.config.is_fix_tool_type)
+                                                                         self.config.is_fix_tool_type)
         return self.prompt_escaper.escape_in(tools_raw), function_parameters
 
     def build_prompt(self, messages: list[dict], tools_raw: list[dict[str, Any]]) -> str:

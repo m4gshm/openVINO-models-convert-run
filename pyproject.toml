@@ -35,6 +35,10 @@ include = ["agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["agent"]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: real-model end-to-end smoke tests (run with `-m e2e`; downloads the model and starts the server)",
+]
 
 [tool.pylint]
 persistent = false
@@ -51,7 +55,8 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 # Native extensions / optional extras shipping no type stubs.
-module = ["openvino", "openvino.*", "openvino_genai", "openvino_genai.*", "soundfile", "librosa"]
+module = ["openvino", "openvino.*", "openvino_genai", "openvino_genai.*", "soundfile", "librosa",
+          "huggingface_hub", "huggingface_hub.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

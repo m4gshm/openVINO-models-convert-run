@@ -3,6 +3,9 @@ import unittest
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
+
+from openvino_genai import Tokenizer
 
 from agent.multimodal.model_capabilities import MediaCapabilities
 from agent.openvino.options import ParserType, Pipe

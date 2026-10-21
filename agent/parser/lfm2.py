@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+from openvino_genai import Tokenizer
+
 from agent.inference.phrase import Phrase
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail, DelayedResult
@@ -20,6 +22,9 @@ TOOL_CALL_END = "<|tool_call_end|>"
 
 class Lfm2Parser(Parser):
     """Parser for LFM2 models emitting python-tuple style tool calls."""
+
+    def __init__(self, tokenizer):
+        super().__init__(tokenizer)
 
     def new_state(self, prompt: str = "", supported_functions: dict[str, FunctionDefinitionParameters] | None = None,
                   init_chat_events=True) -> ParserState:

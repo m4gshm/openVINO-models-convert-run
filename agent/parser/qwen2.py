@@ -3,6 +3,7 @@ import json
 import logging
 
 import json_repair
+from openvino_genai import Tokenizer
 
 from agent.parser import ParserState, ParsedFunctionCall, iter_tool_call_blocks
 from agent.parser.qwen_base import TOOL_CALL_START, TOOL_CALL_END, QwenBaseParser
@@ -14,6 +15,9 @@ FUNCTION_START_PREF = "<function"
 
 class Qwen2Parser(QwenBaseParser):
     """Parser for models emitting ``<tool_call>{json}</tool_call>`` expressions."""
+
+    def __init__(self, tokenizer: Tokenizer):
+        super().__init__(tokenizer)
 
     def parse_tool_calls(self, state: ParserState,
                          tool_call_expression: str | None) -> tuple[list[ParsedFunctionCall], bool]:
