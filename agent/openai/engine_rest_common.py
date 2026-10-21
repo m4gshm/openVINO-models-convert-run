@@ -191,7 +191,8 @@ class GenerationRequest:  # pylint: disable=too-many-instance-attributes  # flat
     @staticmethod
     def of_completion_request(body: completions_api.CompletionRequest) -> "GenerationRequest":
         """Generation parameters of a legacy text completion request."""
-        return GenerationRequest(temperature=body.temperature, max_completion_tokens=body.max_tokens)
+        return GenerationRequest(temperature=body.temperature, max_completion_tokens=body.max_tokens,
+                                 stop=body.stop)
 
     def stop_strings(self) -> set[str]:
         """Stop phrases of the request, normalized to a set."""

@@ -15,6 +15,7 @@ from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts
 from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
+from agent.openai import completions_api
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
 from agent.openai.engine_rest_common import (ControllerConfig, GenerationRequest, disconnect_probe,
                                              is_stream_request, make_union, new_chat_history,
@@ -164,6 +165,20 @@ class GenerationConfigCase(unittest.TestCase):
         """A single stop phrase of the request reaches the config as a set."""
         config = new_generation_config(GenerateOpts(), GenerationRequest(stop="a"))
         self.assertEqual({"a"}, set(config.stop_strings))
+
+    def test_completion_request_carries_stop_phrases(self):
+        """The stop of a /v1/completions body reaches the generation config."""
+        body = completions_api.CompletionRequest(prompt="p", stop=["|end|"])
+
+        config = new_generation_config(GenerateOpts(), GenerationRequest.of_completion_request(body))
+        self.assertEqual({"|end|"}, set(config.stop_strings))
+
+    def test_completion_request_without_stop_keeps_no_stop_strings(self):
+        """A completions body without stop yields an empty stop-strings set."""
+        body = completions_api.CompletionRequest(prompt="p")
+
+        config = new_generation_config(GenerateOpts(), GenerationRequest.of_completion_request(body))
+        self.assertFalse(config.stop_strings)
 
     def test_frequency_penalty_of_zero_is_applied(self):
         """A frequency penalty of zero is a value, not a missing one."""
