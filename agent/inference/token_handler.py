@@ -490,16 +490,18 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                     delayed_result, stop_signal = self.handle_delayed(phrase)
                     result.extend(delayed_result)
                 else:
+                    stop_hit = token in self.config.stop_strings
+                    if stop_hit:
+                        # stop words are matched on the raw token stream in both chat and
+                        # completion modes: the matched token ends the generation, is not
+                        # emitted and does not reach the phrase content
+                        log.debug("stop string '%s' reached, cut the generation", token)
+                        stop_signal = StopSignal.STOP
                     if not self.is_chat_mode:
-                        if token in self.config.stop_strings:
-                            # stop words are matched on the raw token stream: the generated
-                            # token equal to a stop phrase ends the generation and is not emitted
-                            log.debug("stop string '%s' reached, cut the generation", token)
-                            stop_signal = StopSignal.STOP
-                        else:
+                        if not stop_hit:
                             result.append(new_chat_completion_chunk(role=state.role, content=token))
 
-                    erase = current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
+                    erase = stop_hit or current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
                     is_assistant = ROLE_ASSISTANT == state.role
                     if not is_assistant:
                         log.warning("unexpected role %s", state.role)

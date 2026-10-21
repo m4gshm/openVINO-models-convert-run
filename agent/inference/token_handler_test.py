@@ -46,6 +46,16 @@ class CompletionStopPhrasesCases(unittest.TestCase):
         self.assertEqual(["STOPword"], self.chunks_text(result))
         self.assertIsNone(stop_signal)
 
+    def test_stop_also_applies_in_chat_mode(self):
+        """The live completion handlers are chat-mode handlers; the stop must cut them too."""
+        handler = TokenHandler(tokenizer=None, prompt="", parser=Parser(), init_chat_events=True,
+                               is_stop=None, config=TokenHandlerConfig(stop_strings=("END",)),
+                               tool_fixer=None)
+        result, stop_signal = handler.processor.process_tokens(["fine ", "END", "never"])
+
+        self.assertEqual(["fine "], self.chunks_text(result))
+        self.assertEqual(StopSignal.STOP, stop_signal)
+
 
 class TokenHandlerCases(unittest.TestCase):
     """Checks the repair of the tool call arguments of the token handler."""
