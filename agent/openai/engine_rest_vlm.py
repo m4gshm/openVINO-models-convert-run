@@ -141,6 +141,7 @@ class VlmController(BaseOVController):
                                                chunk_queue=chunk_queue)
                     before_generate_mem = get_current_memory()
                     generate_result = self.generate_result(prompt, generation_config, streamer, media)
+                    self.queue_natural_stop(streamer.stopped_by_streamer, generate_result, chunk_queue)
                 chunk_queue.put_nowait(None)
 
                 metrics = generate_result.perf_metrics if isinstance(generate_result, DecodedResults) else None
@@ -234,7 +235,25 @@ class VlmController(BaseOVController):
         log.info("inference handling is done")
 
 
-class StreamerWrapper(py_openvino_genai.StreamerBase):  # pylint: disable=c-extension-no-member  # runtime member of the compiled module
+    def queue_natural_stop(self, stopped_by_streamer: bool, generate_result: Any,
+                           chunk_queue: "queue.Queue[ChatCompletionChunk]") -> None:
+        """Queue a finish chunk when the pipeline itself ended the generation.
+
+        EOS or the token budget ends the generate call without a token-handler stop signal, so the
+        streamer has not emitted a finish chunk: the real reason (length on the token budget) is
+        reported here so the client sees finish_reason=length instead of a default stop.
+        """
+        if stopped_by_streamer:
+            return
+        reasons = getattr(generate_result, "finish_reasons", None)
+        pipelines_reason = reasons[0] if reasons else None
+        finish = "length" if pipelines_reason == GenerationFinishReason.LENGTH else "stop"
+        chunk_queue.put_nowait(new_stop_response(finish_reason=finish, role=None,
+                                                 model=self.config.model_name))
+
+
+class StreamerWrapper(py_openvino_genai.StreamerBase):
+    # pylint: disable=c-extension-no-member  # the base class comes from a compiled extension
     """Bridges pipeline token callbacks into the response chunk queue."""
 
     def __init__(self, streamer: TokenHandler, chunk_queue: queue.Queue[ChatCompletionChunk | None],

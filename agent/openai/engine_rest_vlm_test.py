@@ -176,7 +176,8 @@ class VlmControllerRequestLockCase(unittest.TestCase):
                          controller.order)
         self.assertFalse(controller.lock_violations)
         self.assertEqual(1, len(first_chunks))
-        self.assertEqual(1, len(second_chunks))
+        self.assertEqual(2, len(second_chunks))  # the data chunk + the natural-end finish chunk
+        self.assertEqual("stop", second_chunks[-1].choices[0].finish_reason)
         self.assertFalse(first.is_alive())
         self.assertFalse(second.is_alive())
 

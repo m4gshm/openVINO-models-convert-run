@@ -196,7 +196,7 @@ def resolve_controller_config(args, context: ModelContext, pipe: Pipe,
     interrupt_completions = args.interrupt_completions == enum_value(Turn.on)
     log.info("interrupt mode of /v1/completions: %s", interrupt_completions)
 
-    return ControllerConfig(model_name=args.model, max_prompt_len=context.max_prompt_len,
+    return ControllerConfig(model_name=context.model_name or args.model, max_prompt_len=context.max_prompt_len,
                             model_architectures=context.model_architectures,
                             is_fix_tool_type=args.fix_tool_type != Turn.off.value,
                             chat_template=chat_template,

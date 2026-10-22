@@ -116,8 +116,8 @@ def test_fim_completion(base_url: str) -> None:
 
 @pytest.mark.e2e
 def test_fim_max_tokens_bound(base_url: str) -> None:
-    """A FIM completion with a small max_tokens budget terminates with finish_reason length."""
+    """A token budget tighter than the answer terminates with finish_reason length."""
     completion_text = text_completion_fim(prefix=FIM_PREFIX, suffix=FIM_SUFFIX,
-                                          base_url=base_url, max_tokens=5)
+                                          base_url=base_url, max_tokens=2)
     choice = completion_text["choices"][0]
     assert choice["finish_reason"] == "length", choice["finish_reason"]

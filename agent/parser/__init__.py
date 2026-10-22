@@ -300,7 +300,8 @@ def fill_state_by_prompt_tail(init_chat_events: bool, prompt: str, state: Parser
         if not is_think is None:
             state.start_event(StateEvent.THINK)
             prefill_i = len(tail_lines) - 1 - is_think
-        state.role = role
+        # an unset role stays None, not '', so chunk constructors accept it
+        state.role = role or None
 
         if not prefill_i is None:
             prefill_i += 1

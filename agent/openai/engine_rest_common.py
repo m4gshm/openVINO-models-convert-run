@@ -7,7 +7,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Callable, Literal, Iterable
+from typing import Any, Callable, Literal, Iterable, Iterator
 
 from fastapi.exceptions import RequestValidationError
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
@@ -131,8 +131,12 @@ async def new_http_response_completions(stream: bool,
             """Map one chat choice to a text choice carrying the delta content."""
             delta = chat_completion_choice.delta
             content = delta.content if delta and delta.content else ""
-            reason: Literal["stop"] | None = "stop" if chat_completion_choice.finish_reason else None
-            return completions_api.CompletionChoice(text=content, finish_reason=reason)
+            reason = chat_completion_choice.finish_reason
+            mapped: Literal["stop", "length", "content_filter"] | None = (
+                None if reason is None
+                else "length" if reason == "length" else
+                "content_filter" if reason == "content_filter" else "stop")
+            return completions_api.CompletionChoice(text=content, finish_reason=mapped)
 
         for c in chunk_generator:
             yield convert_response(c)
@@ -142,23 +146,42 @@ async def new_http_response_completions(stream: bool,
 
     def aggregate() -> completions_api.CompletionResponse:
         # completions endpoint must answer the completions schema (choices[].text), not the chat one
-        finish_reason, full_content, _, _ = make_union(chunk_generator)
+        stream = CapturedChunkStream(chunk_generator)
+        finish_reason, full_content, _, _ = make_union(stream)
+        mapped_reason: Literal["stop", "length"] = "length" if finish_reason == "length" else "stop"
         return completions_api.CompletionResponse(id=str(uuid.uuid4()), created=int(time.time()),
+                                                  model=stream.model,
                                                   choices=[completions_api.CompletionChoice(
                                                       text=full_content,
-                                                      finish_reason="stop" if finish_reason else None)])
+                                                      finish_reason=mapped_reason)])
 
     # same as new_http_response_chat: keep the event loop free while the generator is consumed
     response: completions_api.CompletionResponse = await asyncio.to_thread(aggregate)
     return response
 
 
+class CapturedChunkStream:  # pylint: disable=too-few-public-methods  # a stream wrapper only iterates
+    """Wraps a chunk stream and captures the model name for the aggregated response."""
+
+    def __init__(self, chunks: Iterable[ChatCompletionChunk]):
+        self.chunks = iter(chunks)
+        self.model = ""
+
+    def __iter__(self) -> Iterator[ChatCompletionChunk]:
+        for chunk in self.chunks:
+            if chunk.model:
+                self.model = chunk.model
+            yield chunk
+
+
 def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) -> ChatCompletion:
     """Aggregate a chunk stream into a single non-streaming ChatCompletion."""
-    finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(chunk_generator)
+    stream = CapturedChunkStream(chunk_generator)
+    finish_reason, full_content, full_reasoning_content, full_tool_calls = make_union(stream)
     response_id = str(uuid.uuid4())
     return new_chat_completion(response_id=response_id, finish_reason=finish_reason, content=full_content,
-                               reasoning_content=full_reasoning_content, tool_calls=full_tool_calls)
+                               reasoning_content=full_reasoning_content, tool_calls=full_tool_calls,
+                               model=stream.model)
 
 
 @dataclass
@@ -616,8 +639,12 @@ class BaseOVController(BaseController):
             return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
                     or (interrupt_event is not None and interrupt_event.is_set()))
 
-        handler_config = (self.handler_config.model_copy(update={"stop_strings": stop_strings})
-                          if stop_strings else self.handler_config)
+        # a completion prompt has no chat role events, so the empty role is normal there
+        updates: dict[str, bool | tuple[str, ...]] = ({"stop_strings": stop_strings}
+                                                     if stop_strings else {})
+        if self.handler_config.prevent_no_assistant_inference_output:
+            updates["prevent_no_assistant_inference_output"] = False
+        handler_config = self.handler_config.model_copy(update=updates) if updates else self.handler_config
         return TokenHandler(tokenizer=self.tokenizer,
                             prompt=prompt,
                             parser=self.parser,
@@ -744,9 +771,10 @@ def get_function_parameters_by_name(tools: list[ChatCompletionFunctionToolParam]
 
 
 def stream_generator(chunk_generator: Iterable[BaseModel]) -> Iterable[str]:
-    """Serialize chunks as SSE data lines."""
+    """Serialize chunks as SSE data lines, ending with the [DONE] sentinel."""
     for chunk in chunk_generator:
         yield f"data: {chunk.model_dump_json(exclude_none=True)}\n\n"
+    yield "data: [DONE]\n\n"
 
 
 def add_stop_signal(responses: list[ChatCompletionChunk], stop_signal: StopSignal):

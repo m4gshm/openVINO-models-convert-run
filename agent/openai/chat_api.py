@@ -62,6 +62,8 @@ def new_chat_completion_chunk(  # pylint: disable=too-many-arguments,too-many-po
     """Build one streaming chunk holding a single choice delta."""
     if not response_id:
         response_id = str(uuid.uuid4())
+    if not role:  # a raw completion stream has no role: '' is not a valid openai role
+        role = None
     return ChatCompletionChunk(object=CHAT_COMPLETION_CHUNK, id=response_id, created=int(time.perf_counter()),
                                model=model, choices=[new_choice_delta(content=content if not thinking else None,
                                                                       reasoning_content=content if thinking else None,

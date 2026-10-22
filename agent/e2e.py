@@ -3,6 +3,9 @@
 Marked for opt-in e2e runs (`pytest -m e2e`); the plain unit run never imports
 the server or touches the network except through the tests that declare it.
 """
+# the server log handle outlives start(); pylint 4.0.6 ignores inline disables for R1732
+# pylint: disable=consider-using-with
+import contextlib
 import json
 import logging
 import os
@@ -19,7 +22,8 @@ import httpx
 log = logging.getLogger(__name__)
 
 HF_REPO_ID = "OpenVINO/Qwen3.5-2B-int4-ov"
-MODELS_DIR = Path("./models")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MODELS_DIR = REPO_ROOT / "models"
 MODEL_DIR_NAME = "Qwen3.5-2B-int4-ov"
 
 DEVICE_DEFAULT = "GPU"
@@ -33,7 +37,7 @@ HEALTH_INTERVAL_S = 2.0
 REQUEST_TIMEOUT_S = 120.0
 
 # Files whose presence marks a complete local model copy.
-MODEL_REQUIRED_FILES = ("openvino_model.xml", "openvino_model.bin", "config.json")
+MODEL_REQUIRED_FILES = ("openvino_language_model.xml", "openvino_language_model.bin", "config.json")
 
 # --- Expected e2e outcomes ---
 
@@ -128,14 +132,15 @@ class ServerHarness:
         self.model_dir = server_model_dir
         self.port = free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
-        self.log_path = Path("./logs") / f"e2e-{self.port}.log"
+        self.log_path = REPO_ROOT / "logs" / f"e2e-{self.port}.log"
         self.process: Optional[subprocess.Popen] = None
+        self._log_context = contextlib.ExitStack()
 
     def start(self) -> None:
         """Launch the server and wait until it accepts OpenAI-compatible requests."""
         self.log_path.parent.mkdir(exist_ok=True)
-        # The file stays open for the whole server lifetime; closing it would drop early output.
-        log_file = self.log_path.open("w", encoding="utf-8")  # pylint: disable=consider-using-with
+        # the file stays open for the whole server lifetime; closing it would drop early output
+        log_file = self._log_context.enter_context(self.log_path.open("w", encoding="utf-8"))
         args = [str(Path(sys.executable).resolve()), "agent.py",
                 "--model", str(self.model_dir), "--device", device(),
                 "--port", str(self.port), "--skip_typecheck"]
@@ -233,7 +238,7 @@ def parse_sse_response(lines: Any) -> tuple[str, Optional[str], bool]:
 def text_completion_fim(prefix: str, suffix: str, base_url: str,
                         max_tokens: int = 200) -> dict[str, Any]:
     """Fill-in-the-middle request on the legacy text-completions endpoint."""
-    prompt = f"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}"
+    prompt = f"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>"
     body = {"model": MODEL_DIR_NAME, "prompt": prompt, "max_tokens": max_tokens, "temperature": 0.0}
     with client() as http:
         response = http.post(f"{base_url}/v1/completions", json=body)
