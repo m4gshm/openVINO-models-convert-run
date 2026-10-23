@@ -67,6 +67,15 @@ class LoggingConfigCase(unittest.TestCase):
         self.assertIn("drop_client_reset", config["filters"])
         self.assertEqual(["drop_client_reset"], config["loggers"]["asyncio"]["filters"])
 
+    def test_uvicorn_loggers_inherit_common_format(self):
+        """Uvicorn loggers have no own handlers, so access lines use the common format."""
+        with tempfile.TemporaryDirectory() as logs_dir:
+            config = logging_config(logs_dir)
+        uvicorn_config = config["loggers"]["uvicorn"]
+        self.assertEqual("INFO", uvicorn_config["level"])
+        self.assertTrue(uvicorn_config["propagate"])
+        self.assertNotIn("handlers", uvicorn_config)
+
 
 if __name__ == '__main__':
     unittest.main()

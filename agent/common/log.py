@@ -94,6 +94,10 @@ def logging_config(logs_dir: str):
             },
         },
         "loggers": {
+            "uvicorn": {
+                "level": "INFO",
+                "propagate": True,
+            },
             "asyncio": {
                 "filters": ["drop_client_reset"],
                 "propagate": True,

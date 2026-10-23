@@ -23,7 +23,7 @@ def serve_until_stop(app: FastAPI, host: str, port: int, stop_event: threading.E
     logger.info("listening %s:%s", host, port)
 
     def server_handle():
-        uvicorn.run(app, host=host, port=port, reload=False, timeout_graceful_shutdown=0)
+        uvicorn.run(app, host=host, port=port, reload=False, timeout_graceful_shutdown=0, log_config=None)
 
     server_thread = threading.Thread(target=server_handle, daemon=True)
     server_thread.start()
