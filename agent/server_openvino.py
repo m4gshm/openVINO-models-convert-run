@@ -296,8 +296,9 @@ def resolve_pipe_and_parser(args, model_architectures: set[str], media_capabilit
         log.info("pipe selected by model media capabilities: %s", enum_value(pipe))
 
     if not pipe:
-        log.error("need define --pipe for model architectures=%s", model_architectures)
-        sys.exit(1)
+        pipe = Pipe.LLM
+        log.info("no parser family detected for architectures=%s, defaulting to %s",
+                 model_architectures, enum_value(pipe))
 
     return pipe, parser_type
 

@@ -31,10 +31,10 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agent*"]
+include = ["agent*", "fim_bench*"]
 
 [tool.pytest.ini_options]
-testpaths = ["agent"]
+testpaths = ["agent", "fim_bench"]
 addopts = "-m 'not e2e'"
 markers = [
     "e2e: real-model end-to-end smoke tests (run with `-m e2e`; downloads the model and starts the server)",

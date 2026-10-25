@@ -100,6 +100,13 @@ class ResolvePipeAndParserCase(unittest.TestCase):
         pipe, _parser_type = resolve_pipe_and_parser(args, set(), _with_media())
         self.assertEqual(Pipe.VLM, pipe)
 
+    def test_unknown_text_model_defaults_to_llm(self):
+        """An unrecognized text-only architecture is served as a plain LLM."""
+        args = self.parse()
+        pipe, parser_type = resolve_pipe_and_parser(args, {"LlamaForCausalLM"}, _text_only())
+        self.assertEqual(Pipe.LLM, pipe)
+        self.assertIsNone(parser_type)
+
 
 class NewModelParserCase(unittest.TestCase):
     """Tests of the instantiation of the parser of a model family."""
