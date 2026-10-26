@@ -57,6 +57,24 @@ class CompletionStopPhrasesCases(unittest.TestCase):
         self.assertEqual(StopSignal.STOP, stop_signal)
 
 
+    def test_no_role_warning_in_completion_mode(self):
+        """Completion mode has no role tokens: role None must not warn nor suppress output."""
+        with self.assertNoLogs("agent.inference.token_handler", level="WARNING"):
+            handler = self.handler(())
+            result, stop_signal = handler.processor.process_tokens(["fine ", "never"])
+        self.assertEqual(["fine ", "never"], self.chunks_text(result))
+        self.assertIsNone(stop_signal)
+
+    def test_unexpected_role_still_warns_in_chat_mode(self):
+        """In chat mode a non-assistant role keeps the unexpected-role warning."""
+        with self.assertLogs("agent.inference.token_handler", level="WARNING") as logs:
+            handler = TokenHandler(tokenizer=None, prompt="", parser=Parser(), init_chat_events=True,
+                                   is_stop=None, config=TokenHandlerConfig(), tool_fixer=None)
+            handler.processor.state.role = "user"
+            handler.processor.process_tokens(["hi"])
+        self.assertTrue([m for m in logs.output if "unexpected role user" in m])
+
+
 class TokenHandlerCases(unittest.TestCase):
     """Checks the repair of the tool call arguments of the token handler."""
 

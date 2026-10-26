@@ -502,7 +502,14 @@ class BaseOVController(BaseController):
         if over_limit_response:
             return [over_limit_response]
 
-        token_handler = self.new_token_handler(prompt, messages, is_veai, function_parameters, request)
+        user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
+        user_context.messages = messages
+        user_context.model_architectures = self.config.model_architectures
+        token_handler = self.new_token_handler(prompt, request,
+                                               init_chat_events=True,
+                                               tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
+                                               user_context=user_context,
+                                               supported_functions=function_parameters)
         return self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                     token_handler=token_handler, media=prepared.media)
 
@@ -562,27 +569,23 @@ class BaseOVController(BaseController):
         else:
             self.log_inference.info("inference start, media='%s'", media.summary())
 
-    def new_token_handler(self, prompt: str, messages: list[ChatCompletionMessageParam], is_veai: bool,
-                          function_parameters: dict[str, FunctionDefinitionParameters],
-                          request: Request) -> TokenHandler:
-        """Build the token handler of the request, wired to the stop conditions."""
+    def new_token_handler(self, prompt: str, request: Request, init_chat_events: bool,
+                          interrupt_event: threading.Event | None = None,
+                          config: TokenHandlerConfig | None = None, **handler_kwargs) -> TokenHandler:
+        """Wire the shared stop conditions and build a token handler of one request."""
         is_client_gone = disconnect_probe(request)
 
         def is_stop():
-            return self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
+            return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
+                    or (interrupt_event is not None and interrupt_event.is_set()))
 
-        user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
-        user_context.messages = messages
-        user_context.model_architectures = self.config.model_architectures
         return TokenHandler(tokenizer=self.tokenizer,
                             prompt=prompt,
                             parser=self.parser,
-                            init_chat_events=True,
+                            init_chat_events=init_chat_events,
                             is_stop=is_stop,
-                            config=self.handler_config,
-                            tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
-                            user_context=user_context,
-                            supported_functions=function_parameters,
+                            config=config if config is not None else self.handler_config,
+                            **handler_kwargs,
                             )
 
     @abstractmethod
@@ -612,8 +615,15 @@ class BaseOVController(BaseController):
         generation_config = new_generation_config(self.generate_opts,
                                                   GenerationRequest.of_completion_request(body))
 
-        token_handler = self.new_completion_token_handler(prompt, request, interrupt_event,
-                                                         stop_strings=body_stop_strings(body))
+        # a completion prompt has no chat role events, so the handler runs in the
+        # non-chat mode: tokens stream raw and no assistant-role check applies
+        stop_strings = body_stop_strings(body)
+        handler_config = (self.handler_config.model_copy(update={"stop_strings": stop_strings})
+                          if stop_strings else self.handler_config)
+        token_handler = self.new_token_handler(prompt, request,
+                                               init_chat_events=False,
+                                               interrupt_event=interrupt_event,
+                                               config=handler_config)
 
         stream = is_stream_request(body)
         prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
@@ -628,30 +638,6 @@ class BaseOVController(BaseController):
         if interrupt_event is not None:
             chunk_generator = self.guard_generation(chunk_generator, interrupt_event)
         return await new_http_response_completions(stream, chunk_generator)
-
-    def new_completion_token_handler(self, prompt: str, request: Request,
-                                     interrupt_event: threading.Event | None,
-                                     stop_strings: tuple[str, ...] = ()) -> TokenHandler:
-        """Build the token handler of a completion request, wired to the stop conditions."""
-        is_client_gone = disconnect_probe(request)
-
-        def is_stop():
-            return (self.stop_signal.is_set() or self.closed.is_set() or is_client_gone()
-                    or (interrupt_event is not None and interrupt_event.is_set()))
-
-        # a completion prompt has no chat role events, so the empty role is normal there
-        updates: dict[str, bool | tuple[str, ...]] = ({"stop_strings": stop_strings}
-                                                     if stop_strings else {})
-        if self.handler_config.prevent_no_assistant_inference_output:
-            updates["prevent_no_assistant_inference_output"] = False
-        handler_config = self.handler_config.model_copy(update=updates) if updates else self.handler_config
-        return TokenHandler(tokenizer=self.tokenizer,
-                            prompt=prompt,
-                            parser=self.parser,
-                            init_chat_events=True,
-                            is_stop=is_stop,
-                            config=handler_config,
-                            )
 
     def check_prompt_limit(self, max_length: int, encode_size: int, response_id: str) -> ChatCompletionChunk | None:
         """Return a length-stop chunk when the prompt does not fit, else None."""

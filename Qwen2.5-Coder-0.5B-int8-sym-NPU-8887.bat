@@ -1,0 +1,13 @@
+call agent.bat --model Qwen2.5-Coder-0.5B-int8-sym ^
+ --port 8887 ^
+ --device NPU ^
+ --max_prompt_len 8192 ^
+ --npu_turbo YES ^
+ --npu_compiler_type PLUGIN ^
+ --npu_prefill_hint DYNAMIC ^
+ --npuw_llm_enable_block_based_kv_cache NO ^
+ --npuw_llm_enable_continuous_prefill NO ^
+ --npuw_llm_enable_prefix_caching YES ^
+ --npuw_llm_prefill_attention_hint PYRAMID ^
+ --npuw_llm_prefill_chunk_size 256 ^
+ --npuw_devices NPU,GPU

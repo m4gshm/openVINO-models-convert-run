@@ -502,19 +502,27 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                             result.append(new_chat_completion_chunk(role=state.role, content=token))
 
                     erase = stop_hit or current_event == StateEvent.TOOL_RESPONSE or parser.is_erase(state, token)
-                    is_assistant = ROLE_ASSISTANT == state.role
-                    if not is_assistant:
-                        log.warning("unexpected role %s", state.role)
-                    if is_assistant or not self.config.prevent_no_assistant_inference_output:
-                        if erase:
-                            log.debug("erase token: %s", token)
-                        else:
-                            result.append(new_chat_completion_chunk(role=state.role, content=token,
-                                                                    thinking=thinking))
-                    else:
-                        log.warning("prevent generating by unexpected role %s, token '%s'", state.role, token)
+                    # the role check applies to chat mode only: in raw completion mode no role
+                    # token exists, state.role stays None, and the token is already emitted above
+                    if self.is_chat_mode:
+                        result.extend(self.emit_chat_token(token, erase))
         state.finalize(token)
         return result, stop_signal
+
+    def emit_chat_token(self, token: str, erase: bool) -> list[ChatCompletionChunk]:
+        """Emit a chat-mode token after the assistant-role check, empty when suppressed."""
+        state = self.state
+        is_assistant = ROLE_ASSISTANT == state.role
+        if not is_assistant:
+            log.warning("unexpected role %s", state.role)
+        if not is_assistant and self.config.prevent_no_assistant_inference_output:
+            log.warning("prevent generating by unexpected role %s, token '%s'", state.role, token)
+            return []
+        if erase:
+            log.debug("erase token: %s", token)
+            return []
+        return [new_chat_completion_chunk(role=state.role, content=token,
+                                          thinking=state.has_event(StateEvent.THINK))]
 
     def handle_delayed(self, phrase: Phrase) -> tuple[list[ChatCompletionChunk], StopSignal | None]:
         """Emit the delayed phrase as content or finish it as a tool call."""

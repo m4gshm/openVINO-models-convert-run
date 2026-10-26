@@ -4,8 +4,6 @@ import logging
 import re
 from typing import Any
 
-from openvino_genai import Tokenizer
-
 from agent.inference.phrase import Phrase
 from agent.openai.chat_completions_api import FunctionDefinitionParameters
 from agent.parser import ParserState, ParsedFunctionCall, Parser, fill_state_by_prompt_tail, DelayedResult
@@ -82,6 +80,10 @@ class Lfm2Parser(Parser):
         return sequence_end
 
     def is_delay_streaming_start(self, state: ParserState, token: str) -> bool:
+        # the json delay applies to the chat tool call protocol only: in the non-chat
+        # (completion) mode a `{`/`[` is ordinary code and must stream token by token
+        if state.get_current_event() is None:
+            return False
         token_rsplit = token.strip()
         return token_rsplit in (ARRAY_START, OBJECT_START)
 

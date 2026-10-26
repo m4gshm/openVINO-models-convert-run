@@ -172,6 +172,18 @@ class Lfm2TestCases(unittest.TestCase):
             "is_multiple_choice": True
         }, first.arguments)
 
+    def test_delay_streaming_requires_chat_mode(self):
+        """Without a chat conversation event a '{' token must not start the delayed streaming."""
+        completion_state = parser.new_state("def f():\n    return", init_chat_events=False)
+        self.assertIsNone(completion_state.get_current_event())
+        self.assertFalse(parser.is_delay_streaming_start(completion_state, "{"))
+
+    def test_delay_streaming_applies_in_chat_mode(self):
+        """In a chat conversation a '{' token starts the delayed streaming as before."""
+        chat_state = parser.new_state()
+        self.assertTrue(parser.is_delay_streaming_start(chat_state, "{"))
+        self.assertTrue(parser.is_delay_streaming_start(chat_state, " [ "))
+
 
 if __name__ == '__main__':
     unittest.main()

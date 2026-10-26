@@ -37,12 +37,23 @@ def run_bench(info: ModelInfo, port: int, cases: list[Case] | None = None,
         except Exception as exc:  # noqa: BLE001 - warmup failure surfaces in the cases below
             print(f"[bench] warmup failed: {exc}")
     results: list[CaseResult] = []
-    for case in cases or CASES:
+    run_cases = cases or CASES
+    total = len(run_cases)
+    for i, case in enumerate(run_cases, 1):
+        seconds, mark, error = 0.0, "", ""
         try:
             text, seconds = client.fim(case.prefix, case.suffix, max_tokens=case.max_tokens)
-            results.append(CaseResult(case.name, case.key in text, seconds, text, expected=case.key))
+            passed = case.matches(text)
+            results.append(CaseResult(case.name, passed, seconds, text,
+                                      expected=case.expected_display()))
+            mark = "PASS" if passed else "FAIL"
         except Exception as exc:  # noqa: BLE001 - a broken server must not kill the run
-            results.append(CaseResult(case.name, False, 0.0, "", expected=case.key, error=str(exc)))
+            error = str(exc)
+            results.append(CaseResult(case.name, False, 0.0, "", expected=case.key, error=error))
+            mark = "ERR"
+        left = total - i
+        tail = f", {left} to go" if left else ""
+        print(f"[bench] [{i}/{total}] {case.name}: {seconds:.1f}s {mark}{tail}")
     return results
 
 
@@ -54,6 +65,8 @@ def _inline(text: str) -> str:
 def format_report(info: ModelInfo, results: list[CaseResult]) -> str:
     """Human-readable summary block of one model."""
     lines = [f"=== {info.name} ==="]
+    if info.note:
+        lines.append(f"note: {info.note}")
     for res in results:
         if res.error:
             lines.append(f"[ERR ] {res.case}: {res.error}")
@@ -66,6 +79,4 @@ def format_report(info: ModelInfo, results: list[CaseResult]) -> str:
     passed = sum(1 for r in results if r.passed)
     total = sum(r.seconds for r in results)
     lines.append(f"--- {info.name}: {passed}/{len(results)} passed, total {total:.1f}s")
-    if info.note:
-        lines.append(f"    note: {info.note}")
     return "\n".join(lines)

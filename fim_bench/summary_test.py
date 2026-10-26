@@ -42,10 +42,21 @@ class SummaryCase(unittest.TestCase):
         self.assertEqual(3.0, static_a["total"])
 
     def test_markdown_renders_columns(self):
-        cases, rows = build_table([_entry("A", "STATIC", "c1", True, 1.0)])
+        cases, rows = build_table([
+            _entry("A", "STATIC", "c1", True, 1.0),
+            _entry("B-model-longer-name", "STATIC", "c1", True, 12.34),
+        ])
         table = format_markdown(cases, rows)
-        self.assertIn("| model | label | c1 | passed | total s |", table)
-        self.assertIn("| A | STATIC | PASS 1.0s | 1/1 | 1.0 |", table)
+        lines = table.splitlines()
+        self.assertEqual(4, len(lines))
+        # all rows share the same width: cells are padded to the column width
+        self.assertEqual(1, len({len(ln) for ln in lines}))
+        # times are right-aligned within the shared width
+        self.assertTrue(lines[2].rstrip().endswith("1.0 |"))
+        self.assertTrue(lines[3].rstrip().endswith("12.3 |"))
+        # the longer model name defines the column width for both rows
+        self.assertIn("| B-model-longer-name |", lines[3])
+        self.assertIn("| A                   |", lines[2])
 
     def test_main_reports_empty_log(self):
         with tempfile.TemporaryDirectory() as tmp:

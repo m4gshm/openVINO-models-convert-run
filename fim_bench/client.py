@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -43,20 +44,33 @@ def get_model_ids(port: int, timeout_s: float = 5.0) -> list[str]:
         with urllib.request.urlopen(url, timeout=timeout_s) as resp:
             out = json.loads(resp.read())
         return [item["id"] for item in out.get("data", [])]
-    except (urllib.error.URLError, json.JSONDecodeError, KeyError):
+    except (urllib.error.URLError, http.client.HTTPException, OSError,
+            json.JSONDecodeError, KeyError):
         return []
 
 
 def wait_ready(port: int, timeout_s: float = 600.0, poll_s: float = 10.0) -> bool:
-    """Poll /v1/models until the server answers, return whether it became ready."""
+    """Poll /v1/models until the server answers, return whether it became ready.
+
+    A starting server can accept a TCP connection and close it without an
+    HTTP status (uvicorn binds the socket before the app is up) - that
+    surfaces as ``http.client.BadStatusLine``/``ConnectionResetError`` and
+    must be treated as "not ready yet", not a crash. Prints a dot per poll
+    so the silent model-loading time stays visible in the console.
+    """
     url = f"http://127.0.0.1:{port}/v1/models"
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=5.0) as resp:
-                if resp.status == 200:
-                    return True
-        except urllib.error.URLError:
-            pass
-        time.sleep(poll_s)
-    return False
+    print(f"[bench]   waiting for the server on port {port} ", end="", flush=True)
+    try:
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=5.0) as resp:
+                    if resp.status == 200:
+                        return True
+            except (urllib.error.URLError, http.client.HTTPException, OSError):
+                pass
+            print(".", end="", flush=True)
+            time.sleep(poll_s)
+        return False
+    finally:
+        print(f" ({time.monotonic() - (deadline - timeout_s):.0f}s)", flush=True)

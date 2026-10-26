@@ -1,68 +1,67 @@
-# FIM benchmark
+﻿# FIM benchmark
 
-Сравнение моделей код-комплита (fill-in-the-middle) на OpenVINO-агенте через
-`POST /v1/completions`. Бенч гоняет фиксированный набор кейсов и оценивает,
-содержит ли заполнение середины ключевой фрагмент, плюс замеряет время.
+РЎСЂР°РІРЅРµРЅРёРµ РјРѕРґРµР»РµР№ РєРѕРґ-РєРѕРјРїР»РёС‚Р° (fill-in-the-middle) РЅР° OpenVINO-Р°РіРµРЅС‚Рµ С‡РµСЂРµР·
+`POST /v1/completions`. Р‘РµРЅС‡ РіРѕРЅСЏРµС‚ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ РЅР°Р±РѕСЂ РєРµР№СЃРѕРІ Рё РѕС†РµРЅРёРІР°РµС‚,
+СЃРѕРґРµСЂР¶РёС‚ Р»Рё Р·Р°РїРѕР»РЅРµРЅРёРµ СЃРµСЂРµРґРёРЅС‹ РєР»СЋС‡РµРІРѕР№ С„СЂР°РіРјРµРЅС‚, РїР»СЋСЃ Р·Р°РјРµСЂСЏРµС‚ РІСЂРµРјСЏ.
 
-## Запуск
+## Р—Р°РїСѓСЃРє
 
 ```bash
-# сервер уже запущен вручную (порт 8887)
+# СЃРµСЂРІРµСЂ СѓР¶Рµ Р·Р°РїСѓС‰РµРЅ РІСЂСѓС‡РЅСѓСЋ (РїРѕСЂС‚ 8886)
 .venv\Scripts\python -m fim_bench --model Qwen2.5-Coder-3B-nf4-sym-g-1-se-awq
 
-# бенч сам стартует/останавливает сервер на каждую модель (через _bench_model.bat)
+# Р±РµРЅС‡ СЃР°Рј СЃС‚Р°СЂС‚СѓРµС‚/РѕСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ СЃРµСЂРІРµСЂ РЅР° РєР°Р¶РґСѓСЋ РјРѕРґРµР»СЊ (С‡РµСЂРµР· launch-agent.bat)
 .venv\Scripts\python -m fim_bench --model Qwen3.5-2B-int4-sym --launch
 
-# несколько моделей подряд + отчёт в файл
+# РЅРµСЃРєРѕР»СЊРєРѕ РјРѕРґРµР»РµР№ РїРѕРґСЂСЏРґ + РѕС‚С‡С‘С‚ РІ С„Р°Р№Р»
 .venv\Scripts\python -m fim_bench --model A --model B --launch --report reports\fim.md
 ```
 
-## Структура
+## РЎС‚СЂСѓРєС‚СѓСЂР°
 
-| Файл | Назначение |
+| Р¤Р°Р№Р» | РќР°Р·РЅР°С‡РµРЅРёРµ |
 |---|---|
-| `models.py` | реестр моделей и их **FIM-токенов** (Qwen / LFM / Mellum-стили); добавление моделей сюда |
-| `cases.py` | кейсы `(prefix, suffix, key)`; добавление задач сюда |
-| `client.py` | HTTP-клиент `/v1/completions` + ожидание готовности сервера |
-| `runner.py` | прогон кейсов, результаты, форматирование отчёта (expected/actual) |
-| `__main__.py` | CLI: `--model` (повторяемый), `--port`, `--launch`, `--server-arg`, `--report` |
-| `_bench_model.bat` | запуск сервера модели с безопасными NPU-флагами (`<model> [extra args...]`) |
-| `fim-bench-all.bat` | бенч всех моделей из дефолтного набора, отчёт в `reports\` |
-| `prefill-compare.bat` | сравнение prefill-режимов (STATIC/DYN-DEFAULT/DYN-HFA/DYN-PYRAMID) для одной модели |
-| `qwen25-full-compare.bat` | матрица: все Qwen2.5-Coder × все prefill-режимы |
+| `models.py` | СЂРµРµСЃС‚СЂ РјРѕРґРµР»РµР№ Рё РёС… **FIM-С‚РѕРєРµРЅРѕРІ** (Qwen / LFM / Mellum-СЃС‚РёР»Рё); РґРѕР±Р°РІР»РµРЅРёРµ РјРѕРґРµР»РµР№ СЃСЋРґР° |
+| `cases.py` | РєРµР№СЃС‹ `(prefix, suffix, key)`; РґРѕР±Р°РІР»РµРЅРёРµ Р·Р°РґР°С‡ СЃСЋРґР° |
+| `client.py` | HTTP-РєР»РёРµРЅС‚ `/v1/completions` + РѕР¶РёРґР°РЅРёРµ РіРѕС‚РѕРІРЅРѕСЃС‚Рё СЃРµСЂРІРµСЂР° |
+| `runner.py` | РїСЂРѕРіРѕРЅ РєРµР№СЃРѕРІ, СЂРµР·СѓР»СЊС‚Р°С‚С‹, С„РѕСЂРјР°С‚РёСЂРѕРІР°РЅРёРµ РѕС‚С‡С‘С‚Р° (expected/actual) |
+| `__main__.py` | CLI: `--model` (РїРѕРІС‚РѕСЂСЏРµРјС‹Р№), `--port`, `--launch`, `--server-arg`, `--report` |
+| `launch-agent.bat` | Р·Р°РїСѓСЃРє СЃРµСЂРІРµСЂР° РјРѕРґРµР»Рё СЃ Р±РµР·РѕРїР°СЃРЅС‹РјРё NPU-С„Р»Р°РіР°РјРё (`<model> [extra args...]`) |
+| `tuning-sweep.bat` | универсальный прогон параметров (prefill-режимы, chunk size, KV cache, max_prompt_len) для списка моделей + итоговая таблица |
+| `qwen25-1.5b-tuning.bat` / `qwen25-3b-tuning.bat` | обёртки tuning-sweep для Qwen2.5-Coder 1.5B / всех 3B-квтизаций |
+| `qwen25-0.5b-tuning.bat` / `qwen25-3b-tuning.bat` / `mellum-tuning.bat` | обёртки tuning-sweep по семействам; свип включает NPU- и GPU-конфигурации |
 
-## Важно: FIM-токены
+## Р’Р°Р¶РЅРѕ: FIM-С‚РѕРєРµРЅС‹
 
-У семейств разные управляющие токены, при неверном стиле модель выдаёт пустоту
-или мусор:
+РЈ СЃРµРјРµР№СЃС‚РІ СЂР°Р·РЅС‹Рµ СѓРїСЂР°РІР»СЏСЋС‰РёРµ С‚РѕРєРµРЅС‹, РїСЂРё РЅРµРІРµСЂРЅРѕРј СЃС‚РёР»Рµ РјРѕРґРµР»СЊ РІС‹РґР°С‘С‚ РїСѓСЃС‚РѕС‚Сѓ
+РёР»Рё РјСѓСЃРѕСЂ:
 
-| Семейство | Формат |
+| РЎРµРјРµР№СЃС‚РІРѕ | Р¤РѕСЂРјР°С‚ |
 |---|---|
-| Qwen2.5-Coder, Qwen3.5 | `<\|fim_prefix\|> … <\|fim_suffix\|> … <\|fim_middle\|>` |
-| LFM2.x-Coder (LiquidAI) | `<\|fim_pre\|> … <\|fim_suf\|> … <\|fim_mid\|>` |
-| Mellum (JetBrains) | `<fim_prefix> … <fim_suffix> … <fim_middle>` (без пайпов) |
+| Qwen2.5-Coder, Qwen3.5 | `<\|fim_prefix\|> вЂ¦ <\|fim_suffix\|> вЂ¦ <\|fim_middle\|>` |
+| LFM2.x-Coder (LiquidAI) | `<\|fim_pre\|> вЂ¦ <\|fim_suf\|> вЂ¦ <\|fim_mid\|>` |
+| Mellum (JetBrains) | `<fim_prefix> вЂ¦ <fim_suffix> вЂ¦ <fim_middle>` (Р±РµР· РїР°Р№РїРѕРІ) |
 
-## Серверные флаги
+## РЎРµСЂРІРµСЂРЅС‹Рµ С„Р»Р°РіРё
 
-`_bench_model.bat` запускает агент с консервативной конфигурацией NPU:
-`--npu_prefill_hint STATIC` (динамические attention-хинты на LFM2.5 падают —
-см. `bug-report-openvino-38246-npuw-strided-view.md`), без prefix caching.
+`launch-agent.bat` Р·Р°РїСѓСЃРєР°РµС‚ Р°РіРµРЅС‚ СЃ РєРѕРЅСЃРµСЂРІР°С‚РёРІРЅРѕР№ РєРѕРЅС„РёРіСѓСЂР°С†РёРµР№ NPU:
+`--npu_prefill_hint STATIC` (РґРёРЅР°РјРёС‡РµСЃРєРёРµ attention-С…РёРЅС‚С‹ РЅР° LFM2.5 РїР°РґР°СЋС‚ вЂ”
+СЃРј. `bug-report-openvino-38246-npuw-strided-view.md`), Р±РµР· prefix caching.
 
-Тесты: `.venv\Scripts\python -m pytest fim_bench -q`
+РўРµСЃС‚С‹: `.venv\Scripts\python -m pytest fim_bench -q`
 
-## Сводный отчёт
+## РЎРІРѕРґРЅС‹Р№ РѕС‚С‡С‘С‚
 
-Каждый прогон `python -m fim_bench` дописывает результаты кейсов в общий лог
-`reports\fim-results.jsonl` (метка прогона: `--label`, у prefill-compare это имя
-режима). Сводная таблица по всем прогонам:
+РљР°Р¶РґС‹Р№ РїСЂРѕРіРѕРЅ `python -m fim_bench` РґРѕРїРёСЃС‹РІР°РµС‚ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РєРµР№СЃРѕРІ РІ РѕР±С‰РёР№ Р»РѕРі
+`reports\fim-results.jsonl` (РјРµС‚РєР° РїСЂРѕРіРѕРЅР°: `--label`, Сѓ tuning-sweep СЌС‚Рѕ РёРјСЏ
+СЂРµР¶РёРјР°). РЎРІРѕРґРЅР°СЏ С‚Р°Р±Р»РёС†Р° РїРѕ РІСЃРµРј РїСЂРѕРіРѕРЅР°Рј:
 
 ```bash
 .venv\Scripts\python -m fim_bench.summary
 .venv\Scripts\python -m fim_bench.summary --out reports\summary.md
 ```
 
-Формат таблицы: строка = (модель, режим), колонки = кейсы (`PASS 12.3s` /
-`fail 4.5s` / `ERR`), плюс итог passed и суммарное время.
+Р¤РѕСЂРјР°С‚ С‚Р°Р±Р»РёС†С‹: СЃС‚СЂРѕРєР° = (РјРѕРґРµР»СЊ, СЂРµР¶РёРј), РєРѕР»РѕРЅРєРё = РєРµР№СЃС‹ (`PASS 12.3s` /
+`fail 4.5s` / `ERR`), РїР»СЋСЃ РёС‚РѕРі passed Рё СЃСѓРјРјР°СЂРЅРѕРµ РІСЂРµРјСЏ.
 
-Скрипты `fim-bench-all.bat` и `prefill-compare.bat` сами обновляют сводную
-таблицу `reports\fim-summary.md` после прогона.
+С‚Р°Р±Р»РёС†Сѓ `reports\fim-summary.md` РїРѕСЃР»Рµ РїСЂРѕРіРѕРЅР°.

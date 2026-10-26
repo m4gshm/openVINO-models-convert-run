@@ -78,17 +78,30 @@ def build_table(runs: list[dict]) -> tuple[list[str], list[dict]]:
 
 
 def format_markdown(cases: list[str], rows: list[dict]) -> str:
-    """Render the pivot as a markdown table."""
+    """Render the pivot as a markdown table with column-aligned cells."""
+    def case_cell(row: dict, case: str) -> str:
+        return row["cases"].get(case, "-")
+
+    table: list[list[str]] = []
     header = ["model", "label", *cases, "passed", "total s"]
-    lines = [
-        "| " + " | ".join(header) + " |",
-        "| " + " | ".join("---" for _ in header) + " |",
-    ]
+    table.append(header)
     for row in rows:
         cells = [row["model"], row["label"]]
-        cells += [row["cases"].get(case, "-") for case in cases]
+        cells += [case_cell(row, case) for case in cases]
         cells += [f"{row['passed']}/{row['count']}", f"{row['total']:.1f}"]
-        lines.append("| " + " | ".join(cells) + " |")
+        table.append(cells)
+
+    widths = [max(len(cells[col]) for cells in table) for col in range(len(header))]
+
+    def fmt(cells: list[str]) -> str:
+        padded = []
+        for col, cell in enumerate(cells):
+            is_right = header[col] in ("passed", "total s")
+            padded.append(cell.rjust(widths[col]) if is_right else cell.ljust(widths[col]))
+        return "| " + " | ".join(padded) + " |"
+
+    lines = [fmt(header), "| " + " | ".join("-" * widths[col] for col in range(len(header))) + " |"]
+    lines.extend(fmt(cells) for cells in table[1:])
     return "\n".join(lines) + "\n"
 
 
@@ -101,9 +114,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="optional markdown file to write the table into")
     args = parser.parse_args(argv)
 
+    def clickable(path: Path) -> str:
+        return path.resolve().as_uri()
+
     runs = load_runs(args.results_log)
     if not runs:
-        print(f"no runs recorded in {args.results_log}")
+        print(f"no runs recorded in {clickable(args.results_log)}")
         return 1
     cases, rows = build_table(runs)
     table = format_markdown(cases, rows)
@@ -111,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(table, encoding="utf-8")
-        print(f"[summary] written to {args.out}")
+        print(f"[summary] written to {clickable(args.out)}")
     return 0
 
 
