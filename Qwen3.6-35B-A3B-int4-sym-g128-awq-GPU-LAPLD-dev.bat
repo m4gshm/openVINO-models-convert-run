@@ -1,7 +1,8 @@
-call agent-dev.bat --model Qwen3.6-35B-A3B-int4-sym-g128-awq ^
+call agent-dev.bat ^
+ --model Qwen3.6-35B-A3B-int4-sym-g128-awq ^
  --detect_cycled_tool_call on ^
  --pipe VLM ^
  --kv_cache_precision u4 ^
- --generate_config_file .config/qwen_3.5_generate_config_LAPLD.json ^
- --scheduler_config_file .config/LAPLD_scheduler_config.json ^
+ --generate_config_file .config/generate_config_prompt_lookup.json ^
+ --scheduler_config_file .config/scheduler_config_no_dsf.json ^
  --prompt_lookup on

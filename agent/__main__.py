@@ -11,7 +11,7 @@ from agent.server_openvino import run_openvino, add_openvino_args
 from agent.typecheck import typecheck
 
 os.environ["OPENVINO_LOG_LEVEL"] = "4"
-os.environ["OPENVINO_NPUW_LOG_LEVEL"] = "DEBUG"
+# os.environ["OPENVINO_NPUW_LOG_LEVEL"] = "DEBUG"
 os.environ["ONEDNN_VERBOSE"] = "ON"
 os.environ["ONEDNN_VERBOSE_TIMESTAMP"] = "1"
 

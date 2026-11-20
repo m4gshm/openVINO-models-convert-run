@@ -24,3 +24,8 @@ models/*
 .aiforopenide/
 !.aiforopenide/config.json
 /reports/
+
+# Build artifacts and caches
+*.egg-info/
+.gradle/
+NUL

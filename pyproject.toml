@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "pillow>=11",
     "beartype>=0.19",
+    "huggingface_hub>=0.34",
 ]
 
 [project.optional-dependencies]

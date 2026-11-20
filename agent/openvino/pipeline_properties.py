@@ -81,6 +81,7 @@ def optional_npu_properties(args) -> dict[str, Any]:
     if args.npuw_devices:
         optional["NPUW_DEVICES"] = args.npuw_devices
     if args.npu_compilation_mode_params:
+        # compute-layers-with-higher-precision=Sqrt,Power,ReduceMean,Add_RMSNorm"
         # optimization-level=2 performance-hint-override=latency
         optional["NPU_COMPILATION_MODE_PARAMS"] = args.npu_compilation_mode_params
     if args.npuw_llm_prefill_moe_hint:
