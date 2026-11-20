@@ -107,7 +107,8 @@ class OllamaApi:
         def lines():
             """Convert the chat chunks into generate response lines."""
             for chunk in chunks:
-                yield generate_chunk_to_ollama(chunk, self.model_name, created_at, body.prompt)
+                if chunk.choices:  # the final usage chunk has no choice to convert
+                    yield generate_chunk_to_ollama(chunk, self.model_name, created_at, body.prompt)
 
         if body.stream:
             return ndjson_stream(lines())

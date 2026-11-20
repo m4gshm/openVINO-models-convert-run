@@ -20,7 +20,7 @@ from starlette.requests import Request
 
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
-from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT, new_chat_completion_chunk
+from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT, new_chat_completion_chunk, new_usage_chunk
 from agent.openai.engine_rest_common import ControllerConfig, BaseController
 
 log = logging.getLogger(__name__)
@@ -98,11 +98,18 @@ class OpenAiController(BaseController):
         # a client that asked for a plain response gets the chunks aggregated below instead.
         remote_stream = self.client.chat.completions.create(model=body_model,
                                                             stream=True,
+                                                            stream_options={"include_usage": True},
                                                             messages=messages)
 
         def chunk_generator() -> Iterable[ChatCompletionChunk]:
             try:
                 for chunk in remote_stream:
+                    if chunk.usage:
+                        yield new_usage_chunk(
+                            response_id=response_id,
+                            model=chunk.model or body_model,
+                            prompt_tokens=chunk.usage.prompt_tokens,
+                            completion_tokens=chunk.usage.completion_tokens)
                     if chunk.choices:
                         choice = chunk.choices[0]
                         delta = choice.delta

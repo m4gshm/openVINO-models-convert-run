@@ -1,7 +1,9 @@
 """Tests of engine_rest_common: config, chat history, stream flag, aggregation and probes."""
 import asyncio
 import base64
+import threading
 import unittest
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -9,19 +11,23 @@ from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from starlette.responses import StreamingResponse
 
+from agent.inference.token_handler import TokenHandlerConfig
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts
-from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call
+from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call, \
+    new_usage_chunk
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai import completions_api
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
-from agent.openai.engine_rest_common import (ControllerConfig, GenerationRequest, body_stop_strings,
+from agent.openai.engine_rest_common import (BaseOVController, ControllerConfig, GenerationRequest, body_stop_strings,
                                              disconnect_probe,
-                                             is_stream_request, make_union, new_chat_history,
+                                             is_stream_request, make_union, new_chat_completion_union,
+                                             new_chat_history,
                                              new_generation_config, new_http_response_chat,
                                              new_http_response_completions)
+from agent.parser import Parser
 
 
 def new_config(**kwargs) -> ControllerConfig:
@@ -125,6 +131,58 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual("", content)
         self.assertEqual("why", reasoning_content)
         self.assertEqual([tool_call], tool_calls)
+
+
+class UsageCase(unittest.TestCase):
+    """Tests of the token usage reported to the client."""
+
+    def test_aggregated_response_keeps_the_usage_of_the_stream(self):
+        """The aggregated chat completion carries the usage chunk of the stream."""
+        chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, content="hi", model="m", finish_reason="stop"),
+                  new_usage_chunk(prompt_tokens=11, completion_tokens=4, model="m", response_id="r")]
+        completion = new_chat_completion_union(iter(chunks))
+        self.assertEqual("hi", completion.choices[0].message.content)
+        usage = cast(Any, completion.usage)
+        self.assertEqual(11, usage.prompt_tokens)
+        self.assertEqual(4, usage.completion_tokens)
+        self.assertEqual(15, usage.total_tokens)
+
+    def test_usage_chunk_is_appended_after_the_generated_chunks(self):
+        """The wrapper reports the prompt size and the generated tokens as the last chunk."""
+        controller = FakeOVController()
+        handler = cast(Any, SimpleNamespace(processor=SimpleNamespace(token_counter=7)))
+        first = new_chat_completion_chunk(role=ROLE_ASSISTANT, content="x", model="m")
+        chunks = list(controller.with_usage([first], prompt_tokens=3, token_handler=handler))
+        self.assertEqual(2, len(chunks))
+        self.assertEqual([], chunks[-1].choices)
+        self.assertEqual("m", chunks[-1].model)
+        self.assertEqual(first.id, chunks[-1].id)
+        usage = cast(Any, chunks[-1].usage)
+        self.assertEqual(3, usage.prompt_tokens)
+        self.assertEqual(7, usage.completion_tokens)
+
+
+class FakeTokenizer:  # pylint: disable=too-few-public-methods  # duck-typed stub
+    """Tokenizer stub: the controller only counts the prompt tokens with it."""
+
+    def encode(self, _prompt):
+        """Return a fake encoding result."""
+        return SimpleNamespace(input_ids=SimpleNamespace(size=1))
+
+
+class FakeOVController(BaseOVController):
+    """Controller stub exercising the shared usage wrapper."""
+
+    def __init__(self):
+        """Wire the controller with a stub tokenizer and no model."""
+        super().__init__(ControllerConfig(max_prompt_len=4096, model_architectures=set(), model_name="m"),
+                         parser=Parser(), tokenizer=FakeTokenizer(),
+                         handler_config=TokenHandlerConfig(), generate_opts=GenerateOpts(),
+                         stop_signal=threading.Event())
+
+    def chunk_generator(self, prompt, generation_config, token_handler, media):
+        """Emit no chunks: the wrapper is under test, not generation."""
+        return []
 
 
 class GenerationConfigCase(unittest.TestCase):

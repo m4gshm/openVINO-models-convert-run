@@ -8,7 +8,7 @@ from agent.ollama.ollama_convert import aggregate_ollama_chat, aggregate_ollama_
     chat_chunk_to_ollama, chat_chunks_to_ollama, done_reason_of, generate_chunk_to_ollama, \
     ollama_chat_to_request, ollama_generate_to_request, ollama_options_to_request_params, \
     tags_of_models
-from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk
+from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_usage_chunk
 from agent.openai.models_api import ModelObject
 
 
@@ -142,6 +142,12 @@ class OllamaResponseCase(unittest.TestCase):
         self.assertEqual("hello", response["message"]["content"])
         self.assertTrue(response["done"])
         self.assertEqual("stop", response["done_reason"])
+
+    def test_usage_chunk_produces_no_line(self):
+        """The final usage chunk carries no choice and yields no Ollama line."""
+        lines = list(chat_chunks_to_ollama([new_usage_chunk(prompt_tokens=2, completion_tokens=3, model="m")],
+                                           "m", "now"))
+        self.assertEqual([], lines)
 
     def test_generate_line_carries_the_prompt(self):
         """A generate line repeats the prompt of the request."""

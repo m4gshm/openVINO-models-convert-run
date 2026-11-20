@@ -163,7 +163,9 @@ def chat_chunks_to_ollama(chunks: Iterable[ChatCompletionChunk], model: str,
                           created_at: str) -> Iterator[dict[str, Any]]:
     """Convert a stream of OpenAI chat chunks into Ollama chat response lines."""
     for chunk in chunks:
-        yield chat_chunk_to_ollama(chunk, model, created_at)
+        # the final usage chunk carries no choice; Ollama reports nothing of it in a line
+        if chunk.choices:
+            yield chat_chunk_to_ollama(chunk, model, created_at)
 
 
 def generate_chunk_to_ollama(chunk: ChatCompletionChunk, model: str, created_at: str,

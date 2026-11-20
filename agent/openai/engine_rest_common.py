@@ -10,6 +10,7 @@ from datetime import timedelta
 from typing import Any, Callable, Literal, Iterable, Iterator
 
 from fastapi.exceptions import RequestValidationError
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletionChunk, ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, Choice
 from openvino_genai import ChatHistory
@@ -37,7 +38,7 @@ from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
-from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk
+from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk, new_usage_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
     ChatCompletionFunctionToolParam, FunctionDefinitionParameters
 from agent.openai.interrupt import InterruptRegistry
@@ -161,16 +162,19 @@ async def new_http_response_completions(stream: bool,
 
 
 class CapturedChunkStream:  # pylint: disable=too-few-public-methods  # a stream wrapper only iterates
-    """Wraps a chunk stream and captures the model name for the aggregated response."""
+    """Wraps a chunk stream and captures the model name and usage of the aggregated response."""
 
     def __init__(self, chunks: Iterable[ChatCompletionChunk]):
         self.chunks = iter(chunks)
         self.model = ""
+        self.usage: CompletionUsage | None = None
 
     def __iter__(self) -> Iterator[ChatCompletionChunk]:
         for chunk in self.chunks:
             if chunk.model:
                 self.model = chunk.model
+            if chunk.usage:
+                self.usage = chunk.usage
             yield chunk
 
 
@@ -181,7 +185,7 @@ def new_chat_completion_union(chunk_generator: Iterable[ChatCompletionChunk]) ->
     response_id = str(uuid.uuid4())
     return new_chat_completion(response_id=response_id, finish_reason=finish_reason, content=full_content,
                                reasoning_content=full_reasoning_content, tool_calls=full_tool_calls,
-                               model=stream.model)
+                               model=stream.model, usage=stream.usage)
 
 
 @dataclass
@@ -498,7 +502,7 @@ class BaseOVController(BaseController):
         prompt = self.build_prompt(prepared.messages, tools_raw)
         generation_config = new_generation_config(self.generate_opts,
                                                   GenerationRequest.of_chat_request(body))
-        over_limit_response = self.check_prompt_of(prompt, generation_config, prepared.media)
+        over_limit_response, prompt_tokens_amount = self.check_prompt_of(prompt, generation_config, prepared.media)
         if over_limit_response:
             return [over_limit_response]
 
@@ -510,20 +514,37 @@ class BaseOVController(BaseController):
                                                tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
                                                user_context=user_context,
                                                supported_functions=function_parameters)
-        return self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                    token_handler=token_handler, media=prepared.media)
+        return self.with_usage(self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                                    token_handler=token_handler, media=prepared.media),
+                               prompt_tokens=prompt_tokens_amount, token_handler=token_handler)
+
+    def with_usage(self, chunks: Iterable[ChatCompletionChunk], prompt_tokens: int,
+                   token_handler: TokenHandler) -> Iterable[ChatCompletionChunk]:
+        """Append a final usage chunk built from the prompt size and the generated token count."""
+        def generate() -> Iterable[ChatCompletionChunk]:
+            response_id = None
+            for chunk in chunks:
+                response_id = chunk.id or response_id
+                yield chunk
+            # shortcut: counts every decoded token, stop/special ones included; the exact pipeline
+            # metrics are only in the log. Upgrade if clients start reconciling the numbers.
+            yield new_usage_chunk(prompt_tokens=prompt_tokens,
+                                  completion_tokens=token_handler.processor.token_counter,
+                                  response_id=response_id,
+                                  model=self.config.model_name or "")
+        return generate()
 
     def check_prompt_of(self, prompt: str, generation_config: GenerationConfig,
-                        media: MediaInputs) -> ChatCompletionChunk | None:
-        """Check the size of the prompt and log the parameters of the generation."""
+                        media: MediaInputs) -> tuple[ChatCompletionChunk | None, int]:
+        """Check the size of the prompt, log the generation parameters and return the prompt size."""
         prompt_tokens_amount = get_tokens_size(self.tokenizer, prompt)
         over_limit_response = self.check_prompt_limit(max_length=generation_config.max_length,
                                                       encode_size=prompt_tokens_amount,
                                                       response_id=str(uuid.uuid4()))
         if over_limit_response:
-            return over_limit_response
+            return over_limit_response, prompt_tokens_amount
         self.log_inference_start(prompt_tokens_amount, generation_config, media)
-        return None
+        return None, prompt_tokens_amount
 
     def prepare_tools(self, tools, is_veai: bool) -> tuple[list[dict[str, Any]],
     dict[str, FunctionDefinitionParameters]]:

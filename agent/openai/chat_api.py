@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import openai
 from beartype import beartype
+from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage
 from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
 from pydantic import BaseModel
@@ -42,7 +43,8 @@ def new_chat_completion(  # pylint: disable=too-many-arguments,too-many-position
         tool_calls: list[Any] | None = None,
         response_id: str | None = None,
         finish_reason: FinishReason = "stop",
-        model: str = "") -> ChatCompletion:
+        model: str = "",
+        usage: CompletionUsage | None = None) -> ChatCompletion:
     """Build a non-streaming chat completion with a single assistant choice."""
     if not response_id:
         response_id = str(uuid.uuid4())
@@ -50,7 +52,8 @@ def new_chat_completion(  # pylint: disable=too-many-arguments,too-many-position
                           model=model, choices=[new_choice_message(content=content,
                                                                    reasoning_content=reasoning_content,
                                                                    finish_reason=finish_reason,
-                                                                   tool_calls=tool_calls)])
+                                                                   tool_calls=tool_calls)],
+                          usage=usage)
 
 
 # Signature mirrors the openai chunk field set.
@@ -70,6 +73,19 @@ def new_chat_completion_chunk(  # pylint: disable=too-many-arguments,too-many-po
                                                                       role=role,
                                                                       finish_reason=finish_reason,
                                                                       tool_calls=tool_calls)])
+
+
+@beartype
+def new_usage_chunk(prompt_tokens: int, completion_tokens: int, response_id: str | None = None,
+                    model: str = "") -> ChatCompletionChunk:
+    """Build the final streaming chunk that carries only the token usage."""
+    if not response_id:
+        response_id = str(uuid.uuid4())
+    return ChatCompletionChunk(object=CHAT_COMPLETION_CHUNK, id=response_id, created=int(time.perf_counter()),
+                               model=model, choices=[],
+                               usage=CompletionUsage(prompt_tokens=prompt_tokens,
+                                                     completion_tokens=completion_tokens,
+                                                     total_tokens=prompt_tokens + completion_tokens))
 
 
 @beartype
