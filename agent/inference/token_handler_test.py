@@ -3,6 +3,7 @@ import unittest
 from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
+from agent.inference.phrase import DEFAULT_DUPLICATED_TOKENS_LIMIT
 from agent.inference.token_handler import StopSignal, TokenHandler, TokenHandlerConfig
 from agent.parser import ParsedFunctionCall, Parser
 
@@ -73,6 +74,15 @@ class CompletionStopPhrasesCases(unittest.TestCase):
             handler.processor.state.role = "user"
             handler.processor.process_tokens(["hi"])
         self.assertTrue([m for m in logs.output if "unexpected role user" in m])
+
+    def test_looped_generation_streams_a_warning_and_cancels(self):
+        """A looped token run ends the stream with the loop warning and a CANCEL stop."""
+        handler = self.handler(())
+        result, stop_signal = handler.processor.process_tokens(["x"] * (DEFAULT_DUPLICATED_TOKENS_LIMIT + 1))
+
+        self.assertEqual(StopSignal.CANCEL, stop_signal)
+        text = "".join(self.chunks_text(result))
+        self.assertIn("WARNING: Generated content appears to be a loop", text)
 
 
 class TokenHandlerCases(unittest.TestCase):

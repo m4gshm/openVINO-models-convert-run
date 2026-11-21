@@ -4,7 +4,7 @@ import logging
 from agent.inference.loop_error import LoopError, ERROR_APPEARS_TO_BE_A_LOOP
 
 NEW_LINE_UNIX = '\n'
-NEW_LINE_WINDOWS = "\r\n"
+NEW_LINE_MAC = "\r"
 
 DEFAULT_DUPLICATED_TOKENS_LIMIT = 100
 
@@ -130,8 +130,10 @@ def get_last_part_border(line: list[str], line_islands_reversed: dict[int, int] 
     amount = len(line)
     last_part_start: int | None = None
     last_part_end: int | None = None
-    threshold = amount - amount * 0.1
-    i = amount
+    # the last 10% of the line, but at least its last token: on a short line the fractional
+    # threshold used to skip the only island the border search could find
+    threshold = amount - max(1, amount // 10)
+    i = amount - 1
     if line_islands_reversed:
         while i >= threshold:
             last_part_end = i
@@ -338,7 +340,7 @@ def find_duplicated_with_longest_last(  # pylint: disable=too-many-arguments,too
     end_positions = list[int]()
     for start_position in start_positions:
         prev_word_start = duplicated_ranges_reversed.get(start_position)
-        if prev_word_start and prev_word_start >= last_part_start:
+        if prev_word_start is not None and prev_word_start >= last_part_start:
             prev_word = tuple(duplicates_check_tail[prev_word_start: start_position + 1])
             if duplicated_words.get(prev_word):
                 end_position = start_position + len(last_word) - 1
@@ -431,8 +433,10 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
         """Consume the next generated token and raise LoopError when a loop is detected."""
         added_lines = list[str]()
         if token == "":
-            log.error("empty token")
-            token = " "
+            # an empty token carries no text: a substituted space would leak into the phrase and a
+            # run of empty tokens would be reported as a duplicated-token loop
+            log.debug("empty token")
+            return added_lines
 
         prev_token = self.tokens[-1] if self.tokens else None
         self.tokens.append(token)
@@ -451,7 +455,7 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
             if not token_part:
                 pass
             add_token(token_part, self.current_line)
-            if not token_part.endswith(NEW_LINE_UNIX) or token_part.endswith(NEW_LINE_WINDOWS):
+            if not token_part.endswith((NEW_LINE_UNIX, NEW_LINE_MAC)):
                 if self.is_detect_looped_inference and len(
                         self.current_line) > self.in_line_duplicates_detect_start_amount:
                     duplicates_check_tail = self.current_line[self.in_line_duplicates_detect_start_amount:]

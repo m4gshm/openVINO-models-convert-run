@@ -9,7 +9,7 @@ from agent.inference.loop_error import LoopError
 from agent.inference.phrase import DEFAULT_DUPLICATED_TOKENS_LIMIT, Phrase, \
     process_duplicate_pairs, visualize_ranges, add_token, \
     add_check_duplicate_tokens, visualize_reversed_ranges, visualize_tokens, visualize_islands_reversed, \
-    get_last_part_border, layout_last_island
+    get_last_part_border, layout_last_island, find_duplicated_with_longest_last
 
 TEST_RESOURCES = "test_resources/phrase"
 
@@ -351,6 +351,78 @@ class PhraseTestCase(unittest.TestCase):
         phrase = Phrase()
         for token in loop_messages:
             phrase.add_token(token)
+
+    def test_empty_tokens_are_ignored(self):
+        """Empty decoded tokens add no text and a run of them is not a duplicated-token loop."""
+        phrase = Phrase()
+        for token in ["a", "", "", "b"]:
+            phrase.add_token(token)
+        self.assertEqual("ab", phrase.full)
+
+        phrase = Phrase()
+        for _ in range(DEFAULT_DUPLICATED_TOKENS_LIMIT * 5):
+            phrase.add_token("")
+        self.assertEqual("", phrase.full)
+
+    def test_duplicated_tokens_limit_boundary(self):
+        """The run limit trips on the token that reaches it, not before."""
+        phrase = Phrase(strat_duplicates_detect_from=10_000)
+        for _ in range(DEFAULT_DUPLICATED_TOKENS_LIMIT - 1):
+            phrase.add_token("x")
+        with self.assertRaises(LoopError) as context:
+            phrase.add_token("x")
+        self.assertEqual(f"Duplicated tokens (amount={DEFAULT_DUPLICATED_TOKENS_LIMIT})",
+                         context.exception.message)
+
+    def test_detection_can_be_disabled(self):
+        """With detection off the phrase keeps the whole text and never raises."""
+        phrase = Phrase(is_detect_looped_inference=False)
+        text = "x" * (DEFAULT_DUPLICATED_TOKENS_LIMIT * 3) + "first\nsecond\n" * 12
+        for token in text:
+            phrase.add_token(token)
+        self.assertEqual(text, phrase.full)
+
+    def test_crlf_and_cr_complete_a_line(self):
+        """Tokens ending with Windows or old-Mac newlines close the line as Unix ones do."""
+        for new_line in ("\r\n", "\r"):
+            with self.subTest(new_line=repr(new_line)):
+                phrase = Phrase()
+                phrase.add_token(f"first{new_line}")
+                phrase.add_token(f"second{new_line}")
+                self.assertEqual([f"first{new_line}", f"second{new_line}"], phrase.lines)
+                self.assertEqual([], phrase.current_line)
+
+    def test_cycled_phrase_with_crlf_lines(self):
+        """A two-line cycle written with CRLF endings is detected as a cycled phrase."""
+        phrase = Phrase()
+        phrase.add_token("normal\r\n")
+        with self.assertRaises(LoopError) as context:
+            for _ in range(12):
+                phrase.add_token("first\r\n")
+                phrase.add_token("second\r\n")
+        self.assertEqual("Cycled phrase detected", context.exception.message)
+
+    def test_last_part_border_without_islands(self):
+        """Without islands the border stays undefined."""
+        self.assertEqual((None, None), get_last_part_border([], None))
+        self.assertEqual((None, None), get_last_part_border(list("abcd"), None))
+
+
+class LoopDetectorStateCase(unittest.TestCase):
+    """Unit tests of the duplicate-island state helpers used by the loop detector."""
+
+    def test_last_part_border_of_a_short_line(self):
+        """The border search finds an island ending on the last token of a short line."""
+        line = list("abcdabcd")
+        islands = layout_last_island(line, 0, 7)
+        self.assertEqual({7: 0}, islands)
+        self.assertEqual((0, 7), get_last_part_border(line, islands))
+
+    def test_merge_accepts_a_range_starting_at_zero(self):
+        """A duplicated range starting at position 0 is merged, not skipped as falsy."""
+        merged, end_positions = find_duplicated_with_longest_last(
+            0, ("b",), [3], list("abab"), {3: 0}, {("a", "b", "a", "b"): {0}})
+        self.assertEqual((("a", "b", "a", "b"), [3]), (merged, end_positions))
 
 
 def get_islands_of_duplicated_parts(loop_messages: str) -> tuple[
