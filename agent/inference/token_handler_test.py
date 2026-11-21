@@ -1,11 +1,12 @@
 """Tests of the token handler: the stop-phrase filter and tool call argument fixing."""
 import unittest
+from datetime import timedelta
 from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.inference.phrase import DEFAULT_DUPLICATED_TOKENS_LIMIT
 from agent.inference.token_handler import StopSignal, TokenHandler, TokenHandlerConfig
-from agent.parser import ParsedFunctionCall, Parser
+from agent.parser import ParsedFunctionCall, Parser, StateEvent
 
 TEST_RESOURCES = "test_resources"
 
@@ -96,3 +97,23 @@ class TokenHandlerCases(unittest.TestCase):
         fixed = veai_fix_incorrect_arguments(tool_call)
         self.assertIsNotNone(fixed)
         self.assertEqual({"target_file": "/opt/test.txt", "start_line": 1, "end_line": 500}, fixed.arguments)
+
+
+class ToolCallParsingWarningsCase(unittest.TestCase):
+    """Warnings emitted while a tool call is still being parsed."""
+
+    def test_parsing_time_limit_warns_once(self):
+        """Exceeding the parsing time limit warns once and does not repeat per token."""
+        config = TokenHandlerConfig(tool_call_parting_duration_limit=timedelta(0),
+                                    tool_call_parting_duration_warning=timedelta(days=3650))
+        processor = TokenHandler(tokenizer=None, prompt="", parser=Parser(), init_chat_events=True,
+                                 is_stop=None, config=config, tool_fixer=None).processor
+        processor.state.start_event(StateEvent.TOOL_CALL)
+        processor.tool_call_parsing_start_time = 0.0
+
+        first, _ = processor.process_token("x", 1)
+        second, _ = processor.process_token("y", 2)
+
+        first_text = "".join(chunk.choices[0].delta.content or "" for chunk in first if chunk.choices)
+        self.assertIn("Tool call parsing exceeded time limit", first_text)
+        self.assertEqual([], second)

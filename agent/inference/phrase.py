@@ -8,10 +8,6 @@ NEW_LINE_MAC = "\r"
 
 DEFAULT_DUPLICATED_TOKENS_LIMIT = 100
 
-IGNORE_DUPLICATED_PARTS_SIZE = 10
-
-INIT_STEP = 1
-
 log = logging.getLogger(__name__)
 
 
@@ -142,12 +138,6 @@ def get_last_part_border(line: list[str], line_islands_reversed: dict[int, int] 
                 break
             i -= 1
     return last_part_start, last_part_end
-
-
-def get_island_sizes(line_islands_reversed: dict[int, int] | None) -> list[int]:
-    """Return sizes of the islands stored end-to-start."""
-    return [(end - start + 1) for end, start in
-            line_islands_reversed.items()] if line_islands_reversed is not None else []
 
 
 def add_duplicated_pair(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements
@@ -393,8 +383,7 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
     def __init__(self, is_detect_looped_inference: bool = True,  # pylint: disable=too-many-arguments,too-many-positional-arguments  # public tuning knobs
                  strat_duplicates_detect_from: int = 50, last_part_duplicates_rate: float = 0.5,
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
-                 duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT, duplicated_lines_rate_limit=0.6,
-                 duplicated_lines_limit=50,
+                 duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT,
                  duplicated_lines_threshold=10):
         self.tokens: list[str] = []
         self.lines: list[str] = []
@@ -402,14 +391,12 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
         self.lines_duplicated_times: dict[int, set[str]] = {}
 
         self.current_line: list[str] = []
-        # self.current_line_duplicated_count: int = 0
         self.current_line_has_no_pair_tokens: dict[str, set[int]] = {}
         self.duplicate_ranges_reversed = dict[int, int]()
         self.duplicate_ranges = dict[int, int]()
         self.duplicated_words = dict[tuple[str, ...], set[int]]()
         self.duplicates_islands = dict[int, int]()
         self.duplicates_islands_reversed = dict[int, int]()
-        self.last_island_rate = 0.0
 
         self.in_line_duplicates_detect_start_amount = strat_duplicates_detect_from
         self.last_part_duplicates_rate = last_part_duplicates_rate
@@ -417,8 +404,6 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
         self.last_subpart_end_line_delta_rate = last_subpart_end_line_delta_rate
 
         self.duplicated_tokens_limit = duplicated_tokens_limit
-        self.duplicated_lines_rate_limit = duplicated_lines_rate_limit
-        self.duplicated_lines_limit = duplicated_lines_limit
         self.duplicated_lines_threshold = duplicated_lines_threshold
 
         self.is_detect_looped_inference = is_detect_looped_inference
@@ -452,8 +437,6 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
 
         token_lines = token.splitlines(keepends=True)
         for token_part in token_lines:  # pylint: disable=too-many-nested-blocks  # per-part loop of the stream handler
-            if not token_part:
-                pass
             add_token(token_part, self.current_line)
             if not token_part.endswith((NEW_LINE_UNIX, NEW_LINE_MAC)):
                 if self.is_detect_looped_inference and len(
@@ -477,13 +460,11 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                                                                                not last_part_end is None) else 0
                     total_tokens_amount = len(duplicates_check_tail)
                     last_part_rate = last_part_size / total_tokens_amount
-                    if (last_part_rate > self.last_part_duplicates_rate
-                            and last_part_rate - self.last_island_rate > 0.01):
-                        log.debug("duplicates detector: last_part_rate=%s, last_island_rate=%s",
-                                  last_part_rate, self.last_island_rate)
-                        # self.last_island_rate = last_part_rate
+                    # shortcut: the last-part check reruns on every token while the tail stays mostly
+                    # duplicated; throttling it by the previous rate hides real loops (loop_lines6)
+                    if last_part_rate > self.last_part_duplicates_rate:
+                        log.debug("duplicates detector: last_part_rate=%s", last_part_rate)
                         last_sub_islands = layout_last_island(duplicates_check_tail, last_part_start, last_part_end)
-                        # sub_island_sizes = get_island_sizes(last_sub_islands)
 
                         last_subpart_start, last_subpart_end = get_last_part_border(duplicates_check_tail,
                                                                                     last_sub_islands)
@@ -493,7 +474,6 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
 
                         delta = total_tokens_amount - last_subpart_end if subpart_size else total_tokens_amount
                         delta_rate = delta / total_tokens_amount
-                        total_tokens_amount = len(duplicates_check_tail)
                         last_part_rate2 = subpart_size / total_tokens_amount
 
                         if (delta_rate <= self.last_subpart_end_line_delta_rate
@@ -558,7 +538,7 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                         cycle_start = None
                         cycle_end = None
                         i = len_start_positions - 1
-                        while i >= 0:
+                        while i >= 2:
                             line_position = start_positions[i]
                             prev_line_position = start_positions[i - 1]
                             snapshot = lines[prev_line_position:line_position]
@@ -571,9 +551,9 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                                 break
                             i -= 1
 
-                        if cycle_start and cycle_end:
-                            cycled_phrase = "\n".join([lines[fi - 1] for fi in range(cycle_start, cycle_end + 1)])
-                            payload = "\n".join(lines)
+                        if cycle_start is not None and cycle_end is not None:
+                            cycled_phrase = "".join(lines[cycle_start:cycle_end])
+                            payload = "".join(lines)
                             log.error("cycled phrase detected:\npayload=%s\ncycled_phrase=%s\n"
                                       "cycle_start=%s, cycle_end=%s",
                                       payload, cycled_phrase, cycle_start, cycle_end)
@@ -581,15 +561,6 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                         duplicated_phrase = "\n".join(reversed(duplicated_phrase_revert))
                         if len(duplicated_phrase.strip()) > 0:
                             log.debug("duplicated phrase '%s', times %s", duplicated_phrase, len_start_positions)
-
-                    # duplicated_lines_amount = self.current_line_duplicated_count + 1  # len(duplicated_lines)
-                    # duplicated_rate = duplicated_lines_amount / lines_amount
-                    # if duplicated_rate >= self.duplicated_lines_rate_limit and \
-                    #        duplicated_lines_amount >= self.duplicated_lines_limit:
-                    #     payload = "\n".join(lines[-duplicated_lines_amount:])
-                    #     log.error(f"duplicated lines detected:\n{payload}")
-                    #     raise LoopError(payload=payload,
-                    #                     message=f"Duplicated lines detected (amount={duplicated_lines_amount})")
 
                 self.clean_current_line()
                 added_lines.append(current_line_str)
@@ -604,4 +575,3 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
         self.duplicated_words.clear()
         self.duplicates_islands.clear()
         self.duplicates_islands_reversed.clear()
-        self.last_island_rate = 0.0

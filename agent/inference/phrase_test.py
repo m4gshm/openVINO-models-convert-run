@@ -408,6 +408,32 @@ class PhraseTestCase(unittest.TestCase):
         self.assertEqual((None, None), get_last_part_border(list("abcd"), None))
 
 
+class CycledPhraseCase(unittest.TestCase):
+    """Reference cases of the cycled multi-line phrase report."""
+
+    def test_payload_is_one_cycle(self):
+        """The reported cycled phrase is exactly one repeating unit, without extra lines."""
+        phrase = Phrase()
+        with self.assertRaises(LoopError) as context:
+            for _ in range(12):
+                phrase.add_token("first\n")
+                phrase.add_token("second\n")
+        self.assertEqual("Cycled phrase detected", context.exception.message)
+        self.assertEqual(["first\n", "second\n"],
+                         sorted(context.exception.payload.splitlines(keepends=True)))
+
+    def test_cycle_of_three_lines(self):
+        """A three-line cycle is detected and reported as its three lines."""
+        phrase = Phrase(duplicated_lines_threshold=3)
+        with self.assertRaises(LoopError) as context:
+            for _ in range(4):
+                for line in ("a\n", "b\n", "c\n"):
+                    phrase.add_token(line)
+        self.assertEqual("Cycled phrase detected", context.exception.message)
+        self.assertEqual(["a\n", "b\n", "c\n"],
+                         sorted(context.exception.payload.splitlines(keepends=True)))
+
+
 class LoopDetectorStateCase(unittest.TestCase):
     """Unit tests of the duplicate-island state helpers used by the loop detector."""
 

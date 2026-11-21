@@ -431,7 +431,7 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                     warning_msg = markdown_bold(f"WARNING: Long tool call calling({formatted})") + "\n"
                     result.append(new_chat_completion_chunk(role=state.role, content=warning_msg))
                     self.tool_call_parsing_long_time_warned = True
-                elif (self.tool_call_parsing_max_time_warned
+                elif (not self.tool_call_parsing_max_time_warned
                       and parsing_time >= self.config.tool_call_parting_duration_limit):
                     formatted = format_time(self.config.tool_call_parting_duration_limit)
                     warning_msg = markdown_bold(f"WARNING: Tool call parsing exceeded time limit {formatted}.\n"
