@@ -10,8 +10,8 @@ from collections.abc import Iterator
 import pytest
 
 from agent.e2e import (EXPECTED_CHAT_PHRASE, FIM_MIDDLE, FIM_PREFIX, FIM_SUFFIX, FetchFailure,
-                       ServerHarness, chat_completion, ensure_model, parse_sse_response,
-                       text_completion_fim)
+                       ServerHarness, chat_completion, ensure_model, ovms_binary_path,
+                       parse_sse_response, text_completion_fim)
 
 TEST_FRAMES = [
     'data: {"choices":[{"delta":{"content":"2+"}}]}',
@@ -54,6 +54,12 @@ def test_parse_sse_of_length_finish():
     assert content == "ab"
     assert finish_reason == "length"
     assert done is False
+
+
+def test_ovms_binary_path_honours_configured_path(monkeypatch):
+    """An explicit OVMS_BINARY wins over PATH lookup and the automatic download."""
+    monkeypatch.setenv("OVMS_BINARY", "C:/custom/ovms_server.exe")
+    assert ovms_binary_path() == "C:/custom/ovms_server.exe"
 
 
 @pytest.fixture(scope="session")

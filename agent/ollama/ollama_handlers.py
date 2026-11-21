@@ -35,7 +35,7 @@ class OllamaControllerProtocol(Protocol):
     async def models(self) -> ModelsListResponse:
         """The list of the served models."""
 
-    def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
+    def validate_messages(self, body, tools) -> ChatCompletionChunk | None:
         """An intervention chunk for a problematic request, else None."""
 
     async def chat_chunks(self, body: ChatCompletionRequest,
@@ -85,7 +85,7 @@ class OllamaApi:
     async def chat(self, body: OllamaChatRequest, request: Request):
         """POST /api/chat: a chat completion in the Ollama shape."""
         chat_request = ollama_chat_to_request(body)
-        invalid = self.controller.validate_messages(chat_request.messages, chat_request.tools)
+        invalid = self.controller.validate_messages(chat_request, chat_request.tools)
         lines: Iterable[dict]
         if invalid is not None:
             lines = [self._line_of_chunk(invalid)]

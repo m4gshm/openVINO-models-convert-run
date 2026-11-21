@@ -36,9 +36,10 @@ include = ["agent*", "fim_bench*"]
 
 [tool.pytest.ini_options]
 testpaths = ["agent", "fim_bench"]
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not e2e_proxy'"
 markers = [
     "e2e: real-model end-to-end smoke tests (run with `-m e2e`; downloads the model and starts the server)",
+    "e2e_proxy: proxy-mode end-to-end smoke tests (run with `-m e2e_proxy`; requires OVMS binary)",
 ]
 
 [tool.pylint]

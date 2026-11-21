@@ -212,6 +212,28 @@ How it works:
   (server startup budget, default 300)
 - Server stdout/stderr go to `logs/e2e-<port>.log`; failures print the log tail
 
+### Proxy-mode End-to-End Testing
+
+- Proxy-mode e2e suite: `task e2e-proxy` (`uv run python -m pytest agent/e2e_proxy_test.py -m e2e_proxy -v`)
+- Excluded from `task test` by default (pytest `addopts` excludes both `e2e` and `e2e_proxy` markers).
+- The suite starts **OVMS** (OpenVINO Model Server) as a separate process serving `Qwen3.5-2B-int4-ov`,
+  then starts the agent in proxy mode forwarding to the local OVMS instance.
+- OVMS binary resolution: `OVMS_BINARY` env var, then `ovms`/`ovms_server` in PATH, then the
+  release zip (`ovms_windows_<version>_python_off.zip`, ~120 MB) downloaded once into `bin/` and
+  unpacked there. `OVMS_VERSION` (default `2026.4.1`) selects the release; the automatic download
+  is Windows-only, elsewhere the suite skips unless `OVMS_BINARY` is set.
+- Environment variables: `OVMS_BINARY` (path to OVMS binary), `OVMS_VERSION` (release to
+  download), `OVMS_READY_TIMEOUT_S` (startup budget, default 120 s),
+  `OPENAI_PROXY_READY_TIMEOUT_S` (proxy startup budget, default 10 s).
+- Server stdout/stderr go to `logs/ovms-<port>.log` and `logs/proxy-<port>.log`; failures print
+  the log tail.
+- OVMS loads this checkpoint as a VLM servable, which rejects `/completions`, so the FIM tests run
+  against a second OVMS + proxy pair serving `Mellum-4b-base-int4-sym-g128-se-awq` (text-only,
+  FIM-specialized, skipped when the model is not fetched into `models/`). The chat tests still
+  exercise the Qwen3.5-2B path for real.
+- The proxy implements `/v1/completions` by forwarding to the remote text-completions API and
+  re-shaping the streamed completion chunks into chat chunks internally.
+
 ### Static Analysis
 
 - **Pylint** — run via `task lint` or `uv run pylint agent`

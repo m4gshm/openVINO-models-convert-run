@@ -37,6 +37,11 @@ tasks:
     cmds:
       - uv run python -m pytest agent/e2e_test.py -m e2e -v
 
+  e2e-proxy:
+    desc: Run the proxy-mode end-to-end suite (OVMS + agent proxy; requires OVMS_BINARY in PATH)
+    cmds:
+      - uv run python -m pytest agent/e2e_proxy_test.py -m e2e_proxy -v
+
   lint:
     desc: Run linters
     cmds:

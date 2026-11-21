@@ -89,6 +89,7 @@ class PreprocessToolCall:  # pylint: disable=too-few-public-methods
             return None, 0
         results: dict[str, str | None] = {}
         function_call = FunctionCallIndex()
+        best: tuple[str, str, str, int] | None = None
         over_all_messages = False
         for i, message in enumerate(reversed(messages)):
             if not over_all_messages and i >= self.max_messages_to_check - 1:
@@ -98,22 +99,23 @@ class PreprocessToolCall:  # pylint: disable=too-few-public-methods
                 if result_tool_call_id:
                     results[result_tool_call_id] = f"{content_text(message.content)}"
             elif message.role == ROLE_ASSISTANT:
-                loop_result, many_repeats = self._register_tool_calls(
-                    message, i, results, function_call, self.max_repeated_tool_calls_with_the_same_result)
+                loop_result, many_repeats = self._register_tool_calls(message, i, results, function_call)
                 repeats = loop_result[3] if loop_result else 0
                 if not over_all_messages and (many_repeats or repeats > 2):
                     over_all_messages = True
-                if loop_result and repeats >= self.max_repeated_tool_calls_with_the_same_result:
-                    name, arguments, result = loop_result[:3]
-                    return new_function_call_result(name, arguments, result, repeats), repeats
+                if loop_result and repeats > (best[3] if best else 0):
+                    best = loop_result
             else:
                 break
 
+        if best and best[3] >= self.max_repeated_tool_calls_with_the_same_result:
+            name, arguments, result, repeats = best
+            return new_function_call_result(name, arguments, result, repeats), repeats
         return None, 0
 
     @staticmethod
     def _register_tool_calls(message: ChatCompletionMessageParam, position: int, results: dict[str, str | None],
-                             function_call: FunctionCallIndex, max_repeats: int) -> tuple[
+                             function_call: FunctionCallIndex) -> tuple[
         tuple[str, str, str, int] | None, bool]:
         """Index the calls of one assistant message.
 
@@ -140,6 +142,4 @@ class PreprocessToolCall:  # pylint: disable=too-few-public-methods
             if repeats > best_repeats:
                 best = (function.name, function.arguments, result, repeats)
                 best_repeats = repeats
-            if repeats >= max_repeats:
-                break
         return best, many_repeats

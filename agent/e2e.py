@@ -14,6 +14,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -21,10 +23,25 @@ import httpx
 
 log = logging.getLogger(__name__)
 
+# --- OVMS helpers ---
+
+OVMS_BINARY_ENV = "OVMS_BINARY"
+OVMS_MODEL_DIR_ENV = "OVMS_MODEL_DIR"
+OVMS_HTTP_PORT_ENV = "OVMS_HTTP_PORT"
+OVMS_GRPC_PORT_ENV = "OVMS_GRPC_PORT"
+OVMS_READY_TIMEOUT_DEFAULT = 120.0
+OVMS_HEALTH_INTERVAL_S = 2.0
+
 HF_REPO_ID = "OpenVINO/Qwen3.5-2B-int4-ov"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = REPO_ROOT / "models"
 MODEL_DIR_NAME = "Qwen3.5-2B-int4-ov"
+
+# No official pip package ships the server binary, so the harness fetches the release zip.
+OVMS_VERSION = os.environ.get("OVMS_VERSION", "2026.4.1")
+OVMS_DOWNLOAD_DIR = REPO_ROOT / "bin" / f"ovms-{OVMS_VERSION}"
+OVMS_RELEASE_URL = ("https://github.com/openvinotoolkit/model_server/releases/download/"
+                    f"v{OVMS_VERSION}/ovms_windows_{OVMS_VERSION}_python_off.zip")
 
 DEVICE_DEFAULT = "GPU"
 READY_TIMEOUT_DEFAULT = 300.0
@@ -227,7 +244,10 @@ def parse_sse_response(lines: Any) -> tuple[str, Optional[str], bool]:
         if not raw.strip():
             continue
         chunk = json.loads(raw)
-        choice = chunk["choices"][0]
+        choices = chunk.get("choices")
+        if not choices:
+            continue
+        choice = choices[0]
         if choice.get("finish_reason"):
             finish_reason = choice["finish_reason"]
         if choice["delta"].get("content"):
@@ -236,11 +256,234 @@ def parse_sse_response(lines: Any) -> tuple[str, Optional[str], bool]:
 
 
 def text_completion_fim(prefix: str, suffix: str, base_url: str,
-                        max_tokens: int = 200) -> dict[str, Any]:
+                        max_tokens: int = 200,
+                        fim: tuple[str, str, str, str] = (MODEL_DIR_NAME, "<|fim_prefix|>",
+                                                          "<|fim_suffix|>", "<|fim_middle|>")) -> dict[str, Any]:
     """Fill-in-the-middle request on the legacy text-completions endpoint."""
-    prompt = f"<|fim_prefix|>{prefix}<|fim_suffix|>{suffix}<|fim_middle|>"
-    body = {"model": MODEL_DIR_NAME, "prompt": prompt, "max_tokens": max_tokens, "temperature": 0.0}
+    model, begin, end, middle = fim
+    prompt = f"{begin}{prefix}{end}{suffix}{middle}"
+    body = {"model": model, "prompt": prompt, "max_tokens": max_tokens, "temperature": 0.0}
     with client() as http:
         response = http.post(f"{base_url}/v1/completions", json=body)
         response.raise_for_status()
         return response.json()
+
+
+# --- OVMS harness ---
+
+
+# The release ships ovms(.exe); some installs rename it to ovms_server(.exe).
+OVMS_BINARY_NAMES = ("ovms", "ovms.exe", "ovms_server", "ovms_server.exe")
+
+
+def ovms_binary_path() -> Optional[str]:
+    """OVMS binary from OVMS_BINARY, PATH, a previous download, or a fresh download."""
+    configured = os.environ.get(OVMS_BINARY_ENV)
+    if configured:
+        return configured
+    for name in OVMS_BINARY_NAMES:
+        found = shutil.which(name)
+        if found:
+            return found
+    cached = _find_ovms_binary()
+    if cached:
+        return str(cached)
+    return _download_ovms()
+
+
+def _find_ovms_binary() -> Optional[Path]:
+    """Already unpacked OVMS executable in the download directory, if any."""
+    if not OVMS_DOWNLOAD_DIR.is_dir():
+        return None
+    for path in OVMS_DOWNLOAD_DIR.rglob("*"):
+        if path.is_file() and path.name in OVMS_BINARY_NAMES:
+            return path
+    return None
+
+
+def _download_ovms() -> Optional[str]:
+    """Download and unpack the OVMS release once; None where no asset is automated."""
+    # shortcut: only the Windows zip is fetched automatically; elsewhere use OVMS_BINARY or PATH
+    if sys.platform != "win32":
+        return None
+    archive = OVMS_DOWNLOAD_DIR.parent / f"ovms_windows_{OVMS_VERSION}.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    log.info("downloading OVMS %s (~120 MB) into %s", OVMS_VERSION, archive)
+    with urllib.request.urlopen(OVMS_RELEASE_URL) as response, archive.open("wb") as out:
+        shutil.copyfileobj(response, out)
+    with zipfile.ZipFile(archive) as package:
+        package.extractall(OVMS_DOWNLOAD_DIR)
+    binary = _find_ovms_binary()
+    if binary is None:
+        raise RuntimeError(f"OVMS executable is missing from {archive}")
+    log.info("OVMS unpacked at %s", binary)
+    return str(binary)
+
+
+def ovms_http_port() -> int:
+    """Pick a free localhost port for OVMS HTTP endpoint."""
+    return free_port()
+
+
+def ovms_grpc_port() -> int:
+    """Pick a free localhost port for OVMS gRPC endpoint."""
+    return free_port()
+
+
+class OvmssHarness:
+    """One OVMS subprocess serving the model on fixed HTTP/gRPC ports."""
+
+    def __init__(self, model_path: Path, http_port: int | None = None,
+                 grpc_port: int | None = None):
+        self.model_path = model_path
+        self.http_port = http_port or ovms_http_port()
+        self.grpc_port = grpc_port or ovms_grpc_port()
+        self.base_url = f"http://127.0.0.1:{self.http_port}"
+        self.log_path = REPO_ROOT / "logs" / f"ovms-{self.http_port}.log"
+        self.process: Optional[subprocess.Popen] = None
+        self._log_context = contextlib.ExitStack()
+
+    def start(self) -> None:
+        """Launch OVMS and wait until it accepts HTTP requests."""
+        if self.process is not None:
+            return
+        binary = ovms_binary_path()
+        if binary is None:
+            raise RuntimeError("OVMS binary not found in PATH; set OVMS_BINARY env var")
+        self.log_path.parent.mkdir(exist_ok=True)
+        log_file = self._log_context.enter_context(self.log_path.open("w", encoding="utf-8"))
+        args = [binary, "--model_path", str(self.model_path),
+                "--model_name", self.model_path.name,
+                "--rest_port", str(self.http_port),
+                "--port", str(self.grpc_port)]
+        log.info("starting OVMS: %s", " ".join(args))
+        self.process = subprocess.Popen(args, stdout=log_file, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + ovms_ready_timeout_s()
+        while time.monotonic() < deadline:
+            if self._exited():
+                raise RuntimeError(f"OVMS exited during startup; log tail: {self.log_tail()}")
+            try:
+                with httpx.Client(timeout=5) as probe:
+                    if probe.get(f"{self.base_url}/v2/health/ready").status_code == 200:
+                        log.info("OVMS is ready on port %s", self.http_port)
+                        return
+            except httpx.HTTPError:
+                pass
+            time.sleep(OVMS_HEALTH_INTERVAL_S)
+        self.stop()
+        raise RuntimeError(f"OVMS did not become ready in {ovms_ready_timeout_s()}s; log tail: {self.log_tail()}")
+
+    def _exited(self) -> bool:
+        return self.process is None or self.process.poll() is not None
+
+    def log_tail(self, lines: int = 40) -> str:
+        """Trailing lines of the OVMS log, for diagnosable failures."""
+        if not self.log_path.exists():
+            return "<no log file>"
+        content = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(content[-lines:])
+
+    def stop(self) -> None:
+        """Terminate the OVMS process and its children."""
+        if self.process is None:
+            return
+        if self.process.poll() is None:
+            try:
+                self.process.kill()
+            except OSError:
+                pass
+            try:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                               capture_output=True, check=False)
+            except OSError:
+                pass
+        self.process = None
+        log.info("OVMS on port %s stopped", self.http_port)
+
+
+def ovms_ready_timeout_s() -> float:
+    """Configured OVMS startup budget (OVMS_READY_TIMEOUT_S, default 120 s)."""
+    raw = os.environ.get("OVMS_READY_TIMEOUT_S")
+    return float(raw) if raw else OVMS_READY_TIMEOUT_DEFAULT
+
+
+# --- Proxy harness ---
+
+
+PROXY_READY_TIMEOUT_DEFAULT = 10.0
+PROXY_HEALTH_INTERVAL_S = 1.0
+
+
+class ProxyServerHarness:
+    """One agent subprocess in proxy mode, forwarding to a local OVMS instance."""
+
+    def __init__(self, ovms_harness: "OvmssHarness"):
+        self.ovms = ovms_harness
+        self.port = free_port()
+        self.base_url = f"http://127.0.0.1:{self.port}"
+        self.log_path = REPO_ROOT / "logs" / f"proxy-{self.port}.log"
+        self.process: Optional[subprocess.Popen] = None
+        self._log_context = contextlib.ExitStack()
+
+    def start(self) -> None:
+        """Launch the agent in proxy mode and wait until it accepts requests."""
+        binary = ovms_binary_path()
+        if binary is None:
+            raise RuntimeError("OVMS binary not found; proxy mode requires OVMS")
+        self.ovms.start()
+        self.log_path.parent.mkdir(exist_ok=True)
+        log_file = self._log_context.enter_context(self.log_path.open("w", encoding="utf-8"))
+        args = [str(Path(sys.executable).resolve()), "agent.py",
+                "--openai_base_url", f"{self.ovms.base_url}/v3",
+                "--openai_api_key", "ovms-local",
+                "--port", str(self.port), "--skip_typecheck"]
+        log.info("starting proxy: %s", " ".join(args))
+        self.process = subprocess.Popen(args, stdout=log_file, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + proxy_ready_timeout_s()
+        while time.monotonic() < deadline:
+            if self._exited():
+                raise RuntimeError(f"proxy exited during startup; log tail: {self.log_tail()}")
+            try:
+                with httpx.Client(timeout=5) as probe:
+                    if probe.get(f"{self.base_url}/v1/models").status_code == 200:
+                        log.info("proxy is ready on port %s", self.port)
+                        return
+            except httpx.HTTPError:
+                pass
+            time.sleep(PROXY_HEALTH_INTERVAL_S)
+        self.stop()
+        raise RuntimeError(f"proxy did not become ready in {proxy_ready_timeout_s()}s; log tail: {self.log_tail()}")
+
+    def _exited(self) -> bool:
+        return self.process is None or self.process.poll() is not None
+
+    def log_tail(self, lines: int = 40) -> str:
+        """Trailing lines of the proxy log, for diagnosable failures."""
+        if not self.log_path.exists():
+            return "<no log file>"
+        content = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(content[-lines:])
+
+    def stop(self) -> None:
+        """Terminate the proxy and OVMS processes."""
+        if self.process is not None and self.process.poll() is None:
+            try:
+                self.process.kill()
+            except OSError:
+                pass
+            try:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)],
+                               capture_output=True, check=False)
+            except OSError:
+                pass
+            self.process = None
+            log.info("proxy on port %s stopped", self.port)
+        # Also stop OVMS if it's still running
+        if self.ovms.process is not None:
+            self.ovms.stop()
+
+
+def proxy_ready_timeout_s() -> float:
+    """Configured proxy startup budget (OPENAI_PROXY_READY_TIMEOUT_S, default 10 s)."""
+    raw = os.environ.get("OPENAI_PROXY_READY_TIMEOUT_S")
+    return float(raw) if raw else PROXY_READY_TIMEOUT_DEFAULT

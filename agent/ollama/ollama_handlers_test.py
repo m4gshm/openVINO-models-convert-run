@@ -34,7 +34,7 @@ class FakeController:
         """The single served model."""
         return ModelsListResponse(data=[ModelObject(id="test-model")])
 
-    def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:  # pylint: disable=unused-argument
+    def validate_messages(self, body, tools) -> ChatCompletionChunk | None:  # pylint: disable=unused-argument
         """No validation problem in the fake engine."""
         return None
 

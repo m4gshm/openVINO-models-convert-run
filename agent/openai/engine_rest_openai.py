@@ -14,6 +14,8 @@ from agent.openai.models_api import ModelsListResponse, ModelObject
 _openai_pkg = importlib.import_module('openai')
 openai = _openai_pkg
 _openai_types_chat = importlib.import_module('openai.types.chat')
+_chunk_choice = importlib.import_module('openai.types.chat.chat_completion_chunk').Choice
+_chunk_delta = importlib.import_module('openai.types.chat.chat_completion_chunk').ChoiceDelta
 # The imports below must run after the openai importlib workaround above.
 # pylint: disable=wrong-import-position,wrong-import-order,ungrouped-imports
 from starlette.requests import Request
@@ -21,7 +23,8 @@ from starlette.requests import Request
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import new_stop_response, ROLE_ASSISTANT, new_chat_completion_chunk, new_usage_chunk
-from agent.openai.engine_rest_common import ControllerConfig, BaseController
+from agent.openai.engine_rest_common import (ControllerConfig, BaseController,
+                                             is_stream_request, new_http_response_completions)
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +87,33 @@ class OpenAiController(BaseController):
         return ModelsListResponse(data=result)
 
     async def completions(self, body: completions_api.CompletionRequest, request: Request):
-        pass
+        """Forward a text-completions request to the remote OpenAI-compatible API."""
+        remote = self.client.completions.create(
+            model=body.model,
+            prompt=body.prompt,
+            stream=True,
+            max_tokens=body.max_tokens,
+            temperature=body.temperature,
+            stop=body.stop,
+        )
+
+        def as_chat_chunks() -> Iterable[ChatCompletionChunk]:
+            """Re-shape remote completion chunks into the chat-chunk form the responder consumes."""
+            response_id = str(uuid.uuid4())
+            for chunk in remote:
+                yield ChatCompletionChunk(
+                    id=chunk.id or response_id,
+                    created=chunk.created or 0,
+                    model=chunk.model or body.model or "",
+                    object="chat.completion.chunk",
+                    choices=[_chunk_choice(
+                        index=choice.index,
+                        delta=_chunk_delta(content=choice.text),
+                        finish_reason=choice.finish_reason,
+                    ) for choice in chunk.choices],
+                )
+
+        return await new_http_response_completions(is_stream_request(body), as_chat_chunks())
 
     async def chat_chunks(self, body: ChatCompletionRequest,
                            request: Request) -> Iterable[ChatCompletionChunk]:

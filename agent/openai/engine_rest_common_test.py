@@ -5,29 +5,33 @@ import threading
 import unittest
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from openai.types.chat import ChatCompletion
 from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCallFunction
 from starlette.responses import StreamingResponse
 
+from agent.client.opencode.question_tool import QuestionTool
+from agent.client.tool_select_model import AgentType, DetectedSelectOptions
 from agent.inference.token_handler import TokenHandlerConfig
 from agent.multimodal.image_decode_test import new_png, rgb_pixels
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts
-from agent.openai.chat_api import ROLE_ASSISTANT, new_chat_completion_chunk, new_stop_response, new_tool_call, \
-    new_usage_chunk
+from agent.openai.chat_api import ROLE_ASSISTANT, ROLE_TOOL, ROLE_USER, new_chat_completion_chunk, new_stop_response, \
+    new_tool_call, new_usage_chunk
 from agent.openai.chat_completions_api import ChatCompletionMessageParam, ChatCompletionRequest
 from agent.openai import completions_api
 from agent.openai.completions_api import CompletionRequest, CompletionResponse
-from agent.openai.engine_rest_common import (BaseOVController, ControllerConfig, GenerationRequest, body_stop_strings,
+from agent.openai.engine_rest_common import (BaseController, BaseOVController, ControllerConfig, GenerationRequest,
+                                             WARN_GENERATION_IS_INTERRUPTED_, body_stop_strings,
                                              disconnect_probe,
                                              is_stream_request, make_union, new_chat_completion_union,
                                              new_chat_history,
                                              new_generation_config, new_http_response_chat,
                                              new_http_response_completions)
 from agent.parser import Parser
+from agent.preprocess.tool_call import PreprocessToolCall
 
 
 def new_config(**kwargs) -> ControllerConfig:
@@ -321,6 +325,101 @@ class NewHttpResponseCase(unittest.TestCase):
         response = asyncio.run(new_http_response_chat(True, self.chunks()))
         assert isinstance(response, StreamingResponse)
         self.assertEqual("text/event-stream", response.media_type)
+
+
+class LoopValidationController(BaseController):
+    """Controller stub exposing only what validate_messages needs."""
+
+    def __init__(self):  # pylint: disable=super-init-not-called
+        """Wire just the loop detection config."""
+        self.config = ControllerConfig(max_prompt_len=4096, model_architectures=set())
+
+    async def chat_chunks(self, body, request):
+        """No engine."""
+        return []
+
+    async def completions(self, body, request):
+        """No engine."""
+        return None
+
+    async def models(self):
+        """No engine."""
+        return None
+
+
+def middleware_answer(answer: str):
+    """A tool reply of an answered middleware checkpoint."""
+    return SimpleNamespace(role=ROLE_TOOL, content=answer, tool_call_id="middleware_checkpoint_test")
+
+
+class LoopInjectionCase(unittest.TestCase):
+    """Tests the warn-and-continue injection and the ask-user escalation."""
+
+    max_repeats = PreprocessToolCall.max_repeated_tool_calls_with_the_same_result
+
+    def setUp(self):
+        """Build the controller stub."""
+        self.controller = LoopValidationController()
+
+    def _validate(self, count, temperature=None, detected=None):
+        """Run validate_messages with a stubbed loop detector reporting `count` repeats."""
+        body = SimpleNamespace(messages=[], temperature=temperature)
+        with patch("agent.openai.engine_rest_common.PreprocessToolCall") as preprocess, \
+                patch("agent.openai.engine_rest_common.detect_select_options", return_value=detected):
+            looped = MagicMock()
+            looped.render_markdown.return_value = "WARNING: Loop"
+            preprocess.return_value.check_loop_tool_calls.return_value = (looped, count) if count else (None, 0)
+            preprocess.max_repeated_tool_calls_with_the_same_result = self.max_repeats
+            result = self.controller.validate_messages(body, None)
+        return result, body
+
+    @staticmethod
+    def _question_tool() -> DetectedSelectOptions:
+        """A detected OpenCode question tool."""
+        return DetectedSelectOptions(agent=AgentType.OPENCODE, tool=QuestionTool())
+
+    def test_first_attempt_injects_warning_and_continues(self):
+        """The first attempt injects a user warning and raises the temperature without rejecting."""
+        result, body = self._validate(self.max_repeats)
+        self.assertIsNone(result)
+        self.assertEqual(1, len(body.messages))
+        self.assertEqual(ROLE_USER, body.messages[0].role)
+        self.assertIn("WARNING: Loop", body.messages[0].content)
+        self.assertIn("same tool call", body.messages[0].content)
+        self.assertEqual(0.8, body.temperature)
+
+    def test_second_attempt_injects_too(self):
+        """The second attempt still injects instead of asking the user."""
+        result, body = self._validate(2 * self.max_repeats)
+        self.assertIsNone(result)
+        self.assertEqual(1, len(body.messages))
+        self.assertEqual(0.8, body.temperature)
+
+    def test_temperature_is_raised_not_lowered(self):
+        """An already higher temperature stays untouched."""
+        _result, body = self._validate(self.max_repeats, temperature=1.5)
+        self.assertEqual(1.5, body.temperature)
+
+    def test_third_attempt_asks_user(self):
+        """The third attempt asks the user to continue or interrupt."""
+        result, _body = self._validate(3 * self.max_repeats, detected=self._question_tool())
+        self.assertIsNotNone(result)
+        delta = result.choices[0].delta
+        self.assertEqual("", delta.content)
+        self.assertEqual(1, len(delta.tool_calls))
+
+    def test_third_attempt_without_question_tool_warns(self):
+        """Without a question tool the third attempt falls back to a reject warning."""
+        result, _body = self._validate(3 * self.max_repeats)
+        self.assertIsNotNone(result)
+        self.assertIn(WARN_GENERATION_IS_INTERRUPTED_, result.choices[0].delta.content)
+
+    def test_no_loop_leaves_request_untouched(self):
+        """Without a detected loop nothing is injected."""
+        result, body = self._validate(0)
+        self.assertIsNone(result)
+        self.assertEqual([], body.messages)
+        self.assertIsNone(body.temperature)
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@ from agent.multimodal.media_inputs import MediaInputs, MediaLimits
 from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts, completions_api
-from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, new_stop_response
+from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, ROLE_USER, new_stop_response
 from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk, new_usage_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
     ChatCompletionFunctionToolParam, FunctionDefinitionParameters
@@ -367,35 +367,45 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             content={"detail": exc.errors()},
         )
 
-    def validate_messages(self, messages, tools) -> ChatCompletionChunk | None:
-        """Return an intervention chunk for cycled tool calls, or None when the request is fine."""
-        if self.config.is_detect_cycled_tool_call:
-            request_user_select = detect_select_options(tools)
-            preprocess_tool_call = PreprocessToolCall()
-            looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
-            if looped_function:
-                # log
-                msg = looped_function.render_markdown()
-                tool_calls = []
-                content = ""
-                if request_user_select:
-                    # log
-                    question = request_user_select.new_call(
-                        msg +
-                        "\n\n" +
-                        "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
-                        "\n\n" + markdown_bold("What to do next?"),
-                        [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
-                    tool_call = new_tool_call(call_id=new_middleware_call_id(),
-                                              function=question.to_openai_function_call())
-                    tool_calls.append(tool_call)
-                else:
-                    content = msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_
-                return new_chat_completion_chunk(finish_reason=STOP,
-                                                 role=ROLE_ASSISTANT,
-                                                 content=content,
-                                                 tool_calls=tool_calls)
-        return None
+    def validate_messages(self, body: ChatCompletionRequest, tools) -> ChatCompletionChunk | None:
+        """Handle cycled tool calls: warn the model and continue, or ask the user when it keeps looping."""
+        if not self.config.is_detect_cycled_tool_call:
+            return None
+        messages = body.messages
+        looped_function, count = PreprocessToolCall().check_loop_tool_calls(messages)
+        if not looped_function:
+            return None
+        msg = looped_function.render_markdown()
+        # every bucket of `max_repeated_tool_calls_with_the_same_result` repeats is one attempt:
+        # attempts 1–2 are answered with an injected user warning and a raised temperature while
+        # the generation continues; from attempt 3 on the user is asked to continue or interrupt.
+        # the injected message is not part of the client history, so the repeat count itself
+        # carries the escalation state (an answered middleware checkpoint resets detection).
+        if count < 3 * PreprocessToolCall.max_repeated_tool_calls_with_the_same_result:
+            body.messages = messages + [ChatCompletionMessageParam(role=ROLE_USER, content=msg + "\n\n"
+                + "You keep repeating the same tool call with the same result. "
+                + "Change your approach or try a different tool.")]
+            body.temperature = max(body.temperature or 0.0, 0.8)
+            return None
+        tool_calls = []
+        detected = detect_select_options(tools)
+        if detected:
+            question = detected.tool.new_call(
+                msg +
+                "\n\n" +
+                "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
+                "\n\n" + markdown_bold("What to do next?"),
+                [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
+            tool_call = new_tool_call(call_id=new_middleware_call_id(),
+                                      function=question.to_openai_function_call())
+            tool_calls.append(tool_call)
+            content = ""
+        else:
+            content = msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_
+        return new_chat_completion_chunk(finish_reason=STOP,
+                                         role=ROLE_ASSISTANT,
+                                         content=content,
+                                         tool_calls=tool_calls)
 
     async def chat(self, body: ChatCompletionRequest, request: Request):
         """Shared /v1/chat/completions entry: checkpoint guard, validation, dispatch."""
@@ -421,7 +431,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             if last_message.role == ROLE_TOOL:
                 log_client_generated.debug(content_text(last_message.content))
 
-        invalid_response = self.validate_messages(messages, body.tools)
+        invalid_response = self.validate_messages(body, body.tools)
         return (await new_http_response_chat(stream, [invalid_response])) if invalid_response \
             else await self.handle_chat_completion(body, request)
 
