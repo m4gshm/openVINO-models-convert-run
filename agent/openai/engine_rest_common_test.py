@@ -370,7 +370,7 @@ class LoopInjectionCase(unittest.TestCase):
             looped.render_markdown.return_value = "WARNING: Loop"
             preprocess.return_value.check_loop_tool_calls.return_value = (looped, count) if count else (None, 0)
             preprocess.max_repeated_tool_calls_with_the_same_result = self.max_repeats
-            result = self.controller.validate_messages(body, None)
+            result = self.controller.validate_messages(cast(ChatCompletionRequest, body), None)
         return result, body
 
     @staticmethod

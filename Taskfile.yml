@@ -6,7 +6,7 @@ tasks:
     cmds:
 #      - uv python install 3.14
       - uv venv --clear --python 3.14
-      - uv sync
+      - uv sync --all-extras
     sources:
       - pyproject.toml
       - agent/pyproject.toml
@@ -45,11 +45,13 @@ tasks:
   lint:
     desc: Run linters
     cmds:
+      - uv sync --all-extras
       - uv run pylint agent
 
   typecheck:
     desc: Run static type checks (mypy)
     cmds:
+      - uv sync --all-extras
       - uv run mypy
 
   dist:
