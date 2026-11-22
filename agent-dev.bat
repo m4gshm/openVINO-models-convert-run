@@ -6,10 +6,8 @@ if not defined OPENVINO_DEV_NAME (
     set "OPENVINO_DEV_NAME=%EXPECTED_OPENVINO_DEV_NAME%"
 )
 
-set "INTEL_OPENVINO_DIR="
-set "PYTHONPATH="
-@REM setupvars.bat prepends its lib dirs to PATH on every call, so reruns in one console grow PATH past the cmd limit
-@REM %SystemRoot% path guards against msys/GnuWin32 find shadowing the builtin
+@REM PYTHONPATH/INTEL_OPENVINO_DIR are intentionally not cleared: when the guard below skips setupvars
+@REM on a rerun, they must keep the values the first call set, else python falls back to the venv openvino_genai
 echo "%OPENVINO_LIB_PATHS%" | "%SystemRoot%\System32\find.exe" /i "\bin\%OPENVINO_DEV_NAME%\\" >NUL || call .\bin\%OPENVINO_DEV_NAME%\setupvars.bat
 echo OPENVINO_DEV_NAME: %OPENVINO_DEV_NAME%
 .venv\Scripts\python agent.py %*
