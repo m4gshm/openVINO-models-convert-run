@@ -44,17 +44,23 @@ KERNEL_CACHE_SUFFIXES = (".cl_cache", ".onednn.cl_cache")
 
 
 def cleanup_kernel_cache(model_cache_dir: str, days: int) -> int:
-    """Delete OpenVINO oneDNN/OpenCL kernel-cache blobs older than `days`; return the count removed.
+    """Delete OpenVINO oneDNN/OpenCL kernel-cache blobs not accessed within `days`; return the count removed.
 
-    OpenVINO has no eviction: every new shape/device combo adds a file forever. `days <= 0` disables it.
+    OpenVINO has no eviction: every new shape/device combo adds a file forever. The criterion is the last
+    access time, so a blob created long ago but still hit by recent runs is kept; `days <= 0` disables it.
     Safe on a running server too: loaded kernels live in memory, only stale entries are removed.
+    shortcut: NTFS last-access updates can be disabled by the OS — the write time is used as a fallback.
     """
     if days <= 0:
         return 0
     cutoff = time.time() - days * 86400
     removed = 0
     for file in Path(model_cache_dir).glob("*"):
-        if file.is_file() and file.name.endswith(KERNEL_CACHE_SUFFIXES) and file.stat().st_mtime < cutoff:
+        if not (file.is_file() and file.name.endswith(KERNEL_CACHE_SUFFIXES)):
+            continue
+        stat = file.stat()
+        last_used = stat.st_atime if stat.st_atime > 0 else stat.st_mtime
+        if last_used < cutoff:
             file.unlink(missing_ok=True)
             removed += 1
     if removed:

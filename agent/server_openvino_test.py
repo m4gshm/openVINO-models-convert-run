@@ -24,22 +24,25 @@ class CleanupKernelCacheCase(unittest.TestCase):
     """Tests of the startup cleanup of OpenVINO kernel cache blobs."""
 
     def test_old_blobs_are_deleted_and_fresh_kept(self):
-        """Blobs older than the cutoff are removed; fresh ones, other files and subdirs stay."""
+        """Blobs untouched within the cutoff are removed; recently used ones, other files and subdirs stay."""
         with TemporaryDirectory() as tmp:
             old = Path(tmp) / "123.onednn.cl_cache"
             fresh = Path(tmp) / "456.cl_cache"
+            recently_used = Path(tmp) / "789.cl_cache"
             other = Path(tmp) / "model.xml"
-            old.write_text("x")
-            fresh.write_text("x")
-            other.write_text("x")
+            for f in (old, fresh, recently_used, other):
+                f.write_text("x")
             old_age = 8 * 86400
             os.utime(old, (time.time() - old_age, time.time() - old_age))
+            # created long ago, but accessed just now: must survive
+            os.utime(recently_used, (time.time(), time.time() - old_age))
 
             removed = cleanup_kernel_cache(tmp, days=7)
 
             self.assertEqual(1, removed)
             self.assertFalse(old.exists())
             self.assertTrue(fresh.exists())
+            self.assertTrue(recently_used.exists())
             self.assertTrue(other.exists())
 
     def test_zero_disables_cleanup(self):
