@@ -2,6 +2,7 @@
 import logging.config
 import sys
 import threading
+import time
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,6 +39,27 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MODELS_DIR = "./models"
 DEFAULT_MODELS_CACHE_DIR = "./models_cache"
+DEFAULT_CACHE_CLEANUP_DAYS = 7
+KERNEL_CACHE_SUFFIXES = (".cl_cache", ".onednn.cl_cache")
+
+
+def cleanup_kernel_cache(model_cache_dir: str, days: int) -> int:
+    """Delete OpenVINO oneDNN/OpenCL kernel-cache blobs older than `days`; return the count removed.
+
+    OpenVINO has no eviction: every new shape/device combo adds a file forever. `days <= 0` disables it.
+    Safe on a running server too: loaded kernels live in memory, only stale entries are removed.
+    """
+    if days <= 0:
+        return 0
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for file in Path(model_cache_dir).glob("*"):
+        if file.is_file() and file.name.endswith(KERNEL_CACHE_SUFFIXES) and file.stat().st_mtime < cutoff:
+            file.unlink(missing_ok=True)
+            removed += 1
+    if removed:
+        log.info("cleaned %s kernel cache files older than %s days in %s", removed, days, model_cache_dir)
+    return removed
 
 
 @dataclass
@@ -141,6 +163,7 @@ def load_model_context(args) -> ModelContext:
     model_path, model_name = resolve_model_path(args.model, args.models_dir)
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
     setup_logging(args, model_name)
+    cleanup_kernel_cache(model_cache_dir, args.cache_cleanup_days)
 
     model_config = read_model_config(model_path)
     media_capabilities = read_media_capabilities(model_path)
@@ -509,6 +532,8 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--port", type=int, default=8888, help="%(default)s")
     args_parser.add_argument("--models_dir", type=str, default=DEFAULT_MODELS_DIR, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=DEFAULT_MODELS_CACHE_DIR, help="%(default)s")
+    args_parser.add_argument("--cache_cleanup_days", type=int, default=DEFAULT_CACHE_CLEANUP_DAYS,
+                             help="delete kernel cache blobs older than N days at startup, 0 disables (%(default)s)")
     args_parser.add_argument("--model", type=str, default=None, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
 

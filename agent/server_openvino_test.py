@@ -1,16 +1,15 @@
 """Tests of the OpenVINO mode wiring: model path, options and engine setup."""
+import os
+import time
 import unittest
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
-
-from openvino_genai import Tokenizer
 
 from agent.multimodal.model_capabilities import MediaCapabilities
 from agent.openvino.options import ParserType, Pipe
-from agent.server_openvino import add_openvino_args, new_model_parser, resolve_attention_backend, \
-    resolve_max_prompt_len, resolve_model_path, resolve_pipe_and_parser
+from agent.server_openvino import add_openvino_args, cleanup_kernel_cache, new_model_parser, \
+    resolve_attention_backend, resolve_max_prompt_len, resolve_model_path, resolve_pipe_and_parser
 from agent.openai import GenerateOpts
 
 
@@ -19,6 +18,37 @@ def new_args() -> ArgumentParser:
     parser = ArgumentParser()
     add_openvino_args(parser)
     return parser
+
+
+class CleanupKernelCacheCase(unittest.TestCase):
+    """Tests of the startup cleanup of OpenVINO kernel cache blobs."""
+
+    def test_old_blobs_are_deleted_and_fresh_kept(self):
+        """Blobs older than the cutoff are removed; fresh ones, other files and subdirs stay."""
+        with TemporaryDirectory() as tmp:
+            old = Path(tmp) / "123.onednn.cl_cache"
+            fresh = Path(tmp) / "456.cl_cache"
+            other = Path(tmp) / "model.xml"
+            old.write_text("x")
+            fresh.write_text("x")
+            other.write_text("x")
+            old_age = 8 * 86400
+            os.utime(old, (time.time() - old_age, time.time() - old_age))
+
+            removed = cleanup_kernel_cache(tmp, days=7)
+
+            self.assertEqual(1, removed)
+            self.assertFalse(old.exists())
+            self.assertTrue(fresh.exists())
+            self.assertTrue(other.exists())
+
+    def test_zero_disables_cleanup(self):
+        """`days=0` deletes nothing."""
+        with TemporaryDirectory() as tmp:
+            blob = Path(tmp) / "1.cl_cache"
+            blob.write_text("x")
+            self.assertEqual(0, cleanup_kernel_cache(tmp, days=0))
+            self.assertTrue(blob.exists())
 
 
 class ResolveModelPathCase(unittest.TestCase):
