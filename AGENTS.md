@@ -1,5 +1,7 @@
 # Agents
 
+Commit and push only when explicitly asked by the user. Never run `git commit` or `git push` on your own initiative.
+
 AI agent based on **OpenVINO GenAI** with OpenAI-compatible REST API. Supports streaming, tool calls, and IDE
 integrations.
 
