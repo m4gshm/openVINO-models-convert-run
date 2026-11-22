@@ -100,9 +100,9 @@ def decode(tokens: Sequence[SupportsInt], tokenizer: Tokenizer) -> list[str]:
     return [tokenizer.decode(tokens=[token], skip_special_tokens=False) for token in tokens]
 
 
-def to_openai_tool_call(function: ParsedFunctionCall) -> ChoiceDeltaToolCall:
+def to_openai_tool_call(function: ParsedFunctionCall, index: int = 0) -> ChoiceDeltaToolCall:
     """Convert a parsed function call into an OpenAI tool call chunk."""
-    return new_tool_call(function.to_openai_function_call())
+    return new_tool_call(function.to_openai_function_call(), index=index)
 
 
 def now() -> float:
@@ -210,10 +210,12 @@ def fix_tool_calls(tool_fixer: ToolFixer | None, user_context: UserContext | Non
 
 def fix_tool_calls_and_convert_to_choice_delta_tool_calls(tool_fixer: ToolFixer | None,
                                                           user_context: UserContext | None,
-                                                          parsed_function_calls: list[ParsedFunctionCall]
+                                                          parsed_function_calls: list[ParsedFunctionCall],
+                                                          start_index: int = 0
                                                           ) -> list[ChoiceDeltaToolCall]:
     """Fix parsed tool calls and convert them into OpenAI tool call chunks."""
-    return list(map(to_openai_tool_call, fix_tool_calls(tool_fixer, user_context, parsed_function_calls)))
+    fixed = fix_tool_calls(tool_fixer, user_context, parsed_function_calls)
+    return [to_openai_tool_call(call, index=start_index + i) for i, call in enumerate(fixed)]
 
 
 def fix_and_chat_complete_parsed_tool_calls(tool_fixer: ToolFixer | None,
@@ -289,10 +291,12 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
         self.phrase_tick = None
         self.phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
         self.tool_call_phrase = Phrase(is_detect_looped_inference=self.config.is_detect_looped_inference)
+        self.tool_call_index = 0
         self.tool_call_parsing_tick = None
         self.tool_call_parsing_start_time = None
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
+        self.loop_errors: list[str] = []
 
     def tool_call_parsing_time(self, now_time: float) -> timedelta:
         """Time the current tool call has been parsed for, zero when it did not start yet."""
@@ -418,6 +422,7 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
             except LoopError as e:
                 log.error("tool call error (loop): %s", e)
                 tool_call_loop_error = markdown_tool_call_loop_error(e.message + " (tool call)", e.payload)
+                self.loop_errors.append(tool_call_loop_error)
 
             if tool_call_loop_error:
                 tool_call, stop_signal = self.tool_call_end(state, token)
@@ -468,6 +473,7 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                 new_lines = None
                 log.error("loop error: %s", e)
                 loop_error = markdown_tool_call_loop_error(e.message, e.payload)
+                self.loop_errors.append(loop_error)
 
             thinking = state.has_event(StateEvent.THINK)
             is_handle_delay_end = state.is_streaming_delayed or handle_delay_end
@@ -537,7 +543,9 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
         else:
             tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(self.tool_fixer,
                                                                                self.user_context,
-                                                                               delayed.tool_calls)
+                                                                               delayed.tool_calls,
+                                                                               start_index=self.tool_call_index)
+            self.tool_call_index += len(tool_calls)
             stop_signal = StopSignal.TOOL_CALL if len(tool_calls) > 0 else None
             chunk = new_chat_completion_chunk(role=state.role, content=delayed.content,
                                               tool_calls=tool_calls, thinking=thinking)
@@ -627,7 +635,9 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
         tool_call_expression = tool_call_phrase.full
         parsed_function_calls, _ = parser.parse_tool_calls(state, tool_call_expression)
         tool_calls = fix_tool_calls_and_convert_to_choice_delta_tool_calls(self.tool_fixer, self.user_context,
-                                                                           parsed_function_calls)
+                                                                           parsed_function_calls,
+                                                                           start_index=self.tool_call_index)
+        self.tool_call_index += len(tool_calls)
         if len(tool_calls) == 0:
             log.info("unparsed tool calls: %s", tool_call_expression)
             chunk, stop_signal = new_chat_completion_chunk(role=state.role,

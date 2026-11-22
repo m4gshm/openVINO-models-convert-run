@@ -384,7 +384,7 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                  strat_duplicates_detect_from: int = 50, last_part_duplicates_rate: float = 0.5,
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT,
-                 duplicated_lines_threshold=10):
+                 duplicated_lines_threshold=5):
         self.tokens: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}
@@ -534,7 +534,9 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                     start_positions = current_line_positions
                     duplicated_phrase_revert = [current_line_str]
                     len_start_positions = len(start_positions)
-                    if len_start_positions > 2 and len_start_positions >= self.duplicated_lines_threshold:
+                    # a blank anchor fires on any repeated blank-separated stanza, not a real cycle
+                    if (current_line_str.strip() and len_start_positions > 2
+                            and len_start_positions >= self.duplicated_lines_threshold):
                         cycle_start = None
                         cycle_end = None
                         i = len_start_positions - 1

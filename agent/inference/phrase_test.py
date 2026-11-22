@@ -45,16 +45,6 @@ class PhraseTestCase(unittest.TestCase):
                           'second\n'
                           'first\n'
                           'second\n'
-                          'first\n'
-                          'second\n'
-                          'first\n'
-                          'second\n'
-                          'first\n'
-                          'second\n'
-                          'first\n'
-                          'second\n'
-                          'first\n'
-                          'second\n'
                           'first\n'), phrase.full)
 
     def test_loop_lines6(self):
@@ -79,29 +69,30 @@ class PhraseTestCase(unittest.TestCase):
                          phrase.full)
 
     def test_loop_lines_2(self):
-        """Feed loop_messages_2 tokens without expecting an exception."""
+        """Feed loop_messages_2 tokens: a three-line cycle raises on its third repeat."""
         loop_messages_file = files(__package__).joinpath(TEST_RESOURCES, "loop_messages_2.txt")
         loop_messages = loop_messages_file.read_text()
 
         phrase = Phrase()
-        # with self.assertRaises(LoopError):
-        for token in loop_messages:
-            phrase.add_token(token)
+        with self.assertRaises(LoopError) as context:
+            for token in loop_messages:
+                phrase.add_token(token)
 
-        # self.assertEqual('some normal output\n'
-        #                  'first\n'
-        #                  'second\n'
-        #                  'third\n'
-        #                  'first\n'
-        #                  'second\n'
-        #                  'third\n'
-        #                  'first\n'
-        #                  'second\n'
-        #                  'third\n'
-        #                  'first\n'
-        #                  'second\n'
-        #                  'third\n'
-        #                  'first\n', phrase.full)
+        self.assertEqual("Cycled phrase detected", context.exception.message)
+        self.assertEqual(('some normal output\n'
+                          'first\n'
+                          'second\n'
+                          'third\n'
+                          'first\n'
+                          'second\n'
+                          'third\n'
+                          'first\n'
+                          'second\n'
+                          'third\n'
+                          'first\n'
+                          'second\n'
+                          'third\n'
+                          'first\n'), phrase.full)
 
     def test_loop_line_duplicated(self):
         """A repeated single line must raise LoopError with all copies kept."""
@@ -114,11 +105,6 @@ class PhraseTestCase(unittest.TestCase):
                 phrase.add_token(token)
 
         self.assertEqual(('some normal output\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
-                          'duplicated\n'
                           'duplicated\n'
                           'duplicated\n'
                           'duplicated\n'
@@ -432,6 +418,19 @@ class CycledPhraseCase(unittest.TestCase):
         self.assertEqual("Cycled phrase detected", context.exception.message)
         self.assertEqual(["a\n", "b\n", "c\n"],
                          sorted(context.exception.payload.splitlines(keepends=True)))
+
+    def test_long_cycle_detected_before_ten_repeats(self):
+        """An 18-line cycle with blank lines must trip at 3 repeats, not after 10."""
+        unit = ["Now I'm setting up the test configuration class that will handle the Spring beans\n", "\n",
+                "Configuring the test setup...\n", "\n", "step one\n", "\n", "step two\n", "\n",
+                "step three\n", "\n", "step four\n", "\n", "step five\n", "\n", "step six\n", "\n",
+                "step seven\n", "\n"]
+        phrase = Phrase()
+        with self.assertRaises(LoopError) as context:
+            for _ in range(5):
+                for line in unit:
+                    phrase.add_token(line)
+        self.assertEqual("Cycled phrase detected", context.exception.message)
 
 
 class LoopDetectorStateCase(unittest.TestCase):

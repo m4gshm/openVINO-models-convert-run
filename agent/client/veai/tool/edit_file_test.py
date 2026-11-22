@@ -20,7 +20,7 @@ class EditFileTestCase(unittest.TestCase):
     def test_add_old_file(self):
         """new_text from file content must be rebuilt with reconstructed old_text."""
         src_file = files(__package__).joinpath(TEST_RESOURCES,
-                                               "gemma4/build.gradle.kts")
+                                               "gemma4/build.gradle.kts.txt")
         src_file_bytes = src_file.read_bytes()
         user_context = UserContext()
         user_context.files = UserContextFiles({Path("build.gradle.kts"): src_file_bytes})

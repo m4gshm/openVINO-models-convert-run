@@ -5,10 +5,23 @@ from importlib.resources import files
 
 from agent.client.veai.tool_call_fixer import veai_fix_incorrect_arguments
 from agent.inference.phrase import DEFAULT_DUPLICATED_TOKENS_LIMIT
-from agent.inference.token_handler import StopSignal, TokenHandler, TokenHandlerConfig
+from agent.inference.token_handler import (StopSignal, TokenHandler, TokenHandlerConfig,
+                                           fix_tool_calls_and_convert_to_choice_delta_tool_calls)
 from agent.parser import ParsedFunctionCall, Parser, StateEvent
 
 TEST_RESOURCES = "test_resources"
+
+
+class ToolCallIndexCases(unittest.TestCase):
+    """Streamed parallel tool calls must carry distinct, sequential indexes."""
+
+    def test_indexes_follow_start_index(self):
+        """Calls converted with a start offset get sequential indexes, not all zero."""
+        calls = [ParsedFunctionCall(name="glob", arguments={"pattern": "a"}),
+                 ParsedFunctionCall(name="read", arguments={"path": "b"})]
+        deltas = fix_tool_calls_and_convert_to_choice_delta_tool_calls(None, None, calls, start_index=2)
+
+        self.assertEqual([2, 3], [delta.index for delta in deltas])
 
 
 class CompletionStopPhrasesCases(unittest.TestCase):

@@ -91,11 +91,13 @@ def new_usage_chunk(prompt_tokens: int, completion_tokens: int, response_id: str
 @beartype
 def new_tool_call(function: ChoiceDeltaToolCallFunction,
                   call_id: str | None = None,
-                  ts: int | None = None) -> ChoiceDeltaToolCall:
+                  ts: int | None = None,
+                  index: int = 0) -> ChoiceDeltaToolCall:
     """Build a tool-call delta entry, generating a call id when none is given."""
     if not call_id:
         call_id = generate_tool_call_id(function.name or "", ts)
-    return ChoiceDeltaToolCall(id=call_id, function=function, type="function", index=0)
+    # clients aggregate streamed tool calls by index: parallel calls must not share one
+    return ChoiceDeltaToolCall(id=call_id, function=function, type="function", index=index)
 
 
 @beartype

@@ -59,6 +59,12 @@ WARN_GENERATION_IS_INTERRUPTED_ = "Generating is interrupted."
 USER_SELECT_CONTINUE = "continue"
 USER_SELECT_INTERRUPT = "interrupt"
 
+LOOP_RETRY_ATTEMPTS = 2
+LOOP_RETRY_TEMPERATURE_DELTA = 0.2
+# the schema maximum: it never lowers a user-provided temperature, it only keeps the
+# retry temperature valid when the user's own value is already at the top
+MAX_TEMPERATURE = 2.0
+
 
 class TokenizeRequest(BaseModel):
     """Request body of the /tokenize endpoint."""
@@ -367,7 +373,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             content={"detail": exc.errors()},
         )
 
-    def validate_messages(self, body: ChatCompletionRequest, tools) -> ChatCompletionChunk | None:
+    def validate_messages(self, body: ChatCompletionRequest) -> ChatCompletionChunk | None:
         """Handle cycled tool calls: warn the model and continue, or ask the user when it keeps looping."""
         if not self.config.is_detect_cycled_tool_call:
             return None
@@ -388,7 +394,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             body.temperature = max(body.temperature or 0.0, 0.8)
             return None
         tool_calls = []
-        detected = detect_select_options(tools)
+        detected = detect_select_options(body.tools)
         if detected:
             question = detected.tool.new_call(
                 msg +
@@ -431,7 +437,7 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
             if last_message.role == ROLE_TOOL:
                 log_client_generated.debug(content_text(last_message.content))
 
-        invalid_response = self.validate_messages(body, body.tools)
+        invalid_response = self.validate_messages(body)
         return (await new_http_response_chat(stream, [invalid_response])) if invalid_response \
             else await self.handle_chat_completion(body, request)
 
@@ -494,7 +500,11 @@ class BaseOVController(BaseController):
 
     async def chat_chunks(self, body: ChatCompletionRequest,
                           request: Request) -> Iterable[ChatCompletionChunk]:
-        """Run the full local pipeline: prepare messages, build prompt, generate chunks."""
+        """Run the full local pipeline: prepare messages, build prompt, generate chunks.
+
+        A generation ended by the loop detector is restarted with an injected user warning
+        and a raised temperature, so the model gets a chance to continue differently.
+        """
         messages: list[ChatCompletionMessageParam] = body.messages
         is_veai = is_veai_agent(messages)
         tools_raw, function_parameters = self.prepare_tools(body.tools, is_veai)
@@ -509,24 +519,70 @@ class BaseOVController(BaseController):
                 response_id=str(uuid.uuid4()), role=ROLE_ASSISTANT, model=self.config.model_name or "",
                 content=str(e), finish_reason=STOP)]
 
-        prompt = self.build_prompt(prepared.messages, tools_raw)
-        generation_config = new_generation_config(self.generate_opts,
-                                                  GenerationRequest.of_chat_request(body))
-        over_limit_response, prompt_tokens_amount = self.check_prompt_of(prompt, generation_config, prepared.media)
-        if over_limit_response:
-            return [over_limit_response]
-
         user_context = (get_veai_context(messages) or UserContext()) if is_veai else UserContext()
         user_context.messages = messages
         user_context.model_architectures = self.config.model_architectures
-        token_handler = self.new_token_handler(prompt, request,
-                                               init_chat_events=True,
-                                               tool_fixer=(veai_fix_incorrect_arguments if is_veai else None),
-                                               user_context=user_context,
-                                               supported_functions=function_parameters)
-        return self.with_usage(self.chunk_generator(prompt=prompt, generation_config=generation_config,
-                                                    token_handler=token_handler, media=prepared.media),
-                               prompt_tokens=prompt_tokens_amount, token_handler=token_handler)
+
+        def generate_with_loop_retries() -> Iterable[ChatCompletionChunk]:
+            # shortcut: usage counts only the tokens of the last attempt; the exact per-attempt
+            # metrics stay in the log. Upgrade if clients start reconciling the numbers.
+            attempt_messages = prepared.messages
+            base_temperature = 0.0  # replaced with the resolved temperature of the first attempt
+            for attempt in range(1 + LOOP_RETRY_ATTEMPTS):
+                prompt = self.build_prompt(attempt_messages, tools_raw)
+                generation_config = new_generation_config(self.generate_opts,
+                                                          GenerationRequest.of_chat_request(body))
+                # the resolved temperature of the first attempt (the user's one or the server
+                # default) is the base each loop retry raises by the delta
+                if not attempt:
+                    base_temperature = float(generation_config.temperature)
+                else:
+                    retry_temperature = base_temperature + LOOP_RETRY_TEMPERATURE_DELTA
+                    if retry_temperature > MAX_TEMPERATURE:
+                        log.info("loop retry temperature %s is capped to %s (base %s)",
+                                 retry_temperature, MAX_TEMPERATURE, base_temperature)
+                        retry_temperature = MAX_TEMPERATURE
+                    generation_config.temperature = retry_temperature
+                over_limit_response, prompt_tokens_amount = self.check_prompt_of(prompt, generation_config,
+                                                                                 prepared.media)
+                if over_limit_response:
+                    yield over_limit_response
+                    return
+                token_handler = self.new_token_handler(prompt, request,
+                                                       init_chat_events=True,
+                                                       tool_fixer=(veai_fix_incorrect_arguments if is_veai
+                                                                   else None),
+                                                       user_context=user_context,
+                                                       supported_functions=function_parameters)
+                held = None
+                for chunk in self.chunk_generator(prompt=prompt, generation_config=generation_config,
+                                                  token_handler=token_handler, media=prepared.media):
+                    # the finish chunk closes the attempt: hold it back until we know whether the
+                    # looped generation is retried — the retry must not finish the whole stream
+                    if any(choice.finish_reason for choice in chunk.choices):
+                        held = chunk
+                    else:
+                        yield chunk
+                if not (token_handler.processor.loop_errors and attempt < LOOP_RETRY_ATTEMPTS):
+                    if held is not None:
+                        yield held
+                    yield new_usage_chunk(prompt_tokens=prompt_tokens_amount,
+                                          completion_tokens=token_handler.processor.token_counter,
+                                          model=self.config.model_name or "")
+                    return
+                log.warning("generation looped, restarting with a warning (attempt %s of %s)",
+                            attempt + 1, LOOP_RETRY_ATTEMPTS)
+                if held is not None:  # keep the visible loop warning, drop its finish reason
+                    for choice in held.choices:
+                        choice.finish_reason = None
+                    yield held
+                warning = ("\n\n".join(token_handler.processor.loop_errors)
+                           + "\n\nYour generation was repeating itself and was interrupted. "
+                             "Continue from a different angle without repeating the same text.")
+                attempt_messages = attempt_messages + [
+                    ChatCompletionMessageParam(role=ROLE_USER, content=warning).model_dump()]
+
+        return generate_with_loop_retries()
 
     def with_usage(self, chunks: Iterable[ChatCompletionChunk], prompt_tokens: int,
                    token_handler: TokenHandler) -> Iterable[ChatCompletionChunk]:
