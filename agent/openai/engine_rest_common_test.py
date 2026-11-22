@@ -173,6 +173,11 @@ class FakeTokenizer:  # pylint: disable=too-few-public-methods  # duck-typed stu
         """Return a fake encoding result."""
         return SimpleNamespace(input_ids=SimpleNamespace(size=1))
 
+    def apply_chat_template(self, **_kwargs):
+        """Render the prompt as plain text of the messages: no model is attached."""
+        return "".join(str(m.get("content", "")) + "\n"
+                       for m in _kwargs["history"].get_messages())
+
 
 class FakeOVController(BaseOVController):
     """Controller stub exercising the shared usage wrapper."""
@@ -187,6 +192,50 @@ class FakeOVController(BaseOVController):
     def chunk_generator(self, prompt, generation_config, token_handler, media):
         """Emit no chunks: the wrapper is under test, not generation."""
         return []
+
+
+class LoopRetryingController(FakeOVController):
+    """Controller stub: the first two attempts loop, the third one succeeds."""
+
+    def __init__(self):
+        """Track the attempts, their prompts and temperatures."""
+        super().__init__()
+        self.attempts = 0
+        self.prompts: list[tuple[str, float]] = []
+
+    def chunk_generator(self, prompt, generation_config, token_handler, media):
+        """Emit a loop-cancelled stream twice, then a normal one."""
+        self.attempts += 1
+        self.prompts.append((prompt, generation_config.temperature))
+        if self.attempts <= 2:
+            token_handler.processor.loop_errors.append("**WARNING: loop**")
+            yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="**WARNING: loop**",
+                                            finish_reason="stop")
+        else:
+            yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="ok", finish_reason="stop")
+
+
+class LoopRetryCase(unittest.TestCase):
+    """The chat pipeline restarts a looped generation with a warning and a raised temperature."""
+
+    def test_looped_generation_is_retried_and_then_streamed_once(self):
+        """Two looped attempts are retried with a warning message and temperature 0.8."""
+        controller = LoopRetryingController()
+        body = ChatCompletionRequest(messages=[ChatCompletionMessageParam(role=ROLE_USER, content="hi")],
+                                     temperature=0.3)
+        chunks = asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace())))
+        contents = [(c.choices[0].delta.content if c.choices else None,
+                     c.choices[0].finish_reason if c.choices else None,
+                     bool(c.usage)) for c in chunks]
+
+        self.assertEqual(3, controller.attempts)
+        self.assertEqual([("**WARNING: loop**", None), ("**WARNING: loop**", None), ("ok", "stop")],
+                         [(content, reason) for content, reason, _ in contents[:3]])
+        self.assertTrue(contents[-1][2], "the last chunk must be the usage one")
+        # attempts 2-3 carry the injected warning and the raised temperature
+        base = controller.prompts[0][1]
+        self.assertTrue(all("loop" in prompt and abs(temp - (base + 0.2)) < 1e-6
+                            for prompt, temp in controller.prompts[1:]))
 
 
 class GenerationConfigCase(unittest.TestCase):
@@ -363,14 +412,14 @@ class LoopInjectionCase(unittest.TestCase):
 
     def _validate(self, count, temperature=None, detected=None):
         """Run validate_messages with a stubbed loop detector reporting `count` repeats."""
-        body = SimpleNamespace(messages=[], temperature=temperature)
+        body = ChatCompletionRequest(messages=[], temperature=temperature)
         with patch("agent.openai.engine_rest_common.PreprocessToolCall") as preprocess, \
                 patch("agent.openai.engine_rest_common.detect_select_options", return_value=detected):
             looped = MagicMock()
             looped.render_markdown.return_value = "WARNING: Loop"
             preprocess.return_value.check_loop_tool_calls.return_value = (looped, count) if count else (None, 0)
             preprocess.max_repeated_tool_calls_with_the_same_result = self.max_repeats
-            result = self.controller.validate_messages(cast(ChatCompletionRequest, body), None)
+            result = self.controller.validate_messages(body)
         return result, body
 
     @staticmethod
