@@ -143,10 +143,6 @@ def build_engine_setup(args) -> EngineSetup:
 
     scheduler_opts = load_scheduler_opts(args.scheduler_config_file)
     scheduler_config = build_scheduler_config(scheduler_opts, context.max_prompt_len)
-    if args.prompt_lookup == Turn.on.value and getattr(scheduler_config, "enable_prefix_caching", False):
-        # openvino_genai asserts: speculative decoding with a linear-attention verifier needs prefix caching off
-        log.warning("prompt_lookup on: disabling enable_prefix_caching (not supported together)")
-        scheduler_config.enable_prefix_caching = False
 
     pipe, parser_type = resolve_pipe_and_parser(args, context.model_architectures,
                                                 context.media_capabilities)
