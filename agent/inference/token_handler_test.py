@@ -98,6 +98,32 @@ class CompletionStopPhrasesCases(unittest.TestCase):
         text = "".join(self.chunks_text(result))
         self.assertIn("WARNING: Generated content appears to be a loop", text)
 
+    def test_loop_inside_thinking_closes_thinking_and_continues(self):
+        """A loop inside thinking force-closes it with a warning; the answer streams on without a cancel."""
+        handler = TokenHandler(tokenizer=None, prompt="", parser=Parser(), init_chat_events=False,
+                               is_stop=None, config=TokenHandlerConfig(), tool_fixer=None)
+        tokens = ["<think>"] + ["x"] * (DEFAULT_DUPLICATED_TOKENS_LIMIT + 1) + [" the answer"]
+        result, stop_signal = handler.processor.process_tokens(tokens)
+
+        self.assertIsNone(stop_signal)
+        self.assertEqual(1, handler.processor.thinking_loop_exits)
+        text = "".join(self.chunks_text(result))
+        self.assertIn("answering directly", text)
+        self.assertIn(" the answer", text)
+        self.assertFalse(handler.processor.state.has_event(StateEvent.THINK), "thinking must be closed")
+
+    def test_thinking_loop_exit_limit_zero_cancels_like_content(self):
+        """With the limit exhausted a thinking loop cancels the generation like a content loop."""
+        handler = TokenHandler(tokenizer=None, prompt="", parser=Parser(), init_chat_events=False,
+                               is_stop=None, config=TokenHandlerConfig(thinking_loop_exit_limit=0),
+                               tool_fixer=None)
+        tokens = ["<think>"] + ["x"] * (DEFAULT_DUPLICATED_TOKENS_LIMIT + 1)
+        result, stop_signal = handler.processor.process_tokens(tokens)
+
+        self.assertEqual(StopSignal.CANCEL, stop_signal)
+        self.assertEqual(0, handler.processor.thinking_loop_exits)
+        self.assertEqual(1, len(handler.processor.loop_errors))
+
 
 class TokenHandlerCases(unittest.TestCase):
     """Checks the repair of the tool call arguments of the token handler."""

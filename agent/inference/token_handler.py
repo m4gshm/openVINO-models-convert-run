@@ -35,6 +35,9 @@ class TokenHandlerConfig(BaseModel):
     no_conversation_counter_max: int = 20
     empty_conversation_counter_max: int = 20
     is_detect_looped_inference: bool = True
+    # a loop inside thinking does not cancel the generation: thinking is force-closed and the model
+    # answers directly, this many loop detections per attempt; further loops cancel as usual
+    thinking_loop_exit_limit: int = 2
     # stop phrases of the request: a generated token equal to one of them ends the generation;
     # matched on the raw token stream, single-token form (like the Qwen FIM special tags)
     stop_strings: tuple[str, ...] = ()
@@ -297,6 +300,8 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
         self.tool_call_parsing_long_time_warned: bool = False
         self.tool_call_parsing_max_time_warned: bool = False
         self.loop_errors: list[str] = []
+        self.thinking_loop_exits = 0
+        self.thinking_loop_exit_limit = config.thinking_loop_exit_limit
 
     def tool_call_parsing_time(self, now_time: float) -> timedelta:
         """Time the current tool call has been parsed for, zero when it did not start yet."""
@@ -473,11 +478,22 @@ class TokenProcessor:  # pylint: disable=too-many-instance-attributes  # keeps p
                 new_lines = None
                 log.error("loop error: %s", e)
                 loop_error = markdown_tool_call_loop_error(e.message, e.payload)
-                self.loop_errors.append(loop_error)
 
             thinking = state.has_event(StateEvent.THINK)
             is_handle_delay_end = state.is_streaming_delayed or handle_delay_end
-            if loop_error:
+            if loop_error and thinking and self.thinking_loop_exits < self.thinking_loop_exit_limit:
+                # a loop inside thinking: close thinking and let the model answer directly instead of
+                # cancelling — reasoning that keeps repeating cannot produce the closing tag itself
+                self.thinking_loop_exits += 1
+                log.warning("loop inside thinking (%s of %s), closing thinking and continuing with the answer",
+                            self.thinking_loop_exits, self.thinking_loop_exit_limit)
+                self.__clean_phrase()
+                self.thinking_end(state)
+                result.append(new_chat_completion_chunk(
+                    role=state.role, content=markdown_bold(f"WARNING: {loop_error} — repeated reasoning was cut, "
+                                                           f"thinking was closed; answering directly.\n")))
+            elif loop_error:
+                self.loop_errors.append(loop_error)
                 if is_handle_delay_end:
                     result.append(new_chat_completion_chunk(role=state.role, content=phrase.full,
                                                             thinking=thinking))
