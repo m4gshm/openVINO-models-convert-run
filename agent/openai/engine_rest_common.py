@@ -64,6 +64,9 @@ USER_SELECT_INTERRUPT = "interrupt"
 
 LOOP_RETRY_ATTEMPTS = 2
 LOOP_RETRY_TEMPERATURE_DELTA = 0.2
+# greedy retries ignore the temperature: the counting penalty grows with every repeated token
+# and shifts the argmax of a long loop, together with the prompt nudge appended below
+LOOP_RETRY_FREQUENCY_PENALTY_STEP = 0.3
 # how much of a looped attempt stays in the retry context: the full text is mostly
 # repeated garbage, the tail is enough for the warning to refer to real output
 LOOP_RETRY_CONTEXT_CHARS = 2000
@@ -585,13 +588,22 @@ class BaseOVController(BaseController):
                 # default) is the base each loop retry raises by the delta
                 if not attempt:
                     base_temperature = float(generation_config.temperature)
+                    retry_frequency_penalty = float(generation_config.frequency_penalty or 0.0)
                 else:
-                    retry_temperature = base_temperature + LOOP_RETRY_TEMPERATURE_DELTA
-                    if retry_temperature > MAX_TEMPERATURE:
-                        log.info("loop retry temperature %s is capped to %s (base %s)",
-                                 retry_temperature, MAX_TEMPERATURE, base_temperature)
-                        retry_temperature = MAX_TEMPERATURE
-                    generation_config.temperature = retry_temperature
+                    if generation_config.do_sample:
+                        retry_temperature = base_temperature + LOOP_RETRY_TEMPERATURE_DELTA
+                        if retry_temperature > MAX_TEMPERATURE:
+                            log.info("loop retry temperature %s is capped to %s (base %s)",
+                                     retry_temperature, MAX_TEMPERATURE, base_temperature)
+                            retry_temperature = MAX_TEMPERATURE
+                        generation_config.temperature = retry_temperature
+                    else:
+                        # greedy decoding ignores the temperature: escalate the counting penalty instead
+                        # (LogitProcessor applies it before the argmax) — the appended prompt nudge does
+                        # the rest. The pipeline (prefix caching) is left untouched: rebuilding it would
+                        # reload the model, and sampling on linear-attention draft builds asserts.
+                        retry_frequency_penalty += LOOP_RETRY_FREQUENCY_PENALTY_STEP
+                        generation_config.frequency_penalty = retry_frequency_penalty
                 over_limit_response, prompt_tokens_amount = self.check_prompt_of(prompt, generation_config,
                                                                                  prepared.media)
                 if over_limit_response:
@@ -618,11 +630,9 @@ class BaseOVController(BaseController):
                             f"{getattr(choice.delta, 'reasoning_content', None) or ''}"
                             for choice in chunk.choices if choice.delta)
                         yield chunk
-                if not (token_handler.processor.loop_errors and attempt < LOOP_RETRY_ATTEMPTS
-                        and generation_config.do_sample):
-                    # greedy decoding ignores the raised temperature: a retry cannot leave the loop,
-                    # and MTP builds with linear-attention even assert on multinomial sampling —
-                    # in that mode go straight to asking the user instead of burning attempts
+                if not (token_handler.processor.loop_errors and attempt < LOOP_RETRY_ATTEMPTS):
+                    # exhausted retries (or no loop): greedy attempts now retry with an escalated
+                    # counting penalty and the appended prompt nudge; sampling ones raise the temperature
                     yield from exhausted_loop_chunks(body, token_handler.processor.loop_errors, held)
                     yield new_usage_chunk(prompt_tokens=prompt_tokens_amount,
                                           completion_tokens=token_handler.processor.token_counter,

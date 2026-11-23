@@ -225,11 +225,13 @@ class AlwaysLoopingController(LoopRetryingController):
         """Optionally force greedy decoding, as servers with MTP speculative decoding do."""
         super().__init__()
         self.generate_opts = self.generate_opts.model_copy(update={"do_sample": do_sample})
+        self.frequencies: list[float | None] = []
 
     def chunk_generator(self, prompt, generation_config, token_handler, media):
         """Emit a loop-cancelled stream on every attempt."""
         self.attempts += 1
         self.prompts.append((prompt, generation_config.temperature))
+        self.frequencies.append(generation_config.frequency_penalty)
         token_handler.processor.loop_errors.append("**WARNING: loop**")
         yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="**WARNING: loop**",
                                         finish_reason="content_filter")
@@ -288,16 +290,19 @@ class LoopRetryCase(unittest.TestCase):
         self.assertTrue(all("loop" in prompt and abs(temp - (base + 0.2)) < 1e-6
                             for prompt, temp in controller.prompts[1:]))
 
-    def test_greedy_decoding_asks_the_user_on_the_first_loop(self):
-        """Greedy decoding cannot leave the loop: no retries, the question comes right away."""
+    def test_greedy_decoding_retries_with_an_escalated_frequency_penalty(self):
+        """Greedy retries cannot raise the temperature: they escalate the counting penalty instead."""
         controller = AlwaysLoopingController(do_sample=False)
         body = ChatCompletionRequest(messages=[ChatCompletionMessageParam(role=ROLE_USER, content="hi")])
         with patch("agent.openai.engine_rest_common.detect_select_options",
                    return_value=DetectedSelectOptions(agent=AgentType.OPENCODE, tool=QuestionTool())):
             chunks = list(asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace()))))
-        self.assertEqual(1, controller.attempts)
+        self.assertEqual(3, controller.attempts)
+        self.assertTrue(all(abs(f - expected) < 1e-3 for f, expected in zip(controller.frequencies[1:], [0.3, 0.6])))
+        self.assertTrue(all(p[1] == controller.prompts[0][1] for p in controller.prompts),
+                        "greedy retries must keep the temperature untouched")
+        # the exhausted stream still ends with the ask-user question
         last_choice = chunks[-2].choices[0]
-        self.assertEqual("stop", last_choice.finish_reason)
         self.assertEqual(1, len(last_choice.delta.tool_calls or []))
 
 
