@@ -31,3 +31,8 @@ def markdown_tool_call_loop_error(loop_cause: str | None, loop_error: str) -> st
     """Format a tool call loop error as a markdown warning block."""
     return ((markdown_bold("WARNING: " + loop_cause) + "\n") if loop_cause else "") + markdown_file_content(
         loop_error)
+
+
+def markdown_stripped(text: str) -> str:
+    """Drop markdown decorations (bold markers, code fences, back ticks) for plain-text UIs."""
+    return text.replace("**", "").replace("```", "").replace("`", "")

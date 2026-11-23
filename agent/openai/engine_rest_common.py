@@ -28,7 +28,8 @@ from agent.client.user_context import UserContext
 from agent.client.veai import is_veai_agent, get_veai_context
 from agent.client.veai.tool_call_fixer import veai_fix_tool_definition_optional_property_as_null_type, \
     veai_fix_incorrect_arguments
-from agent.common.markdown import markdown_bold, markdown_back_tick
+from agent.common.markdown import markdown_bold, markdown_back_tick, markdown_json, markdown_file_content, \
+    markdown_stripped
 from agent.inference.token_handler import StopSignal, get_finish_str, TokenHandler, \
     TokenHandlerConfig
 from agent.multimodal.content_parts import content_text
@@ -38,11 +39,13 @@ from agent.multimodal.modality import Modalities, Modality
 from agent.multimodal.request_media import prepare_messages
 from agent.openai import GenerateOpts, completions_api
 from agent.openai.chat_api import ROLE_TOOL, ROLE_ASSISTANT, ROLE_USER, new_stop_response
-from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk, new_usage_chunk
+from agent.openai.chat_api import new_chat_completion, new_tool_call, new_chat_completion_chunk, \
+    new_usage_chunk
 from agent.openai.chat_completions_api import ChatCompletionRequest, ChatCompletionMessageParam, \
     ChatCompletionFunctionToolParam, FunctionDefinitionParameters
 from agent.openai.interrupt import InterruptRegistry
-from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id
+from agent.openai.middleware_checkpoint import is_middleware_checkpoint, new_middleware_call_id, \
+    checkpoint_answer
 from agent.openai.models_api import ModelsListResponse, ModelObject
 from agent.parser import Parser
 from agent.preprocess.prompt_escape import PromptEscaper, MEDIA_TAGS_ONLY
@@ -61,9 +64,46 @@ USER_SELECT_INTERRUPT = "interrupt"
 
 LOOP_RETRY_ATTEMPTS = 2
 LOOP_RETRY_TEMPERATURE_DELTA = 0.2
+# how much of a looped attempt stays in the retry context: the full text is mostly
+# repeated garbage, the tail is enough for the warning to refer to real output
+LOOP_RETRY_CONTEXT_CHARS = 2000
 # the schema maximum: it never lowers a user-provided temperature, it only keeps the
 # retry temperature valid when the user's own value is already at the top
 MAX_TEMPERATURE = 2.0
+
+
+def new_ask_user_call(body: ChatCompletionRequest, question: str) -> ChoiceDeltaToolCall | None:
+    """Build the middleware continue/interrupt question, when the client supports select options."""
+    detected = detect_select_options(body.tools)
+    if not detected:
+        return None
+    # the question UIs of the clients render plain text, not markdown
+    select = detected.tool.new_call(markdown_stripped(question) + "\n\nWhat to do next?",
+                                    [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
+    return new_tool_call(call_id=new_middleware_call_id(), function=select.to_openai_function_call())
+
+
+def exhausted_loop_chunks(body: ChatCompletionRequest, loop_errors: list[str],
+                          held: ChatCompletionChunk | None) -> Iterable[ChatCompletionChunk]:
+    """Yield the closing chunks of a stream whose generation kept looping after all retries.
+
+    With a select-capable client the stream ends with the continue/interrupt question instead of
+    the content_filter finish of the cancelled attempt.
+    """
+    question = new_ask_user_call(
+        body, "\n\n".join(loop_errors)
+        + "\n\nThe generation kept repeating itself and was interrupted after retries.") \
+        if loop_errors else None
+    if held is not None:
+        if question is not None:
+            for choice in held.choices:
+                choice.finish_reason = None
+        yield held
+    if question is not None:
+        yield new_chat_completion_chunk(finish_reason=STOP,
+                                        role=ROLE_ASSISTANT,
+                                        content="",
+                                        tool_calls=[question])
 
 
 class TokenizeRequest(BaseModel):
@@ -84,6 +124,7 @@ class ControllerConfig(BaseModel):
     response_timeout: timedelta = timedelta(minutes=20)
     is_fix_tool_type: bool = True
     is_detect_cycled_tool_call: bool = True
+    detect_cycled_tool_call_exclusions: list[str] = []
     chat_template: str = ''
     modalities: set[str] = {Modality.TEXT.value}
     max_media_bytes: int = 20 * 1024 * 1024
@@ -378,40 +419,48 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
         if not self.config.is_detect_cycled_tool_call:
             return None
         messages = body.messages
-        looped_function, count = PreprocessToolCall().check_loop_tool_calls(messages)
-        if not looped_function:
-            return None
-        msg = looped_function.render_markdown()
+        preprocess_tool_call = PreprocessToolCall(self.config.detect_cycled_tool_call_exclusions)
+        looped_function, count = preprocess_tool_call.check_loop_tool_calls(messages)
         # every bucket of `max_repeated_tool_calls_with_the_same_result` repeats is one attempt:
-        # attempts 1–2 are answered with an injected user warning and a raised temperature while
-        # the generation continues; from attempt 3 on the user is asked to continue or interrupt.
+        # the first attempt is answered with an injected user warning and a raised temperature while
+        # the generation continues; from the second attempt on the user is asked to continue or interrupt.
         # the injected message is not part of the client history, so the repeat count itself
         # carries the escalation state (an answered middleware checkpoint resets detection).
-        if count < 3 * PreprocessToolCall.max_repeated_tool_calls_with_the_same_result:
-            body.messages = messages + [ChatCompletionMessageParam(role=ROLE_USER, content=msg + "\n\n"
-                + "You keep repeating the same tool call with the same result. "
-                + "Change your approach or try a different tool.")]
+        if looped_function and count >= 2 * preprocess_tool_call.max_repeated_tool_calls_with_the_same_result:
+            msg = looped_function.render_markdown()
+            question = new_ask_user_call(
+                body, msg + "\n\n" + "Repeated: "
+                + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")))
+            if question:
+                content = ""
+                tool_calls = [question]
+            else:
+                content = msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_
+                tool_calls = []
+            return new_chat_completion_chunk(finish_reason=STOP,
+                                             role=ROLE_ASSISTANT,
+                                             content=content,
+                                             tool_calls=tool_calls)
+        injections = []
+        if looped_function:
+            injections.append(looped_function.render_markdown() + "\n\n"
+                              + "You keep repeating the same tool call with the same result. "
+                              + "Change your approach or try a different tool.")
+        already_applied = preprocess_tool_call.check_already_applied_tool_calls(messages)
+        if already_applied:
+            injections.append(markdown_bold("WARNING: The tool call already succeeded.") + "\n\n"
+                              + f"Tool name: {markdown_back_tick(already_applied.name)}\n\n"
+                              + f"Arguments: {markdown_json(already_applied.arguments)}\n\n"
+                              + "Result of the latest repeat: "
+                              + markdown_file_content(already_applied.result, "json") + "\n\n"
+                              + "These exact arguments succeeded earlier, so the change is already applied "
+                              + "(for example, an edit is already in the file). Do not repeat this call — "
+                              + "continue with the next step.")
+        if injections:
+            body.messages = messages + [ChatCompletionMessageParam(role=ROLE_USER,
+                                                                   content="\n\n".join(injections))]
             body.temperature = max(body.temperature or 0.0, 0.8)
-            return None
-        tool_calls = []
-        detected = detect_select_options(body.tools)
-        if detected:
-            question = detected.tool.new_call(
-                msg +
-                "\n\n" +
-                "Repeated: " + markdown_back_tick(str(count) + " " + ("time" if count == 1 else "times")) +
-                "\n\n" + markdown_bold("What to do next?"),
-                [USER_SELECT_CONTINUE, USER_SELECT_INTERRUPT])
-            tool_call = new_tool_call(call_id=new_middleware_call_id(),
-                                      function=question.to_openai_function_call())
-            tool_calls.append(tool_call)
-            content = ""
-        else:
-            content = msg + "\n\n" + WARN_GENERATION_IS_INTERRUPTED_
-        return new_chat_completion_chunk(finish_reason=STOP,
-                                         role=ROLE_ASSISTANT,
-                                         content=content,
-                                         tool_calls=tool_calls)
+        return None
 
     async def chat(self, body: ChatCompletionRequest, request: Request):
         """Shared /v1/chat/completions entry: checkpoint guard, validation, dispatch."""
@@ -430,8 +479,8 @@ class BaseController(ABC):  # pylint: disable=too-many-instance-attributes  # de
 
         last_message = messages[-1] if messages else None
         if last_message:
-            if is_middleware_checkpoint(last_message) and USER_SELECT_INTERRUPT in \
-                    content_text(last_message.content).lower():
+            if is_middleware_checkpoint(last_message) \
+                    and checkpoint_answer(last_message).strip().lower() == USER_SELECT_INTERRUPT:
                 return await new_http_response_chat(stream, [
                     new_chat_completion_chunk(content="Interrupted", role=ROLE_ASSISTANT, finish_reason="stop")])
             if last_message.role == ROLE_TOOL:
@@ -555,6 +604,7 @@ class BaseOVController(BaseController):
                                                        user_context=user_context,
                                                        supported_functions=function_parameters)
                 held = None
+                attempt_text = ""
                 for chunk in self.chunk_generator(prompt=prompt, generation_config=generation_config,
                                                   token_handler=token_handler, media=prepared.media):
                     # the finish chunk closes the attempt: hold it back until we know whether the
@@ -562,10 +612,18 @@ class BaseOVController(BaseController):
                     if any(choice.finish_reason for choice in chunk.choices):
                         held = chunk
                     else:
+                        # reasoning_content is an optional extra field: read via getattr
+                        attempt_text += "".join(
+                            f"{getattr(choice.delta, 'content', None) or ''}"
+                            f"{getattr(choice.delta, 'reasoning_content', None) or ''}"
+                            for choice in chunk.choices if choice.delta)
                         yield chunk
-                if not (token_handler.processor.loop_errors and attempt < LOOP_RETRY_ATTEMPTS):
-                    if held is not None:
-                        yield held
+                if not (token_handler.processor.loop_errors and attempt < LOOP_RETRY_ATTEMPTS
+                        and generation_config.do_sample):
+                    # greedy decoding ignores the raised temperature: a retry cannot leave the loop,
+                    # and MTP builds with linear-attention even assert on multinomial sampling —
+                    # in that mode go straight to asking the user instead of burning attempts
+                    yield from exhausted_loop_chunks(body, token_handler.processor.loop_errors, held)
                     yield new_usage_chunk(prompt_tokens=prompt_tokens_amount,
                                           completion_tokens=token_handler.processor.token_counter,
                                           model=self.config.model_name or "")
@@ -578,8 +636,14 @@ class BaseOVController(BaseController):
                     yield held
                 warning = ("\n\n".join(token_handler.processor.loop_errors)
                            + "\n\nYour generation was repeating itself and was interrupted. "
-                             "Continue from a different angle without repeating the same text.")
-                attempt_messages = attempt_messages + [
+                             "Start your next reasoning by acknowledging what you were repeating, "
+                             "then continue from a different angle.")
+                # the looped attempt stays in the retry context (its tail): without it the warning
+                # refers to output the model never saw and it restarts the same reasoning from scratch
+                attempt_tail = attempt_text[-LOOP_RETRY_CONTEXT_CHARS:]
+                attempt_messages = attempt_messages + (
+                    [ChatCompletionMessageParam(role=ROLE_ASSISTANT, content=attempt_tail).model_dump()]
+                    if attempt_tail.strip() else []) + [
                     ChatCompletionMessageParam(role=ROLE_USER, content=warning).model_dump()]
 
         return generate_with_loop_retries()

@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 
 from agent.multimodal.model_capabilities import MediaCapabilities
 from agent.openvino.options import ParserType, Pipe
-from agent.server_openvino import add_openvino_args, cleanup_kernel_cache, new_model_parser, \
+from agent.server_openvino import add_openvino_args, cleanup_kernel_cache, cleanup_model_blobs, new_model_parser, \
     resolve_attention_backend, resolve_max_prompt_len, resolve_model_path, resolve_pipe_and_parser
 from agent.openai import GenerateOpts
 
@@ -45,12 +45,46 @@ class CleanupKernelCacheCase(unittest.TestCase):
             self.assertTrue(recently_used.exists())
             self.assertTrue(other.exists())
 
-    def test_zero_disables_cleanup(self):
-        """`days=0` deletes nothing."""
+    def test_blob_cleanup_is_separate_from_kernel_cache(self):
+        """`cleanup_kernel_cache` ignores .blob files; `cleanup_model_blobs` removes only those."""
+        with TemporaryDirectory() as tmp:
+            kernel = Path(tmp) / "1.cl_cache"
+            blob = Path(tmp) / "2.blob"
+            other = Path(tmp) / "model.xml"
+            for f in (kernel, blob, other):
+                f.write_text("x")
+
+            self.assertEqual(1, cleanup_kernel_cache(tmp, days=0))
+            self.assertTrue(blob.exists())
+
+            self.assertEqual(1, cleanup_model_blobs(tmp, days=0))
+            self.assertFalse(blob.exists())
+            self.assertTrue(other.exists())
+
+    def test_blob_cleanup_negative_disables(self):
+        with TemporaryDirectory() as tmp:
+            blob = Path(tmp) / "2.blob"
+            blob.write_text("x")
+            self.assertEqual(0, cleanup_model_blobs(tmp, days=-1))
+            self.assertTrue(blob.exists())
+
+    def test_zero_deletes_everything(self):
+        """`days=0` is a fresh-cache experiment mode: every blob goes."""
         with TemporaryDirectory() as tmp:
             blob = Path(tmp) / "1.cl_cache"
             blob.write_text("x")
-            self.assertEqual(0, cleanup_kernel_cache(tmp, days=0))
+            other = Path(tmp) / "model.xml"
+            other.write_text("x")
+            self.assertEqual(1, cleanup_kernel_cache(tmp, days=0))
+            self.assertFalse(blob.exists())
+            self.assertTrue(other.exists())
+
+    def test_negative_disables_cleanup(self):
+        """Negative `days` deletes nothing."""
+        with TemporaryDirectory() as tmp:
+            blob = Path(tmp) / "1.cl_cache"
+            blob.write_text("x")
+            self.assertEqual(0, cleanup_kernel_cache(tmp, days=-1))
             self.assertTrue(blob.exists())
 
 

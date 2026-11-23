@@ -40,23 +40,34 @@ log = logging.getLogger(__name__)
 DEFAULT_MODELS_DIR = "./models"
 DEFAULT_MODELS_CACHE_DIR = "./models_cache"
 DEFAULT_CACHE_CLEANUP_DAYS = 7
+DEFAULT_BLOB_CLEANUP_DAYS = 7
 KERNEL_CACHE_SUFFIXES = (".cl_cache", ".onednn.cl_cache")
+MODEL_BLOB_SUFFIX = ".blob"
 
 
 def cleanup_kernel_cache(model_cache_dir: str, days: int) -> int:
     """Delete OpenVINO oneDNN/OpenCL kernel-cache blobs not accessed within `days`; return the count removed.
 
     OpenVINO has no eviction: every new shape/device combo adds a file forever. The criterion is the last
-    access time, so a blob created long ago but still hit by recent runs is kept; `days <= 0` disables it.
+    access time; `days = 0` deletes every blob (fresh cache for experiments), negative `days` disables it.
     Safe on a running server too: loaded kernels live in memory, only stale entries are removed.
     shortcut: NTFS last-access updates can be disabled by the OS — the write time is used as a fallback.
     """
-    if days <= 0:
+    return _cleanup_cached_blobs(model_cache_dir, days, KERNEL_CACHE_SUFFIXES)
+
+
+def cleanup_model_blobs(model_cache_dir: str, days: int) -> int:
+    """Delete compiled-model GPU blobs (.blob, one per model-config variant, gigabytes each) by the same rules."""
+    return _cleanup_cached_blobs(model_cache_dir, days, (MODEL_BLOB_SUFFIX,))
+
+
+def _cleanup_cached_blobs(model_cache_dir: str, days: int, suffixes: tuple) -> int:
+    if days < 0:
         return 0
     cutoff = time.time() - days * 86400
     removed = 0
     for file in Path(model_cache_dir).glob("*"):
-        if not (file.is_file() and file.name.endswith(KERNEL_CACHE_SUFFIXES)):
+        if not (file.is_file() and file.name.endswith(suffixes)):
             continue
         stat = file.stat()
         last_used = stat.st_atime if stat.st_atime > 0 else stat.st_mtime
@@ -64,7 +75,7 @@ def cleanup_kernel_cache(model_cache_dir: str, days: int) -> int:
             file.unlink(missing_ok=True)
             removed += 1
     if removed:
-        log.info("cleaned %s kernel cache files older than %s days in %s", removed, days, model_cache_dir)
+        log.info("cleaned %s cache files older than %s days in %s", removed, days, model_cache_dir)
     return removed
 
 
@@ -170,6 +181,7 @@ def load_model_context(args) -> ModelContext:
     model_cache_dir = f"{args.models_cache_dir}/{model_name}"
     setup_logging(args, model_name)
     cleanup_kernel_cache(model_cache_dir, args.cache_cleanup_days)
+    cleanup_model_blobs(model_cache_dir, args.blob_cleanup_days)
 
     model_config = read_model_config(model_path)
     media_capabilities = read_media_capabilities(model_path)
@@ -225,11 +237,16 @@ def resolve_controller_config(args, context: ModelContext, pipe: Pipe,
     interrupt_completions = args.interrupt_completions == enum_value(Turn.on)
     log.info("interrupt mode of /v1/completions: %s", interrupt_completions)
 
+    exclusions = [p.strip() for p in args.detect_cycled_tool_call_exclude.split(",") if p.strip()]
+    if exclusions:
+        log.info("cycled tool call detection exclusions: %s", exclusions)
+
     return ControllerConfig(model_name=context.model_name or args.model, max_prompt_len=context.max_prompt_len,
                             model_architectures=context.model_architectures,
                             is_fix_tool_type=args.fix_tool_type != Turn.off.value,
                             chat_template=chat_template,
                             is_detect_cycled_tool_call=args.detect_cycled_tool_call != Turn.off.value,
+                            detect_cycled_tool_call_exclusions=exclusions,
                             modalities=set(modalities.names()),
                             max_media_bytes=args.max_media_mb * 1024 * 1024,
                             max_media_items=args.max_media_items,
@@ -539,7 +556,9 @@ def add_openvino_args(args_parser: ArgumentParser):
     args_parser.add_argument("--models_dir", type=str, default=DEFAULT_MODELS_DIR, required=False, help="%(default)s")
     args_parser.add_argument("--models_cache_dir", type=str, default=DEFAULT_MODELS_CACHE_DIR, help="%(default)s")
     args_parser.add_argument("--cache_cleanup_days", type=int, default=DEFAULT_CACHE_CLEANUP_DAYS,
-                             help="delete kernel cache blobs older than N days at startup, 0 disables (%(default)s)")
+                             help="delete kernel cache blobs older than N days at startup; 0 deletes all, negative disables (%(default)s)")
+    args_parser.add_argument("--blob_cleanup_days", type=int, default=DEFAULT_BLOB_CLEANUP_DAYS,
+                             help="delete compiled-model GPU blobs (.blob, gigabytes each) older than N days at startup; 0 deletes all, negative disables (%(default)s)")
     args_parser.add_argument("--model", type=str, default=None, help="%(default)s")
     args_parser.add_argument("--draft_model", type=str, help="%(default)s")
 
@@ -564,6 +583,11 @@ def add_openvino_args(args_parser: ArgumentParser):
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--detect_cycled_tool_call", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
+    args_parser.add_argument("--detect_cycled_tool_call_exclude", type=str, required=False, default="",
+                             help="comma-separated glob patterns of tool names never checked for loops, "
+                                  "e.g. repeatable tools like clocks or pollers: time*,mcp__*status*; "
+                                  "matches by tool name, so built-in and MCP tools are excluded alike "
+                                  "(default: %(default)s)")
     args_parser.add_argument("--detect_looped_inference", type=str, required=False,
                              default=None, choices=enum_values(Turn), help="%(default)s")
     args_parser.add_argument("--generate_config_file", type=str, required=False,

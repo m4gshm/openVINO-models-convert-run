@@ -202,17 +202,37 @@ class LoopRetryingController(FakeOVController):
         super().__init__()
         self.attempts = 0
         self.prompts: list[tuple[str, float]] = []
+        self.samples: list[bool] = []
 
     def chunk_generator(self, prompt, generation_config, token_handler, media):
         """Emit a loop-cancelled stream twice, then a normal one."""
         self.attempts += 1
         self.prompts.append((prompt, generation_config.temperature))
+        self.samples.append(generation_config.do_sample)
         if self.attempts <= 2:
             token_handler.processor.loop_errors.append("**WARNING: loop**")
+            yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="partial reasoning")
             yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="**WARNING: loop**",
                                             finish_reason="stop")
         else:
             yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="ok", finish_reason="stop")
+
+
+class AlwaysLoopingController(LoopRetryingController):
+    """Controller stub: every attempt loops, the stream must end with the ask-user question."""
+
+    def __init__(self, do_sample: bool = True):
+        """Optionally force greedy decoding, as servers with MTP speculative decoding do."""
+        super().__init__()
+        self.generate_opts = self.generate_opts.model_copy(update={"do_sample": do_sample})
+
+    def chunk_generator(self, prompt, generation_config, token_handler, media):
+        """Emit a loop-cancelled stream on every attempt."""
+        self.attempts += 1
+        self.prompts.append((prompt, generation_config.temperature))
+        token_handler.processor.loop_errors.append("**WARNING: loop**")
+        yield new_chat_completion_chunk(role=ROLE_ASSISTANT, content="**WARNING: loop**",
+                                        finish_reason="content_filter")
 
 
 class LoopRetryCase(unittest.TestCase):
@@ -229,13 +249,56 @@ class LoopRetryCase(unittest.TestCase):
                      bool(c.usage)) for c in chunks]
 
         self.assertEqual(3, controller.attempts)
-        self.assertEqual([("**WARNING: loop**", None), ("**WARNING: loop**", None), ("ok", "stop")],
-                         [(content, reason) for content, reason, _ in contents[:3]])
-        self.assertTrue(contents[-1][2], "the last chunk must be the usage one")
+        self.assertEqual([("partial reasoning", None), ("**WARNING: loop**", None),
+                          ("partial reasoning", None), ("**WARNING: loop**", None), ("ok", "stop")],
+                         [(content, reason) for content, reason, _ in contents[:5]])
+        # the retry prompt carries the looped attempt as an assistant turn before the user warning,
+        # so the model sees what it repeated instead of restarting the same reasoning from scratch
+        self.assertTrue(all("partial reasoning" in prompt for prompt, _t in controller.prompts[1:]))
+        # retries must actually sample: greedy decoding cannot leave the loop, so it must not retry
+        # (the first attempt keeps the request's setting)
+        self.assertTrue(all(controller.samples[1:]))
+
+    def test_exhausted_retries_ask_the_user(self):
+        """When every attempt loops the stream ends with the continue/interrupt question, not content_filter."""
+        controller = AlwaysLoopingController()
+        body = ChatCompletionRequest(messages=[ChatCompletionMessageParam(role=ROLE_USER, content="hi")])
+        with patch("agent.openai.engine_rest_common.detect_select_options",
+                   return_value=DetectedSelectOptions(agent=AgentType.OPENCODE, tool=QuestionTool())):
+            chunks = list(asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace()))))
+        self.assertEqual(3, controller.attempts)
+        last_choice = chunks[-2].choices[0]
+        self.assertEqual("stop", last_choice.finish_reason)
+        tool_calls = last_choice.delta.tool_calls or []
+        self.assertEqual(1, len(tool_calls))
+        arguments = getattr(tool_calls[0].function, "arguments", None) or ""
+        self.assertIn("repeating itself", arguments)
+        self.assertNotIn("**", arguments, "the question UI renders plain text, not markdown")
+        self.assertNotIn("```", arguments)
+
+    def test_exhausted_retries_without_question_tool_keep_cancel(self):
+        """Without a select tool the exhausted retries keep the content_filter finish."""
+        controller = AlwaysLoopingController()
+        body = ChatCompletionRequest(messages=[ChatCompletionMessageParam(role=ROLE_USER, content="hi")])
+        chunks = list(asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace()))))
+        self.assertEqual("content_filter", chunks[-2].choices[0].finish_reason)
+        self.assertTrue(chunks[-1].usage, "the last chunk must be the usage one")
         # attempts 2-3 carry the injected warning and the raised temperature
         base = controller.prompts[0][1]
         self.assertTrue(all("loop" in prompt and abs(temp - (base + 0.2)) < 1e-6
                             for prompt, temp in controller.prompts[1:]))
+
+    def test_greedy_decoding_asks_the_user_on_the_first_loop(self):
+        """Greedy decoding cannot leave the loop: no retries, the question comes right away."""
+        controller = AlwaysLoopingController(do_sample=False)
+        body = ChatCompletionRequest(messages=[ChatCompletionMessageParam(role=ROLE_USER, content="hi")])
+        with patch("agent.openai.engine_rest_common.detect_select_options",
+                   return_value=DetectedSelectOptions(agent=AgentType.OPENCODE, tool=QuestionTool())):
+            chunks = list(asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace()))))
+        self.assertEqual(1, controller.attempts)
+        last_choice = chunks[-2].choices[0]
+        self.assertEqual("stop", last_choice.finish_reason)
+        self.assertEqual(1, len(last_choice.delta.tool_calls or []))
 
 
 class GenerationConfigCase(unittest.TestCase):
@@ -379,9 +442,9 @@ class NewHttpResponseCase(unittest.TestCase):
 class LoopValidationController(BaseController):
     """Controller stub exposing only what validate_messages needs."""
 
-    def __init__(self):  # pylint: disable=super-init-not-called
+    def __init__(self, **config_kwargs):  # pylint: disable=super-init-not-called
         """Wire just the loop detection config."""
-        self.config = ControllerConfig(max_prompt_len=4096, model_architectures=set())
+        self.config = ControllerConfig(max_prompt_len=4096, model_architectures=set(), **config_kwargs)
 
     async def chat_chunks(self, body, request):
         """No engine."""
@@ -410,7 +473,7 @@ class LoopInjectionCase(unittest.TestCase):
         """Build the controller stub."""
         self.controller = LoopValidationController()
 
-    def _validate(self, count, temperature=None, detected=None):
+    def _validate(self, count, temperature=None, detected=None, already_applied=None):
         """Run validate_messages with a stubbed loop detector reporting `count` repeats."""
         body = ChatCompletionRequest(messages=[], temperature=temperature)
         with patch("agent.openai.engine_rest_common.PreprocessToolCall") as preprocess, \
@@ -418,7 +481,8 @@ class LoopInjectionCase(unittest.TestCase):
             looped = MagicMock()
             looped.render_markdown.return_value = "WARNING: Loop"
             preprocess.return_value.check_loop_tool_calls.return_value = (looped, count) if count else (None, 0)
-            preprocess.max_repeated_tool_calls_with_the_same_result = self.max_repeats
+            preprocess.return_value.check_already_applied_tool_calls.return_value = already_applied
+            preprocess.return_value.max_repeated_tool_calls_with_the_same_result = self.max_repeats
             result = self.controller.validate_messages(body)
         return result, body
 
@@ -437,9 +501,20 @@ class LoopInjectionCase(unittest.TestCase):
         self.assertIn("same tool call", body.messages[0].content)
         self.assertEqual(0.8, body.temperature)
 
+    def test_configured_exclusions_reach_the_detector(self):
+        """The tool-name exclusions of the controller config are passed to the loop detector."""
+        controller = LoopValidationController(detect_cycled_tool_call_exclusions=["time*", "mcp__*"])
+        body = ChatCompletionRequest(messages=[])
+        with patch("agent.openai.engine_rest_common.PreprocessToolCall") as preprocess, \
+                patch("agent.openai.engine_rest_common.detect_select_options", return_value=None):
+            preprocess.return_value.check_loop_tool_calls.return_value = (None, 0)
+            preprocess.return_value.check_already_applied_tool_calls.return_value = None
+            controller.validate_messages(body)
+        preprocess.assert_called_once_with(["time*", "mcp__*"])
+
     def test_second_attempt_injects_too(self):
-        """The second attempt still injects instead of asking the user."""
-        result, body = self._validate(2 * self.max_repeats)
+        """Just below the escalation threshold the model still gets an injection, not a question."""
+        result, body = self._validate(2 * self.max_repeats - 1)
         self.assertIsNone(result)
         self.assertEqual(1, len(body.messages))
         self.assertEqual(0.8, body.temperature)
@@ -449,19 +524,33 @@ class LoopInjectionCase(unittest.TestCase):
         _result, body = self._validate(self.max_repeats, temperature=1.5)
         self.assertEqual(1.5, body.temperature)
 
-    def test_third_attempt_asks_user(self):
-        """The third attempt asks the user to continue or interrupt."""
-        result, _body = self._validate(3 * self.max_repeats, detected=self._question_tool())
+    def test_second_attempt_asks_user(self):
+        """The second attempt asks the user to continue or interrupt."""
+        result, _body = self._validate(2 * self.max_repeats, detected=self._question_tool())
         self.assertIsNotNone(result)
         delta = result.choices[0].delta
         self.assertEqual("", delta.content)
         self.assertEqual(1, len(delta.tool_calls))
 
-    def test_third_attempt_without_question_tool_warns(self):
-        """Without a question tool the third attempt falls back to a reject warning."""
-        result, _body = self._validate(3 * self.max_repeats)
+    def test_second_attempt_without_question_tool_warns(self):
+        """Without a question tool the second attempt falls back to a reject warning."""
+        result, _body = self._validate(2 * self.max_repeats)
         self.assertIsNotNone(result)
         self.assertIn(WARN_GENERATION_IS_INTERRUPTED_, result.choices[0].delta.content)
+
+    def test_already_applied_injects_hint(self):
+        """A call that succeeded and now fails injects an 'already applied' hint."""
+        applied = MagicMock()
+        applied.name = "edit"
+        applied.arguments = '{"path": "a.txt", "oldString": "x", "newString": "y"}'
+        applied.result = '{"error":{"message":"Could not find oldString"}}'
+        result, body = self._validate(0, already_applied=applied)
+        self.assertIsNone(result)
+        self.assertEqual(1, len(body.messages))
+        content = body.messages[0].content
+        self.assertIn("already succeeded", content)
+        self.assertIn("already applied", content)
+        self.assertEqual(0.8, body.temperature)
 
     def test_no_loop_leaves_request_untouched(self):
         """Without a detected loop nothing is injected."""

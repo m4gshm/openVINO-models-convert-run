@@ -2,4 +2,5 @@
 set "OPENVINO_DEV_NAME="
 set "INTEL_OPENVINO_DIR="
 set "PYTHONPATH="
-.venv\Scripts\python agent.py %*
+@REM experiments: never clean the kernel cache (explicit --cache_cleanup_days in a script wins)
+.venv\Scripts\python agent.py --cache_cleanup_days 0 %*

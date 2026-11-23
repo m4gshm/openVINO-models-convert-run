@@ -43,8 +43,6 @@ class PhraseTestCase(unittest.TestCase):
                           'second\n'
                           'first\n'
                           'second\n'
-                          'first\n'
-                          'second\n'
                           'first\n'), phrase.full)
 
     def test_loop_lines6(self):
@@ -89,9 +87,6 @@ class PhraseTestCase(unittest.TestCase):
                           'first\n'
                           'second\n'
                           'third\n'
-                          'first\n'
-                          'second\n'
-                          'third\n'
                           'first\n'), phrase.full)
 
     def test_loop_line_duplicated(self):
@@ -105,7 +100,6 @@ class PhraseTestCase(unittest.TestCase):
                 phrase.add_token(token)
 
         self.assertEqual(('some normal output\n'
-                          'duplicated\n'
                           'duplicated\n'
                           'duplicated\n'
                           'duplicated\n'

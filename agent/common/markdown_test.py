@@ -2,7 +2,7 @@
 import unittest
 
 from agent.common.markdown import markdown_back_tick, markdown_bold, markdown_file_content, \
-    markdown_json, markdown_tool_call_loop_error
+    markdown_json, markdown_stripped, markdown_tool_call_loop_error
 
 
 class MarkdownCase(unittest.TestCase):
@@ -37,6 +37,13 @@ class MarkdownCase(unittest.TestCase):
         rendered = markdown_tool_call_loop_error("cause", "error")
         self.assertTrue(rendered.startswith("**WARNING: cause**"))
         self.assertIn("error", rendered)
+
+    def test_markdown_stripped_removes_decorations(self):
+        """Bold markers, code fences and back ticks are dropped for plain-text UIs."""
+        source = ("**WARNING: Cycled phrase detected**\n"
+                  "```\nLet me use `DSL.using`\n```\n")
+        self.assertEqual("WARNING: Cycled phrase detected\n\nLet me use DSL.using\n\n",
+                         markdown_stripped(source))
 
 
 if __name__ == '__main__':

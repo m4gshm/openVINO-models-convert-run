@@ -384,7 +384,7 @@ class Phrase:  # pylint: disable=too-many-instance-attributes  # detector state 
                  strat_duplicates_detect_from: int = 50, last_part_duplicates_rate: float = 0.5,
                  last_subpart_duplicates_rate: float = 0.49, last_subpart_end_line_delta_rate: float = 0.025,
                  duplicated_tokens_limit=DEFAULT_DUPLICATED_TOKENS_LIMIT,
-                 duplicated_lines_threshold=5):
+                 duplicated_lines_threshold=4):
         self.tokens: list[str] = []
         self.lines: list[str] = []
         self.lines_unique: dict[str, list[int]] = {}

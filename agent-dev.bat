@@ -10,4 +10,5 @@ if not defined OPENVINO_DEV_NAME (
 @REM on a rerun, they must keep the values the first call set, else python falls back to the venv openvino_genai
 echo "%OPENVINO_LIB_PATHS%" | "%SystemRoot%\System32\find.exe" /i "\bin\%OPENVINO_DEV_NAME%\\" >NUL || call .\bin\%OPENVINO_DEV_NAME%\setupvars.bat
 echo OPENVINO_DEV_NAME: %OPENVINO_DEV_NAME%
-.venv\Scripts\python agent.py %*
+@REM experiments: never clean the kernel cache (explicit --cache_cleanup_days in a script wins)
+.venv\Scripts\python agent.py --cache_cleanup_days 0 %*
