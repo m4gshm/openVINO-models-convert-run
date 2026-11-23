@@ -298,7 +298,8 @@ class LoopRetryCase(unittest.TestCase):
                    return_value=DetectedSelectOptions(agent=AgentType.OPENCODE, tool=QuestionTool())):
             chunks = list(asyncio.run(controller.chat_chunks(body, cast(Any, SimpleNamespace()))))
         self.assertEqual(3, controller.attempts)
-        self.assertTrue(all(abs(f - expected) < 1e-3 for f, expected in zip(controller.frequencies[1:], [0.3, 0.6])))
+        self.assertTrue(all(f is not None and abs(f - expected) < 1e-3
+                            for f, expected in zip(controller.frequencies[1:], [0.3, 0.6])))
         self.assertTrue(all(p[1] == controller.prompts[0][1] for p in controller.prompts),
                         "greedy retries must keep the temperature untouched")
         # the exhausted stream still ends with the ask-user question
