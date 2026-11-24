@@ -254,6 +254,7 @@ class GenerationRequest:  # pylint: disable=too-many-instance-attributes  # flat
     apply_chat_template: bool = False
     logprobs: bool | None = None
     stop: list[str] | str | None = None
+    seed: int | None = None
 
     @staticmethod
     def of_chat_request(body: ChatCompletionRequest) -> "GenerationRequest":
@@ -263,7 +264,8 @@ class GenerationRequest:  # pylint: disable=too-many-instance-attributes  # flat
                                  top_p=body.top_p,
                                  frequency_penalty=body.frequency_penalty,
                                  logprobs=body.logprobs,
-                                 stop=body.stop)
+                                 stop=body.stop,
+                                 seed=body.seed)
 
     @staticmethod
     def of_completion_request(body: completions_api.CompletionRequest) -> "GenerationRequest":
@@ -344,6 +346,10 @@ def _apply_request(generation_config: GenerationConfig, request: GenerationReque
         generation_config.top_p = request.top_p
     if not request.frequency_penalty is None:
         generation_config.frequency_penalty = request.frequency_penalty
+    # GenerationConfig seeds its RNG with a constant (rng_seed=0): without this, every
+    # sampled request produces the identical output; seed=0 keeps the deterministic behavior
+    if request.seed:
+        generation_config.rng_seed = request.seed
     if request.logprobs:
         generation_config.logprobs = 1
     generation_config.apply_chat_template = request.apply_chat_template
