@@ -30,6 +30,12 @@ CONFIGS = {
     "edit_dflash2_greedy": ["--draft_model", "Qwen3.6-35B-A3B-dflash2-int4-sym-g128", "--dflash_mode", "on",
                             "--generate_config_file", ".config/generate_config_eagle3.json",
                             "--scheduler_config_file", ".config/scheduler_config.json"],
+    "edit_mtp_sampled": ["--draft_model", "Qwen3.6-35B-A3B-int4-sym-g128-awq",
+                         "--generate_config_file", ".config/generate_config_prompt_lookup_sampled.json",
+                         "--scheduler_config_file", ".config/scheduler_config_no_dsf.json"],
+    "edit_dflash2_sampled": ["--draft_model", "Qwen3.6-35B-A3B-dflash2-int4-sym-g128", "--dflash_mode", "on",
+                             "--generate_config_file", ".config/generate_config_dflash2_sampled.json",
+                             "--scheduler_config_file", ".config/scheduler_config.json"],
 }
 
 

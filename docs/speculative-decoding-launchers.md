@@ -12,7 +12,7 @@ GenAI build (prompt lookup / scheduler / MTP / DFlash admission: greedy || multi
 | Prompt lookup + greedy | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-LAPLD-dev.bat` | false | 34–37 tok/s | The pre-relax default |
 | DFlash2 + sampled | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-dflash2-sampled.bat` | true | 55 tok/s edit, **58 tok/s** prose (acceptance ~50 %) | Best on free-form generation; needs `max_ngram_size: 0` |
 | DFlash2 + greedy | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-dflash2-dev.bat` | false | 50–58 tok/s | Draft: `models/Qwen3.6-35B-A3B-dflash2-int4-sym-g128` |
-| MTP + sampled | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-MTP-sampled.bat` | true | ~38 tok/s prose | **OOM on large prompts** — two pipelines + LA checkpoints exceed VRAM; short contexts only |
+| MTP + sampled | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-MTP-sampled.bat` | true | ~36–38 tok/s prose, 34–36 edit (acceptance ~38 %) | Needs free VRAM: two pipelines + LA checkpoints; an unrelated process holding GPU memory will cause OOM |
 | No draft + sampled | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-nodraft-sampled.bat` | true | 39–41 tok/s | Safe baseline, nothing to mispredict |
 | No draft + greedy | `Qwen3.6-35B-A3B-int4-sym-g128-awq-GPU-nodraft-greedy.bat` | false | ~34 tok/s | Baseline |
 
