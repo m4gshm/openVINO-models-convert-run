@@ -136,6 +136,22 @@ class MakeUnionCase(unittest.TestCase):
         self.assertEqual("why", reasoning_content)
         self.assertEqual([tool_call], tool_calls)
 
+    def test_aggregated_tool_call_is_a_valid_message_tool_call(self):
+        """A non-streaming response serializes the aggregated delta tool call of a stream.
+
+        The message tool call of the openai SDK is a stricter model than the streaming delta and
+        rejected it outright, so a non-streaming request that produced a tool call failed with a 500.
+        """
+        tool_call = new_tool_call(ChoiceDeltaToolCallFunction(name="edit", arguments='{"path": "p"}'),
+                                  call_id="call_1", index=2)
+        chunks = [new_chat_completion_chunk(role=ROLE_ASSISTANT, tool_calls=[tool_call], model="m",
+                                            finish_reason="tool_calls")]
+        completion = new_chat_completion_union(iter(chunks))
+        serialized = completion.model_dump()
+        message_tool_call = serialized["choices"][0]["message"]["tool_calls"][0]
+        self.assertEqual({"id": "call_1", "type": "function",
+                          "function": {"name": "edit", "arguments": '{"path": "p"}'}}, message_tool_call)
+
 
 class UsageCase(unittest.TestCase):
     """Tests of the token usage reported to the client."""

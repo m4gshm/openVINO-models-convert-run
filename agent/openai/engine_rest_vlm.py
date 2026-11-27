@@ -161,6 +161,8 @@ class VlmController(BaseOVController):
                 if metrics:
                     log_msg += (
                         f"num_input_tokens={metrics.get_num_input_tokens()}, "
+                        # the prefix-caching ground truth: how many prompt tokens were not prefilled again
+                        f"num_prefix_cache_hit_tokens={metrics.get_num_prefix_cache_hit_tokens()}, "
                         f"generated_tokens={metrics.get_num_generated_tokens()}, "
                         f"generate_duration={to_str(metrics.get_generate_duration())}, "
                         f"inference_duration={to_str(metrics.get_inference_duration())}, "

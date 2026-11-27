@@ -2,6 +2,6 @@
   "max_num_seqs": 1,
   "dynamic_split_fuse": false,
   "max_num_batched_tokens": 1,
-  "cache_interval_multiplier": 128,
+  "cache_interval_multiplier": 64,
   "enable_prefix_caching": true
 }

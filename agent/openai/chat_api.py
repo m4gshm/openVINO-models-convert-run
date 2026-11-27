@@ -2,13 +2,15 @@
 import itertools
 import time
 import uuid
-from typing import Any, Literal
+from typing import Literal
 
 import openai
 from beartype import beartype
 from openai.types import CompletionUsage
 from openai.types.chat import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage
 from openai.types.chat.chat_completion_chunk import ChoiceDelta, ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageFunctionToolCall, \
+    ChatCompletionMessageToolCallUnion, Function
 from pydantic import BaseModel
 
 from agent.openai.chat_completions_api import CHAT_COMPLETION_CHUNK, CHAT_COMPLETION
@@ -39,8 +41,7 @@ def new_stop_response(role: Role | None, response_id: str | None = None, model: 
 def new_chat_completion(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         content: str,
         reasoning_content: str | None = None,
-        # delta-style tool calls are serialized as-is; the openai SDK tolerates the shape
-        tool_calls: list[Any] | None = None,
+        tool_calls: list[ChoiceDeltaToolCall] | None = None,
         response_id: str | None = None,
         finish_reason: FinishReason = "stop",
         model: str = "",
@@ -141,11 +142,30 @@ def new_delta(role: Role | None, content: str | None,
 @beartype
 def new_choice_message(content: str | None = None,
                        reasoning_content: str | None = None,
-                       # delta-style tool calls are serialized as-is; the openai SDK tolerates the shape
-                       tool_calls: list[Any] | None = None,
+                       tool_calls: list[ChoiceDeltaToolCall] | None = None,
                        finish_reason: FinishReason = "stop"):
     """Build a non-streaming Choice, attaching reasoning_content as an extension field."""
-    message = ChatCompletionMessage(role="assistant", content=content, tool_calls=tool_calls)
+    message = ChatCompletionMessage(role="assistant", content=content,
+                                    tool_calls=message_tool_calls(tool_calls))
     if reasoning_content:
         _add_extra(message, "reasoning_content", reasoning_content)
     return openai.types.chat.chat_completion.Choice(message=message, finish_reason=finish_reason, index=0)
+
+
+@beartype
+def message_tool_calls(delta_tool_calls: list[ChoiceDeltaToolCall] | None) -> list[ChatCompletionMessageToolCallUnion]:
+    """Convert the aggregated delta tool calls into the shape a chat message requires.
+
+    A streaming delta carries an index and no required fields, while the message tool call the
+    non-streaming response validates is a different, stricter model: it rejects a delta outright.
+    """
+    calls: list[ChatCompletionMessageToolCallUnion] = []
+    for call in delta_tool_calls or []:
+        function = call.function
+        if function is None:
+            continue
+        calls.append(ChatCompletionMessageFunctionToolCall(id=call.id or generate_tool_call_id(function.name or ""),
+                                                           type="function",
+                                                           function=Function(name=function.name or "",
+                                                                             arguments=function.arguments or "")))
+    return calls
